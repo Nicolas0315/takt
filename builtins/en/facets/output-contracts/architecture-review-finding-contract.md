@@ -1,12 +1,17 @@
 ```markdown
-# Architecture Review
+# Architecture and Contract Lifecycle Review
 ## Result: APPROVE / REJECT
 ## Summary
 {1-2 sentence conclusion}
 ## Verification Evidence
-| Structure / Contract | Checked Route | Result |
-|----------------------|---------------|--------|
-| {design or wiring} | {code, entry, and test} | {verified result or unverified} |
+Use exactly two specialist tables in total, one row per requirement in the first table and one row per resource in the second.
+| Requirement / Contract | Structural Boundary / Public Entry | producer | validator | consumer | Corresponding Test |
+|------------------------|------------------------------------|----------|-----------|----------|--------------------|
+| {requirement or contract} | {design boundary and entry point} | {producer} | {validator} | {consumer} | {test} |
+
+| Resource | owner / transfer | last consumer | release / persist | success / failure / interruption / retry |
+|----------|------------------|---------------|-------------------|------------------------------------------|
+| {resource} | {owner and transfer} | {last consumer} | {release or persistence} | {result for each path} |
 ## Re-scan Evidence
 | Checked Chapters | Unverified Chapters (only when any) | Checked Route | Current Evidence | Result |
 |------------------|------------------------------------|---------------|------------------|--------|

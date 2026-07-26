@@ -175,7 +175,7 @@ steps:
       - condition: all("approved")
         next: reviewers_2
       - condition: any("needs_fix")
-        next: supervise
+        next: reviewers_2
 
   - name: reviewers_2
     tags:

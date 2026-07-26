@@ -1,12 +1,12 @@
 ```markdown
-# Coding Review
+# Coding and Implementation Semantics Review
 ## Result: APPROVE / REJECT
 ## Summary
 {1-2 sentence conclusion}
 ## Verification Evidence
-| Public Entry / Execution Mode | Success / Failure | Corresponding Test |
-|-------------------------------|-------------------|--------------------|
-| {entry or mode} | {expected outcome and failure} | {test} |
+| Public Entry / Execution Mode | State / Generated Identifier | Existing Namespace | Downstream Syntax | Concrete Break Condition | Corresponding Test / Result |
+|-------------------------------|------------------------------|--------------------|-------------------|--------------------------|-----------------------------|
+| {entry or mode} | {target} | {existing input or reserved word} | {persistence, display, lookup, or reuse} | {collision or mismatch condition} | {test and verification result or unverified} |
 
 | Resource API | Success / Failure / Interruption | Cleanup / Residual Artifacts |
 |--------------|----------------------------------|------------------------------|

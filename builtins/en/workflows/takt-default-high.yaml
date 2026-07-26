@@ -159,7 +159,7 @@ steps:
         persona: architecture-reviewer
         policy: review
         knowledge: [architecture, contract-lifecycle]
-        instruction: review-arch
+        instruction: review-arch-contract-lifecycle-finding-contract
         rules:
           - condition: approved
           - condition: needs_fix
@@ -188,7 +188,7 @@ steps:
         persona: coding-reviewer
         policy: [review, coding]
         knowledge: implementation-semantics
-        instruction: review-coding
+        instruction: review-coding-implementation-semantics-finding-contract
         rules:
           - condition: approved
           - condition: needs_fix
