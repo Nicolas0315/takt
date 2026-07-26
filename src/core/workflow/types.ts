@@ -34,6 +34,7 @@ import type { FindingContractConfig, FindingLedger } from '../models/finding-typ
 import type { RunResumeSource } from './run/run-meta.js';
 import type { FindingLedgerStore } from './findings/store.js';
 import type { OperationJournalStore } from './operations/operation-journal-types.js';
+import type { PullRequestContext } from './pr-context.js';
 
 import type { ProviderType, StreamCallback, StreamEvent } from '../../shared/types/provider.js';
 
@@ -422,6 +423,8 @@ export interface WorkflowEngineOptions {
   };
   /** Task metadata used only for trace discovery attributes. */
   traceTaskMetadata?: WorkflowTraceTaskMetadata;
+  /** Structured PR context used for all Phase 1 instructions. */
+  prContext?: PullRequestContext;
   phase1ProcessSafetyByStep?: Record<string, { protectedParentRunPid: number }>;
   systemStepServicesFactory?: SystemStepServicesFactory;
   sharedRuntime?: WorkflowSharedRuntimeState;

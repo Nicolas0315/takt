@@ -92,6 +92,9 @@ vi.mock('../infra/task/index.js', () => ({
   })),
   isStaleRunningTask: (...args: unknown[]) => mockIsStaleRunningTask(...args),
   checkoutBranch: (...args: unknown[]) => mockCheckoutBranch(...args),
+  materializePullRequestBase: vi.fn((_projectCwd, _targetCwd, baseBranch: string) =>
+    `refs/takt/pr-base/${baseBranch}`),
+  resolveBaseBranch: vi.fn(() => ({ branch: 'main' })),
 }));
 
 vi.mock('../infra/config/index.js', () => ({
@@ -392,6 +395,15 @@ describe('PR resolution in routing', () => {
             prNumber: 456,
             branch: 'feat/my-pr-branch',
             baseBranch: 'release/main',
+          },
+          prContext: {
+            source: 'pr_review',
+            prNumber: 456,
+            baseBranch: 'release/main',
+            headBranch: 'feat/my-pr-branch',
+            baseBranchSource: 'pull_request',
+            baseDiffRef: 'refs/takt/pr-base/release/main',
+            headDiffRef: 'refs/heads/feat/my-pr-branch',
           },
         }),
         undefined,
