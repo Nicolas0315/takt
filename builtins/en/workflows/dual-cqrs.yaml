@@ -206,6 +206,7 @@ steps:
         persona: cqrs-es-reviewer
         policy: review
         knowledge:
+          - architecture
           - cqrs-es
           - backend
           - contract-lifecycle

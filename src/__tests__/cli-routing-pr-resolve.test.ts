@@ -350,10 +350,14 @@ describe('PR resolution in routing', () => {
       );
     });
 
-    it('should exit with a controlled error when a PR has an empty head branch', async () => {
+    it.each([
+      ['empty', ''],
+      ['whitespace-only', '   '],
+      ['surrounding whitespace', ' feat/my-pr-branch '],
+    ])('should exit with a controlled error when a PR has a %s head branch', async (_case, headRefName) => {
       mockOpts.pr = 456;
       mockCheckCliStatus.mockReturnValue({ available: true });
-      mockFetchPrReviewComments.mockReturnValue(createMockPrReview({ headRefName: '' }));
+      mockFetchPrReviewComments.mockReturnValue(createMockPrReview({ headRefName }));
       const mockExit = vi.spyOn(process, 'exit').mockImplementation(() => {
         throw new Error('process.exit called');
       });

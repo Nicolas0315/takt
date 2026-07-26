@@ -25,8 +25,8 @@ TAKT に同梱されているすべてのビルトイン workflow と persona �
 | | `default-mini` | テストなしのミニ開発 workflow。`default` から `write_tests` を抜いた軽量版。計画 → 実装 → AIアンチパターンレビュー → 並列レビュー → 完了。 |
 | | `default-high` | フルスペック開発 workflow。テスト先行、チームリーダー実装、AIアンチパターンレビュー（仲裁付き）、専門ピアレビュー、merge-readiness ゲート、監督。計画 → テスト作成 → team-leader draft → peer-review（専門レビュー → merge-readiness → 修正ループ）→ 監督 → 完了。 |
 | | `frontend` | フロントエンド特化開発 workflow。architecture/frontend/testing/AI/robustness → security/coding の5+2レビュー。 |
-| | `backend` | バックエンド特化開発 workflow。バックエンド、セキュリティ、堅牢性のエキスパートレビュー付き。 |
-| | `dual` | フロントエンド＋バックエンド開発 workflow: architecture、frontend、security、robustness レビューと修正ループ付き。 |
+| | `backend` | バックエンド開発 workflow。architecture/testing/AI/security/robustness/coding の6人レビュー。 |
+| | `dual` | フロントエンド＋バックエンド開発 workflow。architecture/frontend/testing/AI/security/robustness/coding の7人レビュー。 |
 | ⚡ Mini | `default-mini` | テストなしのミニ開発 workflow。`default` から `write_tests` を抜いた軽量版。計画 → 実装 → AIアンチパターンレビュー → 並列レビュー → 完了。 |
 | | `backend-cqrs-mini` | ミニ CQRS+ES workflow: plan -> implement -> 並列レビュー (AI antipattern + supervisor)。CQRS+ES ナレッジ注入付き。 |
 | | `dual-mini` | ミニデュアル workflow: plan -> implement -> 並列レビュー (AI antipattern + expert supervisor)。フロントエンド＋バックエンドナレッジ注入付き。 |
@@ -83,7 +83,6 @@ TAKT に同梱されているすべてのビルトイン workflow と persona �
 | **architecture-reviewer** | アーキテクチャとコード品質のレビュー、仕様準拠の検証 |
 | **frontend-reviewer** | フロントエンド (React/Next.js) のコード品質とベストプラクティスのレビュー |
 | **cqrs-es-reviewer** | CQRS+Event Sourcing のアーキテクチャと実装のレビュー |
-| **robustness-reviewer** | 失敗・再試行・中断・後始末を含む堅牢性レビュー |
 | **security-reviewer** | セキュリティ脆弱性の評価 |
 | **conductor** | Phase 3 判定スペシャリスト: レポート/レスポンスを読み取りステータスタグを出力 |
 | **supervisor** | 最終検証、承認 |

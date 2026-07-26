@@ -25,14 +25,14 @@ Organized by category.
 | | `default-mini` | Mini development workflow without tests. A lightweight variant of `default` with `write_tests` removed. plan → implement → AI antipattern review → parallel review → complete. |
 | | `default-high` | Full-spec development workflow. Test-first with team-leader implementation, AI antipattern review with arbitration, specialist peer review, merge-readiness gate, and supervision. plan → write_tests → team-leader draft → peer-review (specialists → merge-readiness → fix loop) → supervise → complete. |
 | | `frontend` | Frontend workflow with a 5+2 review: architecture/frontend/testing/AI/robustness -> security/coding. |
-| | `backend` | Backend-specialized development workflow with backend, security, and robustness expert reviews. |
-| | `dual` | Frontend + backend development workflow: architecture, frontend, security, and robustness reviews with fix loops. |
+| | `backend` | Backend workflow with six reviewers: architecture/testing/AI/security/robustness/coding. |
+| | `dual` | Frontend + backend workflow with seven reviewers: architecture/frontend/testing/AI/security/robustness/coding. |
 | ⚡ Mini | `default-mini` | Mini development workflow without tests. A lightweight variant of `default` with `write_tests` removed. plan → implement → AI antipattern review → parallel review → complete. |
 | | `backend-cqrs-mini` | Mini CQRS+ES workflow: plan -> implement -> parallel review (AI antipattern + supervisor) with CQRS+ES knowledge injection. |
 | | `dual-mini` | Mini dual workflow: plan -> implement -> parallel review (AI antipattern + expert supervisor) with frontend + backend knowledge injection. |
 | | `dual-cqrs-mini` | Mini CQRS+ES dual workflow: plan -> implement -> parallel review (AI antipattern + expert supervisor) with CQRS+ES knowledge injection. |
 | 🎨 Frontend | `frontend` | Frontend-specialized development workflow with React/Next.js focused reviews and knowledge injection. |
-| | `frontend-maintenance` | (Experimental) Frontend workflow for modifying existing products: maintenance-scoped plan/implement/test/fix/supervise that respects current conventions and keeps changes within scope. Can be heavy-handed today — use as a starting point and tune. |
+| | `frontend-maintenance` | (Experimental) Frontend workflow for modifying existing products: maintenance-scoped plan/implement/test/fix/supervise that respects current conventions and keeps changes within scope. This workflow can be heavy-handed today — use it as a starting point and tune it. |
 | ⚙️ Backend | `backend` | Backend workflow with six reviewers: architecture/testing/AI/security/robustness/coding. |
 | | `backend-cqrs` | CQRS+ES backend workflow with six reviewers: CQRS/testing/AI/security/robustness/coding. |
 | | `backend-maintenance` | Strict backend maintenance workflow with six parallel reviewers followed by a merge-readiness gate. |
@@ -83,7 +83,6 @@ Run `takt` to choose a workflow interactively.
 | **architecture-reviewer** | Architecture and code quality review, spec compliance verification |
 | **frontend-reviewer** | Frontend (React/Next.js) code quality and best practices review |
 | **cqrs-es-reviewer** | CQRS+Event Sourcing architecture and implementation review |
-| **robustness-reviewer** | Robustness review covering failures, retries, interruption, and cleanup |
 | **security-reviewer** | Security vulnerability assessment |
 | **conductor** | Phase 3 judgment specialist: reads reports/responses and outputs status tags |
 | **supervisor** | Final validation, approval |

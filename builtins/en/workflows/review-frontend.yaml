@@ -121,7 +121,7 @@ steps:
           - condition: approved
           - condition: needs_fix
 
-      - name: ai-antipattern-review-2nd
+      - name: ai-antipattern-review
         tags:
           - review
         edit: false
