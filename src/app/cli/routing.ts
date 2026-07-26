@@ -272,17 +272,24 @@ export async function executeDefaultAction(task?: string): Promise<void> {
         });
       },
       save_task: async ({ task: confirmedTask }) => {
-        const presetSettings = prBranch
-          ? {
-            worktree: true as const,
-            branch: prBranch,
-            autoPr: true,
-            ...(prBaseBranch ? { baseBranch: prBaseBranch } : {}),
+        if (prNumber !== undefined) {
+          if (prBranch === undefined) {
+            logError('Fetched PR head branch is required when saving a PR review task.');
+            process.exit(1);
           }
-          : undefined;
+          await saveTaskFromInteractive(resolvedCwd, confirmedTask, workflowId, {
+            prNumber,
+            presetSettings: {
+              worktree: true,
+              branch: prBranch,
+              autoPr: true,
+              ...(prBaseBranch ? { baseBranch: prBaseBranch } : {}),
+            },
+            ...(result.attachments ? { attachments: result.attachments } : {}),
+          });
+          return;
+        }
         await saveTaskFromInteractive(resolvedCwd, confirmedTask, workflowId, {
-          presetSettings,
-          ...(prNumber !== undefined ? { prNumber } : {}),
           ...(sourceIssueNumber !== undefined ? { issue: sourceIssueNumber } : {}),
           ...(result.attachments ? { attachments: result.attachments } : {}),
         });
