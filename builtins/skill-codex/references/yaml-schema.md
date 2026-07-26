@@ -110,11 +110,11 @@ step 定義内では**キー名**で参照する（パスを直接書かない�
         - condition: "approved"
         - condition: "needs_fix"
 
-    - name: qa-review
-      persona: qa-reviewer
+    - name: robustness-review
+      persona: robustness-reviewer
       policy: review
       edit: false
-      instruction: review-qa
+      instruction: review-robustness
       rules:
         - condition: "approved"
         - condition: "needs_fix"

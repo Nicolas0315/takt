@@ -87,6 +87,7 @@ steps:
     args:
       arch_knowledge:
         - architecture
+        - contract-lifecycle
       fix_knowledge:
         - architecture
     rules:

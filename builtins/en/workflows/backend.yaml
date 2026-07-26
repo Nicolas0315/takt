@@ -1,5 +1,5 @@
 name: backend
-description: Backend development workflow with test-first, AI review, 2-stage reviews, fix loops, and supervision
+description: Backend development workflow with test-first, AI review, six parallel reviewers, fix loops, and supervision
 workflow_config:
   provider_options:
     codex:
@@ -20,9 +20,9 @@ loop_monitors:
         - condition: Healthy (making progress)
           next: ai-antipattern-review-1st
         - condition: Unproductive (no improvement)
-          next: reviewers_1
+          next: reviewers
   - cycle:
-      - reviewers_1
+      - reviewers
       - final-gate
       - fix
     threshold: 3
@@ -31,7 +31,7 @@ loop_monitors:
       instruction: loop-monitor-reviewers-fix
       rules:
         - condition: converging (findings decreasing, fixes applied)
-          next: reviewers_1
+          next: reviewers
         - condition: unproductive (same findings repeating)
           next: final-gate
 steps:
@@ -167,7 +167,7 @@ steps:
     instruction: ai-antipattern-review
     rules:
       - condition: No AI-specific issues found
-        next: reviewers_1
+        next: reviewers
       - condition: AI-specific issues detected
         next: ai-antipattern-fix
     output_contracts:
@@ -223,9 +223,9 @@ steps:
       - condition: ai-antipattern-review-1st's findings are valid (fix required)
         next: ai-antipattern-fix
       - condition: ai-antipattern-fix's judgment is valid (no fix needed)
-        next: reviewers_1
+        next: reviewers
     instruction: arbitrate
-  - name: reviewers_1
+  - name: reviewers
     tags:
       - review
     parallel:
@@ -238,6 +238,7 @@ steps:
         knowledge:
           - architecture
           - backend
+          - contract-lifecycle
         provider_options:
           claude:
             allowed_tools:
@@ -305,15 +306,6 @@ steps:
           report:
             - name: ai-antipattern-review.md
               format: ai-antipattern-review
-    rules:
-      - condition: all("approved")
-        next: reviewers_2
-      - condition: any("needs_fix")
-        next: fix
-  - name: reviewers_2
-    tags:
-      - review
-    parallel:
       - name: security-review
         tags:
           - review
@@ -337,14 +329,13 @@ steps:
           report:
             - name: security-review.md
               format: security-review
-      - name: qa-review
+      - name: robustness-review
         tags:
           - review
         edit: false
-        persona: qa-reviewer
-        policy:
-          - review
-          - qa
+        persona: robustness-reviewer
+        policy: review
+        knowledge: robustness
         provider_options:
           claude:
             allowed_tools:
@@ -356,11 +347,11 @@ steps:
         rules:
           - condition: approved
           - condition: needs_fix
-        instruction: review-qa
+        instruction: review-robustness
         output_contracts:
           report:
-            - name: qa-review.md
-              format: qa-review
+            - name: robustness-review.md
+              format: robustness-review
       - name: coding-review
         tags:
           - review
@@ -369,6 +360,7 @@ steps:
         policy:
           - review
           - coding
+        knowledge: implementation-semantics
         provider_options:
           claude:
             allowed_tools:
@@ -439,7 +431,7 @@ steps:
     pass_previous_response: false
     rules:
       - condition: Fix complete
-        next: reviewers_1
+        next: reviewers
       - condition: Cannot proceed, insufficient info
         next: plan
     instruction: fix

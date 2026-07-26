@@ -1,5 +1,5 @@
 name: frontend
-description: Frontend development workflow with test-first, AI review, 2-stage reviews, fix loops, and supervision
+description: Frontend development workflow with test-first, AI review, 5+2 two-stage reviews, fix loops, and supervision
 workflow_config:
   provider_options:
     codex:
@@ -23,6 +23,32 @@ loop_monitors:
           next: reviewers_1
   - cycle:
       - reviewers_1
+      - fix
+    threshold: 3
+    judge:
+      persona: supervisor
+      instruction: loop-monitor-reviewers-fix
+      rules:
+        - condition: converging (findings decreasing, fixes applied)
+          next: reviewers_1
+        - condition: unproductive (same findings repeating)
+          next: final-gate
+  - cycle:
+      - reviewers_1
+      - reviewers_2
+      - fix
+    threshold: 3
+    judge:
+      persona: supervisor
+      instruction: loop-monitor-reviewers-fix
+      rules:
+        - condition: converging (findings decreasing, fixes applied)
+          next: reviewers_1
+        - condition: unproductive (same findings repeating)
+          next: final-gate
+  - cycle:
+      - reviewers_1
+      - reviewers_2
       - final-gate
       - fix
     threshold: 3
@@ -247,6 +273,7 @@ steps:
           - architecture
           - frontend
           - react
+          - contract-lifecycle
         provider_options:
           claude:
             allowed_tools:
@@ -341,6 +368,29 @@ steps:
           report:
             - name: ai-antipattern-review.md
               format: ai-antipattern-review
+      - name: robustness-review
+        tags:
+          - review
+        edit: false
+        persona: robustness-reviewer
+        policy: review
+        knowledge: robustness
+        provider_options:
+          claude:
+            allowed_tools:
+              - Read
+              - Glob
+              - Grep
+              - WebSearch
+              - WebFetch
+        rules:
+          - condition: approved
+          - condition: needs_fix
+        instruction: review-robustness
+        output_contracts:
+          report:
+            - name: robustness-review.md
+              format: robustness-review
     rules:
       - condition: all("approved")
         next: reviewers_2
@@ -373,30 +423,6 @@ steps:
           report:
             - name: security-review.md
               format: security-review
-      - name: qa-review
-        tags:
-          - review
-        edit: false
-        persona: qa-reviewer
-        policy:
-          - review
-          - qa
-        provider_options:
-          claude:
-            allowed_tools:
-              - Read
-              - Glob
-              - Grep
-              - WebSearch
-              - WebFetch
-        rules:
-          - condition: approved
-          - condition: needs_fix
-        instruction: review-qa
-        output_contracts:
-          report:
-            - name: qa-review.md
-              format: qa-review
       - name: coding-review
         tags:
           - review
@@ -405,6 +431,7 @@ steps:
         policy:
           - review
           - coding
+        knowledge: implementation-semantics
         provider_options:
           claude:
             allowed_tools:

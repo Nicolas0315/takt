@@ -139,6 +139,7 @@ steps:
         policy:
           - review
           - coding
+        knowledge: implementation-semantics
         provider_options:
           claude:
             allowed_tools:

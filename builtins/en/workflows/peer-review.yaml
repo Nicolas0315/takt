@@ -12,6 +12,7 @@ subworkflow:
       default:
         - architecture
         - takt
+        - contract-lifecycle
     fix_knowledge:
       type: facet_ref[]
       facet_kind: knowledge
@@ -92,24 +93,23 @@ steps:
           report:
             - name: security-review.md
               format: security-review
-      - name: qa-review
+      - name: robustness-review
         tags:
           - review
         edit: false
-        persona: qa-reviewer
-        policy:
-          - review
-          - qa
+        persona: robustness-reviewer
+        policy: review
+        knowledge: robustness
         provider_options:
           extends: review-readonly
         rules:
           - condition: approved
           - condition: needs_fix
-        instruction: review-qa
+        instruction: review-robustness
         output_contracts:
           report:
-            - name: qa-review.md
-              format: qa-review
+            - name: robustness-review.md
+              format: robustness-review
       - name: testing-review
         tags:
           - review
@@ -139,6 +139,7 @@ steps:
         policy:
           - review
           - coding
+        knowledge: implementation-semantics
         pass_previous_response: false
         provider_options:
           extends: review-readonly

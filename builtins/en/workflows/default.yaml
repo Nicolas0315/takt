@@ -95,7 +95,13 @@ steps:
         next: ABORT
   - name: peer-review
     kind: workflow_call
-    call: default-peer-review
+    call: peer-review
+    args:
+      arch_knowledge:
+        - architecture
+        - contract-lifecycle
+      fix_knowledge:
+        - architecture
     rules:
       - condition: COMPLETE
         next: COMPLETE

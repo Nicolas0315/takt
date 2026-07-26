@@ -1,7 +1,7 @@
 Strictly review the code diff against the task intent.
 
 Procedure:
-1. If a Policy Source Path is provided, open it and review the criteria in its `##` sections
+1. If Knowledge or Policy Source Paths are provided, open them and review the criteria in every `##` section
 2. Review the task intent, plan, diff, and execution evidence
 3. Look for implementation bugs, regressions in existing behavior, security risks, and missing tests
 4. For additions or changes to IDs, names, metadata, config, environment variables, or output contracts, reconcile each entry point against the original requirement and trace downstream meaning, classification, display, and reuse

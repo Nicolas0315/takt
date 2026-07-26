@@ -187,7 +187,7 @@ steps:
         session: compact
         persona: architecture-reviewer
         policy: review
-        knowledge: architecture
+        knowledge: [architecture, contract-lifecycle]
         instruction: review-arch
         rules:
           - condition: approved
@@ -216,6 +216,7 @@ steps:
         session: compact
         persona: coding-reviewer
         policy: [review, coding]
+        knowledge: implementation-semantics
         instruction: review-coding
         rules:
           - condition: approved
@@ -224,36 +225,36 @@ steps:
           report:
             - name: coding-review.md
               format: coding-review-finding-contract
-      - name: implementation-semantics-review
+      - name: security-review
         tags: [review]
         edit: false
         session: compact
-        persona: implementation-semantics-reviewer
+        persona: security-reviewer
         policy: review
-        knowledge: implementation-semantics
-        instruction: review-implementation-semantics
+        knowledge: security
+        instruction: review-security
         rules:
           - condition: approved
           - condition: needs_fix
         output_contracts:
           report:
-            - name: implementation-semantics-review.md
-              format: implementation-semantics-review-finding-contract
-      - name: contract-lifecycle-review
+            - name: security-review.md
+              format: security-review-finding-contract
+      - name: testing-review
         tags: [review]
         edit: false
         session: compact
-        persona: contract-lifecycle-reviewer
-        policy: review
-        knowledge: contract-lifecycle
-        instruction: contract-lifecycle-review
+        persona: testing-reviewer
+        policy: [review, testing]
+        knowledge: [unit-testing, e2e-testing]
+        instruction: review-test
         rules:
           - condition: approved
           - condition: needs_fix
         output_contracts:
           report:
-            - name: contract-lifecycle-review.md
-              format: contract-lifecycle-review-finding-contract
+            - name: testing-review.md
+              format: testing-review-finding-contract
       - name: robustness-review
         tags: [review]
         edit: false

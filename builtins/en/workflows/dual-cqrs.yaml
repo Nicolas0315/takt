@@ -1,5 +1,5 @@
 name: dual-cqrs
-description: Frontend + backend development workflow (CQRS+ES specialized) with CQRS+ES, frontend, security, and QA reviews with fix loops
+description: Frontend + backend development workflow (CQRS+ES specialized) with CQRS+ES, frontend, security, and robustness reviews with fix loops
 workflow_config:
   provider_options:
     codex:
@@ -208,6 +208,7 @@ steps:
         knowledge:
           - cqrs-es
           - backend
+          - contract-lifecycle
         provider_options:
           claude:
             allowed_tools:
@@ -249,6 +250,34 @@ steps:
           report:
             - name: frontend-review.md
               format: frontend-review
+      - name: testing-review
+        tags:
+          - review
+        edit: false
+        persona: testing-reviewer
+        policy:
+          - review
+          - testing
+        knowledge:
+          - unit-testing
+          - e2e-testing
+        provider_options:
+          claude:
+            allowed_tools:
+              - Read
+              - Glob
+              - Grep
+              - Bash
+              - WebSearch
+              - WebFetch
+        rules:
+          - condition: approved
+          - condition: needs_fix
+        instruction: review-test
+        output_contracts:
+          report:
+            - name: testing-review.md
+              format: testing-review
       - name: security-review
         tags:
           - review
@@ -272,14 +301,13 @@ steps:
           report:
             - name: security-review.md
               format: security-review
-      - name: qa-review
+      - name: robustness-review
         tags:
           - review
         edit: false
-        persona: qa-reviewer
-        policy:
-          - review
-          - qa
+        persona: robustness-reviewer
+        policy: review
+        knowledge: robustness
         provider_options:
           claude:
             allowed_tools:
@@ -291,11 +319,11 @@ steps:
         rules:
           - condition: approved
           - condition: needs_fix
-        instruction: review-qa
+        instruction: review-robustness
         output_contracts:
           report:
-            - name: qa-review.md
-              format: qa-review
+            - name: robustness-review.md
+              format: robustness-review
       - name: ai-antipattern-review-2nd
         tags:
           - review
@@ -328,6 +356,7 @@ steps:
         policy:
           - review
           - coding
+        knowledge: implementation-semantics
         provider_options:
           claude:
             allowed_tools:

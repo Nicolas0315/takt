@@ -51,6 +51,7 @@ steps:
         policy: review
         knowledge:
           - architecture
+          - contract-lifecycle
           - takt
         provider_options:
           claude:
@@ -95,14 +96,13 @@ steps:
           - condition: approved
           - condition: needs_fix
 
-      - name: qa-review
+      - name: robustness-review
         tags:
           - review
         edit: false
-        persona: qa-reviewer
-        policy:
-          - review
-          - qa
+        persona: robustness-reviewer
+        policy: review
+        knowledge: robustness
         provider_options:
           claude:
             allowed_tools:
@@ -112,11 +112,11 @@ steps:
               - Bash
               - WebSearch
               - WebFetch
-        instruction: review-qa
+        instruction: review-robustness
         output_contracts:
           report:
-            - name: qa-review.md
-              format: qa-review
+            - name: robustness-review.md
+              format: robustness-review
         rules:
           - condition: approved
           - condition: needs_fix
@@ -184,6 +184,7 @@ steps:
         policy:
           - review
           - coding
+        knowledge: implementation-semantics
         provider_options:
           claude:
             allowed_tools:
@@ -268,7 +269,7 @@ steps:
          - `00-review-target.md` (Review target information)
          - `01-architecture-review.md` (Architecture review)
          - `02-security-review.md` (Security review)
-         - `03-qa-review.md` (QA review)
+         - `03-robustness-review.md` (robustness review)
          - `04-testing-review.md` (Testing review)
          - `05-ai-antipattern-review.md` (AI antipattern review)
          - `06-coding-review.md` (Coding review)
@@ -289,7 +290,7 @@ steps:
       |--------|--------|--------------|
       | Architecture | APPROVE/REJECT | {Brief finding} |
       | Security | APPROVE/REJECT | {Brief finding} |
-      | QA | APPROVE/REJECT | {Brief finding} |
+      | Robustness | APPROVE/REJECT | {Brief finding} |
       | Testing | APPROVE/REJECT | {Brief finding} |
       | AI Antipattern | APPROVE/REJECT | {Brief finding} |
       | Coding | APPROVE/REJECT | {Brief finding} |
@@ -319,7 +320,7 @@ steps:
             |--------|--------|--------------|
             | Architecture | APPROVE/REJECT | {Overview} |
             | Security | APPROVE/REJECT | {Overview} |
-            | QA | APPROVE/REJECT | {Overview} |
+            | Robustness | APPROVE/REJECT | {Overview} |
             | Testing | APPROVE/REJECT | {Overview} |
             | AI Antipattern | APPROVE/REJECT | {Overview} |
             | Coding | APPROVE/REJECT | {Overview} |
@@ -337,7 +338,7 @@ steps:
             ## Resolved Findings (resolved)
             | finding_id | Source | Resolution Evidence |
             |------------|--------|---------------------|
-            | SUM-RESOLVED-src-file-L10 | QA | `file:line` |
+            | SUM-RESOLVED-src-file-L10 | Robustness | `file:line` |
 
             ## Improvement Suggestions
             - {Consolidated suggestions from all reviews}

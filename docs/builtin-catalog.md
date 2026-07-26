@@ -11,9 +11,9 @@ A comprehensive catalog of all builtin workflows and personas included with TAKT
 | `default` | Standard development workflow. Test-first with draft implementation, AI antipattern self-review, specialist peer review, merge-readiness gate, and supervision. plan → write_tests → draft → peer-review (specialists → merge-readiness → fix loop) → supervise → complete. |
 | `default-mini` | Mini development workflow without tests. A lightweight variant of `default` with `write_tests` removed. plan → implement → AI antipattern review → parallel review → complete. |
 | `default-high` | Full-spec development workflow. Test-first with team-leader implementation, AI antipattern review with arbitration, specialist peer review, merge-readiness gate, and supervision. plan → write_tests → team-leader draft → peer-review (specialists → merge-readiness → fix loop) → supervise → complete. |
-| `frontend` | Frontend-specialized development workflow with React/Next.js focused reviews and knowledge injection. |
-| `backend` | Backend-specialized development workflow with backend, security, and QA expert reviews. |
-| `dual` | Frontend + backend development workflow with team-leader implementation, architecture, frontend, security, QA reviews with fix loops. |
+| `frontend` | Frontend workflow with a 5+2 review: architecture/frontend/testing/AI/robustness -> security/coding. |
+| `backend` | Backend workflow with six reviewers: architecture/testing/AI/security/robustness/coding. |
+| `dual` | Frontend + backend workflow with seven parallel reviewers including a frontend specialist. |
 
 ## All Builtin Workflows
 
@@ -24,33 +24,33 @@ Organized by category.
 | 🚀 Quick Start | `default` | Standard development workflow. Test-first with draft implementation, AI antipattern self-review, specialist peer review, merge-readiness gate, and supervision. plan → write_tests → draft → peer-review (specialists → merge-readiness → fix loop) → supervise → complete. |
 | | `default-mini` | Mini development workflow without tests. A lightweight variant of `default` with `write_tests` removed. plan → implement → AI antipattern review → parallel review → complete. |
 | | `default-high` | Full-spec development workflow. Test-first with team-leader implementation, AI antipattern review with arbitration, specialist peer review, merge-readiness gate, and supervision. plan → write_tests → team-leader draft → peer-review (specialists → merge-readiness → fix loop) → supervise → complete. |
-| | `frontend` | Frontend-specialized development workflow with React/Next.js focused reviews and knowledge injection. |
-| | `backend` | Backend-specialized development workflow with backend, security, and QA expert reviews. |
-| | `dual` | Frontend + backend development workflow: architecture, frontend, security, QA reviews with fix loops. |
+| | `frontend` | Frontend workflow with a 5+2 review: architecture/frontend/testing/AI/robustness -> security/coding. |
+| | `backend` | Backend-specialized development workflow with backend, security, and robustness expert reviews. |
+| | `dual` | Frontend + backend development workflow: architecture, frontend, security, and robustness reviews with fix loops. |
 | ⚡ Mini | `default-mini` | Mini development workflow without tests. A lightweight variant of `default` with `write_tests` removed. plan → implement → AI antipattern review → parallel review → complete. |
 | | `backend-cqrs-mini` | Mini CQRS+ES workflow: plan -> implement -> parallel review (AI antipattern + supervisor) with CQRS+ES knowledge injection. |
 | | `dual-mini` | Mini dual workflow: plan -> implement -> parallel review (AI antipattern + expert supervisor) with frontend + backend knowledge injection. |
 | | `dual-cqrs-mini` | Mini CQRS+ES dual workflow: plan -> implement -> parallel review (AI antipattern + expert supervisor) with CQRS+ES knowledge injection. |
 | 🎨 Frontend | `frontend` | Frontend-specialized development workflow with React/Next.js focused reviews and knowledge injection. |
 | | `frontend-maintenance` | (Experimental) Frontend workflow for modifying existing products: maintenance-scoped plan/implement/test/fix/supervise that respects current conventions and keeps changes within scope. Can be heavy-handed today — use as a starting point and tune. |
-| ⚙️ Backend | `backend` | Backend-specialized development workflow with backend, security, and QA expert reviews. |
-| | `backend-cqrs` | CQRS+ES-specialized backend development workflow with CQRS+ES, security, and QA expert reviews. |
-| | `backend-maintenance` | Strict backend maintenance workflow with specialist parallel review (architecture, testing, security, QA, coding-review), a merge-readiness gate, loop monitors, and dual-supervisor sign-off. |
-| 🔧 Dual | `dual` | Frontend + backend development workflow: architecture, frontend, security, QA reviews with fix loops. |
-| | `dual-cqrs` | Frontend + backend development workflow (CQRS+ES specialized): CQRS+ES, frontend, security, QA reviews with fix loops. |
+| ⚙️ Backend | `backend` | Backend workflow with six reviewers: architecture/testing/AI/security/robustness/coding. |
+| | `backend-cqrs` | CQRS+ES backend workflow with six reviewers: CQRS/testing/AI/security/robustness/coding. |
+| | `backend-maintenance` | Strict backend maintenance workflow with six parallel reviewers followed by a merge-readiness gate. |
+| 🔧 Dual | `dual` | Frontend + backend workflow with seven parallel reviewers including a frontend specialist. |
+| | `dual-cqrs` | Frontend + CQRS+ES workflow with seven parallel reviewers including CQRS and frontend specialists. |
 | 🏗️ Infrastructure | `terraform` | Terraform IaC development workflow: plan → implement → parallel review → supervisor validation → fix → complete. |
-| 🔍 Review | `review-default` | Multi-perspective code review: auto-detects PR/branch/working diff, runs specialist parallel review for architecture, security, QA, testing, and coding, then runs a merge-readiness gate and outputs consolidated results. |
-| | `review-fix-default` | Multi-perspective review + fix loop (architecture, security, QA, testing, and coding in parallel, followed by merge-readiness review). |
-| | `review-frontend` | Frontend-focused review (structure, modularization, component design, security, QA). |
-| | `review-fix-frontend` | Frontend-focused review + fix loop (structure, modularization, component design, security, QA). |
-| | `review-backend` | Backend-focused review (structure, modularization, hexagonal architecture, security, QA). |
-| | `review-fix-backend` | Backend-focused review + fix loop (structure, modularization, hexagonal architecture, security, QA). |
-| | `review-dual` | Frontend + backend focused review (structure, modularization, component design, security, QA). |
-| | `review-fix-dual` | Frontend + backend focused review + fix loop (structure, modularization, component design, security, QA). |
-| | `review-dual-cqrs` | Frontend + CQRS+ES focused review (structure, modularization, domain model, component design, security, QA). |
-| | `review-fix-dual-cqrs` | Frontend + CQRS+ES focused review + fix loop (structure, modularization, domain model, component design, security, QA). |
-| | `review-backend-cqrs` | CQRS+ES focused review (structure, modularization, domain model, security, QA). |
-| | `review-fix-backend-cqrs` | CQRS+ES focused review + fix loop (structure, modularization, domain model, security, QA). |
+| 🔍 Review | `review-default` | Six parallel reviewers for architecture/testing/AI/security/robustness/coding, followed by merge-readiness synthesis. |
+| | `review-fix-default` | The same six-reviewer default configuration with a fix loop. |
+| | `review-frontend` | Frontend-focused 5+2 two-stage review. |
+| | `review-fix-frontend` | The same frontend 5+2 configuration with a fix loop. |
+| | `review-backend` | Six parallel reviewers with backend knowledge. |
+| | `review-fix-backend` | The same six-reviewer backend configuration with a fix loop. |
+| | `review-dual` | Seven parallel reviewers including a frontend specialist. |
+| | `review-fix-dual` | The same seven-reviewer dual configuration with a fix loop. |
+| | `review-dual-cqrs` | Seven parallel reviewers including CQRS and frontend specialists. |
+| | `review-fix-dual-cqrs` | The same seven-reviewer dual-CQRS configuration with a fix loop. |
+| | `review-backend-cqrs` | Six parallel reviewers with architecture and contract lifecycle folded into the CQRS reviewer. |
+| | `review-fix-backend-cqrs` | The same six-reviewer backend-CQRS configuration with a fix loop. |
 | | `audit-unit` | Unit test audit. Enumerates behaviors and coverage gaps, produces an issue-ready report without modifying code. |
 | | `audit-e2e` | E2E audit. Enumerates user flows and coverage gaps, produces an issue-ready report without modifying code. |
 | | `audit-security` | Full security audit. Reads every project file for security review. |
@@ -83,7 +83,7 @@ Run `takt` to choose a workflow interactively.
 | **architecture-reviewer** | Architecture and code quality review, spec compliance verification |
 | **frontend-reviewer** | Frontend (React/Next.js) code quality and best practices review |
 | **cqrs-es-reviewer** | CQRS+Event Sourcing architecture and implementation review |
-| **qa-reviewer** | Test coverage and quality assurance review |
+| **robustness-reviewer** | Robustness review covering failures, retries, interruption, and cleanup |
 | **security-reviewer** | Security vulnerability assessment |
 | **conductor** | Phase 3 judgment specialist: reads reports/responses and outputs status tags |
 | **supervisor** | Final validation, approval |

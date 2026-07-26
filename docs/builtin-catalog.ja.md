@@ -11,9 +11,9 @@ TAKT に同梱されているすべてのビルトイン workflow と persona �
 | `default` | 標準の開発 workflow です。テスト先行、ドラフト実装、AIアンチパターン自己レビュー、専門ピアレビュー、merge-readiness ゲート、監督の構成です。計画 → テスト作成 → draft → peer-review（専門レビュー → merge-readiness → 修正ループ）→ 監督 → 完了。 |
 | `default-mini` | テストなしのミニ開発 workflow です。`default` から `write_tests` を抜き、軽量に回したいタスク向けの構成です。計画 → 実装 → AIアンチパターンレビュー → 並列レビュー → 完了。 |
 | `default-high` | フルスペック開発 workflow です。テスト先行、チームリーダー実装、AIアンチパターンレビュー（仲裁付き）、専門ピアレビュー、merge-readiness ゲート、監督の構成です。計画 → テスト作成 → team-leader draft → peer-review（専門レビュー → merge-readiness → 修正ループ）→ 監督 → 完了。 |
-| `frontend` | フロントエンド特化開発 workflow。React/Next.js に焦点を当てたレビューとナレッジ注入付き。 |
-| `backend` | バックエンド特化開発 workflow。バックエンド、セキュリティ、QA エキスパートレビュー付き。 |
-| `dual` | フロントエンド＋バックエンド開発 workflow。チームリーダー実装、architecture、frontend、security、QA レビューと修正ループ付き。 |
+| `frontend` | フロントエンド特化開発 workflow。architecture/frontend/testing/AI/robustness → security/coding の5+2レビュー。 |
+| `backend` | バックエンド特化開発 workflow。architecture/testing/AI/security/robustness/coding の6人レビュー。 |
+| `dual` | フロントエンド＋バックエンド開発 workflow。frontend専門を加えた7人並列レビューと修正ループ付き。 |
 
 ## 全ビルトイン Workflow 一覧
 
@@ -24,33 +24,33 @@ TAKT に同梱されているすべてのビルトイン workflow と persona �
 | 🚀 クイックスタート | `default` | 標準の開発 workflow です。テスト先行、ドラフト実装、AIアンチパターン自己レビュー、専門ピアレビュー、merge-readiness ゲート、監督の構成です。計画 → テスト作成 → draft → peer-review（専門レビュー → merge-readiness → 修正ループ）→ 監督 → 完了。 |
 | | `default-mini` | テストなしのミニ開発 workflow。`default` から `write_tests` を抜いた軽量版。計画 → 実装 → AIアンチパターンレビュー → 並列レビュー → 完了。 |
 | | `default-high` | フルスペック開発 workflow。テスト先行、チームリーダー実装、AIアンチパターンレビュー（仲裁付き）、専門ピアレビュー、merge-readiness ゲート、監督。計画 → テスト作成 → team-leader draft → peer-review（専門レビュー → merge-readiness → 修正ループ）→ 監督 → 完了。 |
-| | `frontend` | フロントエンド特化開発 workflow。React/Next.js に焦点を当てたレビューとナレッジ注入付き。 |
-| | `backend` | バックエンド特化開発 workflow。バックエンド、セキュリティ、QA エキスパートレビュー付き。 |
-| | `dual` | フロントエンド＋バックエンド開発 workflow: architecture、frontend、security、QA レビューと修正ループ付き。 |
+| | `frontend` | フロントエンド特化開発 workflow。architecture/frontend/testing/AI/robustness → security/coding の5+2レビュー。 |
+| | `backend` | バックエンド特化開発 workflow。バックエンド、セキュリティ、堅牢性のエキスパートレビュー付き。 |
+| | `dual` | フロントエンド＋バックエンド開発 workflow: architecture、frontend、security、robustness レビューと修正ループ付き。 |
 | ⚡ Mini | `default-mini` | テストなしのミニ開発 workflow。`default` から `write_tests` を抜いた軽量版。計画 → 実装 → AIアンチパターンレビュー → 並列レビュー → 完了。 |
 | | `backend-cqrs-mini` | ミニ CQRS+ES workflow: plan -> implement -> 並列レビュー (AI antipattern + supervisor)。CQRS+ES ナレッジ注入付き。 |
 | | `dual-mini` | ミニデュアル workflow: plan -> implement -> 並列レビュー (AI antipattern + expert supervisor)。フロントエンド＋バックエンドナレッジ注入付き。 |
 | | `dual-cqrs-mini` | ミニ CQRS+ES デュアル workflow: plan -> implement -> 並列レビュー (AI antipattern + expert supervisor)。CQRS+ES ナレッジ注入付き。 |
 | 🎨 フロントエンド | `frontend` | フロントエンド特化開発 workflow。React/Next.js に焦点を当てたレビューとナレッジ注入付き。 |
 | | `frontend-maintenance` | （実験的）既存プロダクト改修向けのフロントエンド workflow。現行の規約を尊重し変更をスコープ内に収める、保守スコープの plan/implement/test/fix/supervise。現状はやや過剰に動くことがあるため、出発点として使い調整する。 |
-| ⚙️ バックエンド | `backend` | バックエンド特化開発 workflow。バックエンド、セキュリティ、QA エキスパートレビュー付き。 |
-| | `backend-cqrs` | CQRS+ES 特化バックエンド開発 workflow。CQRS+ES、セキュリティ、QA エキスパートレビュー付き。 |
-| | `backend-maintenance` | バックエンド本番保守向け厳密 workflow。専門並列レビュー（アーキテクチャ、テスト、セキュリティ、QA、コーディングレビュー）の後に merge-readiness ゲートを実行し、ループモニターとデュアルスーパーバイザー最終承認を行う。 |
-| 🔧 デュアル | `dual` | フロントエンド＋バックエンド開発 workflow: architecture、frontend、security、QA レビューと修正ループ付き。 |
-| | `dual-cqrs` | フロントエンド＋バックエンド開発 workflow (CQRS+ES 特化): CQRS+ES、frontend、security、QA レビューと修正ループ付き。 |
+| ⚙️ バックエンド | `backend` | バックエンド特化開発 workflow。architecture/testing/AI/security/robustness/coding の6人レビュー。 |
+| | `backend-cqrs` | CQRS+ES 特化バックエンド開発 workflow。CQRS/testing/AI/security/robustness/coding の6人レビュー。 |
+| | `backend-maintenance` | バックエンド本番保守向け厳密 workflow。architecture/testing/AI/security/robustness/coding の6人並列レビュー後に merge-readiness ゲートを実行する。 |
+| 🔧 デュアル | `dual` | フロントエンド＋バックエンド開発 workflow。frontend専門を加えた7人並列レビューと修正ループ付き。 |
+| | `dual-cqrs` | フロントエンド＋CQRS+ES開発 workflow。CQRSとfrontendの専門レビューを含む7人並列レビュー。 |
 | 🏗️ インフラストラクチャ | `terraform` | Terraform IaC 開発 workflow: plan → implement → 並列レビュー → 監督検証 → 修正 → 完了。 |
-| 🔍 レビュー | `review-default` | 多角コードレビュー: PR/ブランチ/作業中の差分を自動判定し、architecture、security、QA、testing、coding を専門並列レビューした後、merge-readiness ゲートを実行して統合結果を出力。 |
-| | `review-fix-default` | 多角レビュー＋修正ループ（architecture/security/QA/testing/coding の専門並列レビュー後に merge-readiness review）。 |
-| | `review-frontend` | フロントエンド特化レビュー（構造、モジュール化、コンポーネント設計、セキュリティ、QA）。 |
-| | `review-fix-frontend` | フロントエンド特化レビュー＋修正ループ（構造、モジュール化、コンポーネント設計、セキュリティ、QA）。 |
-| | `review-backend` | バックエンド特化レビュー（構造、モジュール化、ヘキサゴナルアーキテクチャ、セキュリティ、QA）。 |
-| | `review-fix-backend` | バックエンド特化レビュー＋修正ループ（構造、モジュール化、ヘキサゴナルアーキテクチャ、セキュリティ、QA）。 |
-| | `review-dual` | フロントエンド＋バックエンド特化レビュー（構造、モジュール化、コンポーネント設計、セキュリティ、QA）。 |
-| | `review-fix-dual` | フロントエンド＋バックエンド特化レビュー＋修正ループ（構造、モジュール化、コンポーネント設計、セキュリティ、QA）。 |
-| | `review-dual-cqrs` | フロントエンド＋CQRS+ES 特化レビュー（構造、モジュール化、ドメインモデル、コンポーネント設計、セキュリティ、QA）。 |
-| | `review-fix-dual-cqrs` | フロントエンド＋CQRS+ES 特化レビュー＋修正ループ（構造、モジュール化、ドメインモデル、コンポーネント設計、セキュリティ、QA）。 |
-| | `review-backend-cqrs` | CQRS+ES 特化レビュー（構造、モジュール化、ドメインモデル、セキュリティ、QA）。 |
-| | `review-fix-backend-cqrs` | CQRS+ES 特化レビュー＋修正ループ（構造、モジュール化、ドメインモデル、セキュリティ、QA）。 |
+| 🔍 レビュー | `review-default` | architecture/testing/AI/security/robustness/coding の6人並列レビュー後、merge-readinessで統合。 |
+| | `review-fix-default` | defaultと同じ6人構成のレビュー＋修正ループ。 |
+| | `review-frontend` | frontend専門を加えた5+2の2段階レビュー。 |
+| | `review-fix-frontend` | frontendと同じ5+2構成のレビュー＋修正ループ。 |
+| | `review-backend` | backend knowledgeを付与した6人並列レビュー。 |
+| | `review-fix-backend` | backendと同じ6人構成のレビュー＋修正ループ。 |
+| | `review-dual` | frontend専門を加えた7人並列レビュー。 |
+| | `review-fix-dual` | dualと同じ7人構成のレビュー＋修正ループ。 |
+| | `review-dual-cqrs` | CQRSとfrontendの専門レビューを含む7人並列レビュー。 |
+| | `review-fix-dual-cqrs` | dual-CQRSと同じ7人構成のレビュー＋修正ループ。 |
+| | `review-backend-cqrs` | architecture/contract-lifecycleをCQRS reviewerへ集約した6人並列レビュー。 |
+| | `review-fix-backend-cqrs` | backend-CQRSと同じ6人構成のレビュー＋修正ループ。 |
 | | `audit-unit` | ユニットテスト監査。振る舞いとカバレッジギャップを列挙し、コードを変更せずに Issue 作成可能なレポートを出力。 |
 | | `audit-e2e` | E2E テスト監査。ユーザーフローとカバレッジギャップを列挙し、コードを変更せずに Issue 作成可能なレポートを出力。 |
 | | `audit-security` | セキュリティ監査。プロジェクトの全ファイルを読み取ってセキュリティレビュー。 |
@@ -83,7 +83,7 @@ TAKT に同梱されているすべてのビルトイン workflow と persona �
 | **architecture-reviewer** | アーキテクチャとコード品質のレビュー、仕様準拠の検証 |
 | **frontend-reviewer** | フロントエンド (React/Next.js) のコード品質とベストプラクティスのレビュー |
 | **cqrs-es-reviewer** | CQRS+Event Sourcing のアーキテクチャと実装のレビュー |
-| **qa-reviewer** | テストカバレッジと品質保証のレビュー |
+| **robustness-reviewer** | 失敗・再試行・中断・後始末を含む堅牢性レビュー |
 | **security-reviewer** | セキュリティ脆弱性の評価 |
 | **conductor** | Phase 3 判定スペシャリスト: レポート/レスポンスを読み取りステータスタグを出力 |
 | **supervisor** | 最終検証、承認 |

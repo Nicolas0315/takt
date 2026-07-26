@@ -1,5 +1,5 @@
 name: backend-cqrs
-description: テストファースト・AIレビュー・2段階レビュー・修正ループ・監督付きCQRS+ES開発
+description: テストファースト・AIレビュー・6人並列レビュー・修正ループ・監督付きCQRS+ES開発
 workflow_config:
   provider_options:
     codex:
@@ -20,10 +20,9 @@ loop_monitors:
         - condition: 健全（進捗あり）
           next: ai-antipattern-review-1st
         - condition: 非生産的（改善なし）
-          next: reviewers_1
+          next: reviewers
   - cycle:
-      - reviewers_1
-      - reviewers_2
+      - reviewers
       - final-gate
       - fix
     threshold: 3
@@ -32,7 +31,7 @@ loop_monitors:
       instruction: loop-monitor-reviewers-fix
       rules:
         - condition: 健全（指摘数が減少、修正が反映されている）
-          next: reviewers_1
+          next: reviewers
         - condition: 非生産的（同じ指摘が繰り返される）
           next: final-gate
 steps:
@@ -171,7 +170,7 @@ steps:
     instruction: ai-antipattern-review
     rules:
       - condition: AI特有の問題が見つからない
-        next: reviewers_1
+        next: reviewers
       - condition: AI特有の問題が検出された
         next: ai-antipattern-fix
     output_contracts:
@@ -228,9 +227,9 @@ steps:
       - condition: ai-antipattern-review-1stの指摘が妥当（修正すべき）
         next: ai-antipattern-fix
       - condition: ai-antipattern-fixの判断が妥当（修正不要）
-        next: reviewers_1
+        next: reviewers
     instruction: arbitrate
-  - name: reviewers_1
+  - name: reviewers
     tags:
       - review
     parallel:
@@ -243,6 +242,7 @@ steps:
         knowledge:
           - cqrs-es
           - backend
+          - contract-lifecycle
         provider_options:
           claude:
             allowed_tools:
@@ -310,15 +310,6 @@ steps:
           report:
             - name: ai-antipattern-review.md
               format: ai-antipattern-review
-    rules:
-      - condition: all("approved")
-        next: reviewers_2
-      - condition: any("needs_fix")
-        next: fix
-  - name: reviewers_2
-    tags:
-      - review
-    parallel:
       - name: security-review
         tags:
           - review
@@ -342,14 +333,13 @@ steps:
           report:
             - name: security-review.md
               format: security-review
-      - name: qa-review
+      - name: robustness-review
         tags:
           - review
         edit: false
-        persona: qa-reviewer
-        policy:
-          - review
-          - qa
+        persona: robustness-reviewer
+        policy: review
+        knowledge: robustness
         provider_options:
           claude:
             allowed_tools:
@@ -361,11 +351,11 @@ steps:
         rules:
           - condition: approved
           - condition: needs_fix
-        instruction: review-qa
+        instruction: review-robustness
         output_contracts:
           report:
-            - name: qa-review.md
-              format: qa-review
+            - name: robustness-review.md
+              format: robustness-review
       - name: coding-review
         tags:
           - review
@@ -374,6 +364,7 @@ steps:
         policy:
           - review
           - coding
+        knowledge: implementation-semantics
         provider_options:
           claude:
             allowed_tools:
@@ -447,7 +438,7 @@ steps:
     pass_previous_response: false
     rules:
       - condition: 修正が完了した
-        next: reviewers_1
+        next: reviewers
       - condition: 修正を進行できない
         next: plan
     instruction: fix

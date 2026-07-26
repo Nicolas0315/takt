@@ -102,6 +102,7 @@ steps:
     args:
       arch_knowledge:
         - architecture
+        - contract-lifecycle
     rules:
       - condition: COMPLETE
         next: COMPLETE

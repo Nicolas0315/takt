@@ -1,5 +1,5 @@
 name: review-fix-frontend
-description: Frontend-focused review + fix loop (structure, modularization, component design, security, QA)
+description: Frontend-focused 5+2 two-stage review + fix loop (structure, components, testing, AI, and robustness -> security and coding)
 workflow_config:
   provider_options:
     codex:
@@ -10,7 +10,33 @@ max_steps: 30
 initial_step: gather
 loop_monitors:
   - cycle:
-      - reviewers
+      - reviewers_1
+      - fix
+    threshold: 3
+    judge:
+      persona: supervisor
+      instruction: loop-monitor-reviewers-fix
+      rules:
+        - condition: Healthy (making progress)
+          next: reviewers_1
+        - condition: Unproductive (same findings repeating or fixes not applied)
+          next: final-gate
+  - cycle:
+      - reviewers_1
+      - reviewers_2
+      - fix
+    threshold: 3
+    judge:
+      persona: supervisor
+      instruction: loop-monitor-reviewers-fix
+      rules:
+        - condition: Healthy (making progress)
+          next: reviewers_1
+        - condition: Unproductive (same findings repeating or fixes not applied)
+          next: final-gate
+  - cycle:
+      - reviewers_1
+      - reviewers_2
       - final-gate
       - fix
     threshold: 3
@@ -19,7 +45,7 @@ loop_monitors:
       instruction: loop-monitor-reviewers-fix
       rules:
         - condition: Healthy (progress being made)
-          next: reviewers
+          next: reviewers_1
         - condition: Unproductive (repeated findings, fixes not applied)
           next: final-gate
 
@@ -45,11 +71,11 @@ steps:
           format: review-gather
     rules:
       - condition: Review target information gathered
-        next: reviewers
+        next: reviewers_1
       - condition: Unable to identify review target, insufficient information
         next: ABORT
 
-  - name: reviewers
+  - name: reviewers_1
     tags:
       - review
     parallel:
@@ -61,6 +87,7 @@ steps:
         policy: review
         knowledge:
           - architecture
+          - contract-lifecycle
           - frontend
         provider_options:
           claude:
@@ -105,6 +132,95 @@ steps:
           - condition: approved
           - condition: needs_fix
 
+      - name: testing-review
+        tags:
+          - review
+        edit: false
+        persona: testing-reviewer
+        policy:
+          - review
+          - testing
+        knowledge:
+          - unit-testing
+          - e2e-testing
+        provider_options:
+          claude:
+            allowed_tools:
+              - Read
+              - Glob
+              - Grep
+              - Bash
+              - WebSearch
+              - WebFetch
+        instruction: review-test
+        output_contracts:
+          report:
+            - name: testing-review.md
+              format: testing-review
+        rules:
+          - condition: approved
+          - condition: needs_fix
+
+      - name: ai-antipattern-review-2nd
+        tags:
+          - review
+        edit: false
+        persona: ai-antipattern-reviewer
+        policy:
+          - review
+          - ai-antipattern
+        provider_options:
+          claude:
+            allowed_tools:
+              - Read
+              - Glob
+              - Grep
+              - Bash
+              - WebSearch
+              - WebFetch
+        instruction: ai-antipattern-review
+        output_contracts:
+          report:
+            - name: ai-antipattern-review.md
+              format: ai-antipattern-review
+        rules:
+          - condition: approved
+          - condition: needs_fix
+
+      - name: robustness-review
+        tags:
+          - review
+        edit: false
+        persona: robustness-reviewer
+        policy: review
+        knowledge: robustness
+        provider_options:
+          claude:
+            allowed_tools:
+              - Read
+              - Glob
+              - Grep
+              - WebSearch
+              - WebFetch
+        instruction: review-robustness
+        output_contracts:
+          report:
+            - name: robustness-review.md
+              format: robustness-review
+        rules:
+          - condition: approved
+          - condition: needs_fix
+
+    rules:
+      - condition: all("approved")
+        next: reviewers_2
+      - condition: any("needs_fix")
+        next: fix
+
+  - name: reviewers_2
+    tags:
+      - review
+    parallel:
       - name: security-review
         tags:
           - review
@@ -129,31 +245,6 @@ steps:
           - condition: approved
           - condition: needs_fix
 
-      - name: qa-review
-        tags:
-          - review
-        edit: false
-        persona: qa-reviewer
-        policy:
-          - review
-          - qa
-        provider_options:
-          claude:
-            allowed_tools:
-              - Read
-              - Glob
-              - Grep
-              - WebSearch
-              - WebFetch
-        instruction: review-qa
-        output_contracts:
-          report:
-            - name: qa-review.md
-              format: qa-review
-        rules:
-          - condition: approved
-          - condition: needs_fix
-
       - name: coding-review
         tags:
           - review
@@ -162,6 +253,7 @@ steps:
         policy:
           - review
           - coding
+        knowledge: implementation-semantics
         provider_options:
           claude:
             allowed_tools:
@@ -236,6 +328,6 @@ steps:
     instruction: fix
     rules:
       - condition: Fixes complete
-        next: reviewers
+        next: reviewers_1
       - condition: Unable to proceed with fixes
         next: final-gate

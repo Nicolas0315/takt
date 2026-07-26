@@ -51,6 +51,7 @@ steps:
         policy: review
         knowledge:
           - architecture
+          - contract-lifecycle
           - takt
         provider_options:
           claude:
@@ -95,14 +96,13 @@ steps:
           - condition: approved
           - condition: needs_fix
 
-      - name: qa-review
+      - name: robustness-review
         tags:
           - review
         edit: false
-        persona: qa-reviewer
-        policy:
-          - review
-          - qa
+        persona: robustness-reviewer
+        policy: review
+        knowledge: robustness
         provider_options:
           claude:
             allowed_tools:
@@ -112,11 +112,11 @@ steps:
               - Bash
               - WebSearch
               - WebFetch
-        instruction: review-qa
+        instruction: review-robustness
         output_contracts:
           report:
-            - name: qa-review.md
-              format: qa-review
+            - name: robustness-review.md
+              format: robustness-review
         rules:
           - condition: approved
           - condition: needs_fix
@@ -184,6 +184,7 @@ steps:
         policy:
           - review
           - coding
+        knowledge: implementation-semantics
         provider_options:
           claude:
             allowed_tools:
@@ -268,7 +269,7 @@ steps:
          - `00-review-target.md`（レビュー対象情報）
          - `01-architecture-review.md`（アーキテクチャレビュー）
          - `02-security-review.md`（セキュリティレビュー）
-         - `03-qa-review.md`（QAレビュー）
+         - `03-robustness-review.md`（堅牢性レビュー）
          - `04-testing-review.md`（テストレビュー）
          - `05-ai-antipattern-review.md`（AIアンチパターンレビュー）
          - `06-coding-review.md`（コーディングレビュー）
@@ -291,7 +292,7 @@ steps:
             |---------|------|-----------|
             | アーキテクチャ | APPROVE/REJECT | {概要} |
             | セキュリティ | APPROVE/REJECT | {概要} |
-            | QA | APPROVE/REJECT | {概要} |
+            | 堅牢性 | APPROVE/REJECT | {概要} |
             | テスト | APPROVE/REJECT | {概要} |
             | AIアンチパターン | APPROVE/REJECT | {概要} |
             | コーディング | APPROVE/REJECT | {概要} |
@@ -309,7 +310,7 @@ steps:
             ## 解消済み（resolved）
             | finding_id | ソース | 解消根拠 |
             |------------|--------|----------|
-            | SUM-RESOLVED-src-file-L10 | QA | `file:line` |
+            | SUM-RESOLVED-src-file-L10 | 堅牢性 | `file:line` |
 
             ## 改善提案
             - {全レビューからの統合提案}

@@ -1,5 +1,5 @@
 name: review-default
-description: 多角レビュー - 専門レビュアーで並列レビューした後、merge-readiness review の証跡を使ってレビュー結果を統合する
+description: 6人の多角並列レビュー（アーキテクチャ・テスト・AI・セキュリティ・堅牢性・コーディング）後に結果を統合する
 workflow_config:
   provider_options:
     codex:
@@ -49,7 +49,9 @@ steps:
         edit: false
         persona: architecture-reviewer
         policy: review
-        knowledge: architecture
+        knowledge:
+          - architecture
+          - contract-lifecycle
         provider_options:
           claude:
             allowed_tools:
@@ -93,14 +95,13 @@ steps:
           - condition: approved
           - condition: needs_fix
 
-      - name: qa-review
+      - name: robustness-review
         tags:
           - review
         edit: false
-        persona: qa-reviewer
-        policy:
-          - review
-          - qa
+        persona: robustness-reviewer
+        policy: review
+        knowledge: robustness
         provider_options:
           claude:
             allowed_tools:
@@ -110,11 +111,11 @@ steps:
               - Bash
               - WebSearch
               - WebFetch
-        instruction: review-qa
+        instruction: review-robustness
         output_contracts:
           report:
-            - name: qa-review.md
-              format: qa-review
+            - name: robustness-review.md
+              format: robustness-review
         rules:
           - condition: approved
           - condition: needs_fix
@@ -148,6 +149,32 @@ steps:
           - condition: approved
           - condition: needs_fix
 
+      - name: ai-antipattern-review-2nd
+        tags:
+          - review
+        edit: false
+        persona: ai-antipattern-reviewer
+        policy:
+          - review
+          - ai-antipattern
+        provider_options:
+          claude:
+            allowed_tools:
+              - Read
+              - Glob
+              - Grep
+              - Bash
+              - WebSearch
+              - WebFetch
+        instruction: ai-antipattern-review
+        output_contracts:
+          report:
+            - name: ai-antipattern-review.md
+              format: ai-antipattern-review
+        rules:
+          - condition: approved
+          - condition: needs_fix
+
       - name: coding-review
         tags:
           - review
@@ -156,6 +183,7 @@ steps:
         policy:
           - review
           - coding
+        knowledge: implementation-semantics
         provider_options:
           claude:
             allowed_tools:
@@ -240,10 +268,11 @@ steps:
          - `00-review-target.md`（レビュー対象情報）
          - `01-architecture-review.md`（アーキテクチャレビュー）
          - `02-security-review.md`（セキュリティレビュー）
-         - `03-qa-review.md`（QAレビュー）
+         - `03-robustness-review.md`（堅牢性レビュー）
          - `04-testing-review.md`（テストレビュー）
-         - `05-coding-review.md`（コーディングレビュー）
-      2. 5つのレビュー結果を統合
+         - `05-ai-antipattern-review.md`（AIアンチパターンレビュー）
+         - `06-coding-review.md`（コーディングレビュー）
+      2. 6つのレビュー結果を統合
       3. 統合レビューサマリーと総合判定を作成
     output_contracts: &review_synthesis_output_contracts
       report:
@@ -262,8 +291,9 @@ steps:
             |---------|------|-----------|
             | アーキテクチャ | APPROVE/REJECT | {概要} |
             | セキュリティ | APPROVE/REJECT | {概要} |
-            | QA | APPROVE/REJECT | {概要} |
+            | 堅牢性 | APPROVE/REJECT | {概要} |
             | テスト | APPROVE/REJECT | {概要} |
+            | AIアンチパターン | APPROVE/REJECT | {概要} |
             | コーディング | APPROVE/REJECT | {概要} |
 
             ## 今回の指摘（new）
@@ -279,7 +309,7 @@ steps:
             ## 解消済み（resolved）
             | finding_id | ソース | 解消根拠 |
             |------------|--------|----------|
-            | SUM-RESOLVED-src-file-L10 | QA | `file:line` |
+            | SUM-RESOLVED-src-file-L10 | 堅牢性 | `file:line` |
 
             ## 改善提案
             - {全レビューからの統合提案}

@@ -1,5 +1,5 @@
 name: frontend-maintenance
-description: 既存プロダクト向けの厳格なフロントエンド保守ワークフロー
+description: 既存プロダクト向けの5+2の2段階レビューを備えた厳格なフロントエンド保守ワークフロー
 workflow_config:
   provider_options:
     codex:
@@ -23,6 +23,32 @@ loop_monitors:
           next: reviewers_1
   - cycle:
       - reviewers_1
+      - fix
+    threshold: 3
+    judge:
+      persona: supervisor
+      instruction: loop-monitor-reviewers-fix
+      rules:
+        - condition: 健全（指摘数が減少、修正が反映されている）
+          next: reviewers_1
+        - condition: 非生産的（同じ指摘が繰り返される）
+          next: final-gate
+  - cycle:
+      - reviewers_1
+      - reviewers_2
+      - fix
+    threshold: 3
+    judge:
+      persona: supervisor
+      instruction: loop-monitor-reviewers-fix
+      rules:
+        - condition: 健全（指摘数が減少、修正が反映されている）
+          next: reviewers_1
+        - condition: 非生産的（同じ指摘が繰り返される）
+          next: final-gate
+  - cycle:
+      - reviewers_1
+      - reviewers_2
       - final-gate
       - fix
     threshold: 3
@@ -263,6 +289,7 @@ steps:
           - architecture
           - frontend
           - react
+          - contract-lifecycle
           - existing-system
         provider_options:
           claude:
@@ -365,6 +392,33 @@ steps:
               format: ai-antipattern-review
         knowledge:
           - existing-system
+      - name: robustness-review
+        tags:
+          - review
+        edit: false
+        persona: robustness-reviewer
+        policy:
+          - review
+          - existing-system-respect
+        provider_options:
+          claude:
+            allowed_tools:
+              - Read
+              - Glob
+              - Grep
+              - WebSearch
+              - WebFetch
+        rules:
+          - condition: approved
+          - condition: needs_fix
+        instruction: review-robustness
+        output_contracts:
+          report:
+            - name: robustness-review.md
+              format: robustness-review
+        knowledge:
+          - robustness
+          - existing-system
     rules:
       - condition: all("approved")
         next: reviewers_2
@@ -401,33 +455,6 @@ steps:
           report:
             - name: security-review.md
               format: security-review
-      - name: qa-review
-        tags:
-          - review
-        edit: false
-        persona: qa-reviewer
-        policy:
-          - review
-          - qa
-          - existing-system-respect
-        provider_options:
-          claude:
-            allowed_tools:
-              - Read
-              - Glob
-              - Grep
-              - WebSearch
-              - WebFetch
-        rules:
-          - condition: approved
-          - condition: needs_fix
-        instruction: review-qa
-        output_contracts:
-          report:
-            - name: qa-review.md
-              format: qa-review
-        knowledge:
-          - existing-system
       - name: coding-review
         tags:
           - review
@@ -439,6 +466,7 @@ steps:
           - existing-system-respect
         knowledge:
           - existing-system
+          - implementation-semantics
         provider_options:
           claude:
             allowed_tools:

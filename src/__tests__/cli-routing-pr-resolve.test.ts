@@ -350,23 +350,20 @@ describe('PR resolution in routing', () => {
       );
     });
 
-    it('should exit with a controlled error when a saved PR task has no head branch', async () => {
+    it('should exit with a controlled error when a PR has an empty head branch', async () => {
       mockOpts.pr = 456;
-      mockInteractiveMode.mockResolvedValue({
-        action: 'save_task',
-        task: 'Saved PR task',
-      });
       mockCheckCliStatus.mockReturnValue({ available: true });
-      mockFetchPrReviewComments.mockReturnValue(createMockPrReview({ headRefName: undefined }));
+      mockFetchPrReviewComments.mockReturnValue(createMockPrReview({ headRefName: '' }));
       const mockExit = vi.spyOn(process, 'exit').mockImplementation(() => {
         throw new Error('process.exit called');
       });
 
       await expect(executeDefaultAction()).rejects.toThrow('process.exit called');
       expect(mockLogError).toHaveBeenCalledWith(
-        'Fetched PR head branch is required when saving a PR review task.',
+        'PR context headBranch must be a non-empty branch name without surrounding whitespace.',
       );
       expect(mockExit).toHaveBeenCalledWith(1);
+      expect(mockInteractiveMode).not.toHaveBeenCalled();
       expect(mockSaveTaskFromInteractive).not.toHaveBeenCalled();
 
       mockExit.mockRestore();

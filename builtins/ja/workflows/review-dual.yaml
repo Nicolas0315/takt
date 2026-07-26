@@ -1,5 +1,5 @@
 name: review-dual
-description: フロントエンド＋バックエンド特化レビュー（構造・モジュール化・コンポーネント設計・セキュリティ・QA）
+description: frontend専門を加えたフロントエンド＋バックエンド7人並列レビュー
 workflow_config:
   provider_options:
     codex:
@@ -47,6 +47,7 @@ steps:
         policy: review
         knowledge:
           - architecture
+          - contract-lifecycle
           - frontend
           - backend
         provider_options:
@@ -116,14 +117,13 @@ steps:
           - condition: approved
           - condition: needs_fix
 
-      - name: qa-review
+      - name: robustness-review
         tags:
           - review
         edit: false
-        persona: qa-reviewer
-        policy:
-          - review
-          - qa
+        persona: robustness-reviewer
+        policy: review
+        knowledge: robustness
         provider_options:
           claude:
             allowed_tools:
@@ -132,11 +132,66 @@ steps:
               - Grep
               - WebSearch
               - WebFetch
-        instruction: review-qa
+        instruction: review-robustness
         output_contracts:
           report:
-            - name: qa-review.md
-              format: qa-review
+            - name: robustness-review.md
+              format: robustness-review
+        rules:
+          - condition: approved
+          - condition: needs_fix
+
+      - name: testing-review
+        tags:
+          - review
+        edit: false
+        persona: testing-reviewer
+        policy:
+          - review
+          - testing
+        knowledge:
+          - unit-testing
+          - e2e-testing
+        provider_options:
+          claude:
+            allowed_tools:
+              - Read
+              - Glob
+              - Grep
+              - Bash
+              - WebSearch
+              - WebFetch
+        instruction: review-test
+        output_contracts:
+          report:
+            - name: testing-review.md
+              format: testing-review
+        rules:
+          - condition: approved
+          - condition: needs_fix
+
+      - name: ai-antipattern-review-2nd
+        tags:
+          - review
+        edit: false
+        persona: ai-antipattern-reviewer
+        policy:
+          - review
+          - ai-antipattern
+        provider_options:
+          claude:
+            allowed_tools:
+              - Read
+              - Glob
+              - Grep
+              - Bash
+              - WebSearch
+              - WebFetch
+        instruction: ai-antipattern-review
+        output_contracts:
+          report:
+            - name: ai-antipattern-review.md
+              format: ai-antipattern-review
         rules:
           - condition: approved
           - condition: needs_fix
@@ -149,6 +204,7 @@ steps:
         policy:
           - review
           - coding
+        knowledge: implementation-semantics
         provider_options:
           claude:
             allowed_tools:

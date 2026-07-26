@@ -87,6 +87,7 @@ steps:
         policy:
           - review
           - coding
+        knowledge: implementation-semantics
         pass_previous_response: false
         provider_options:
           claude:
