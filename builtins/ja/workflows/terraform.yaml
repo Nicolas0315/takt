@@ -205,6 +205,8 @@ steps:
           - WebFetch
     instruction: &terraform_supervise_instruction supervise
     rules:
+      - condition: BLOCKED
+        next: ABORT
       - condition: レビュアー全員承認かつマージ可能な品質
         next: COMPLETE
       - condition: AI特有の問題のみ要修正
@@ -220,7 +222,7 @@ steps:
         - name: supervisor-validation.md
           format: supervisor-validation
         - name: summary.md
-          format: summary
+          format: supervisor-summary
           use_judge: false
 
   - name: supervise
@@ -234,6 +236,8 @@ steps:
     provider_options: *terraform_supervise_provider_options
     instruction: *terraform_supervise_instruction
     rules:
+      - condition: BLOCKED
+        next: ABORT
       - condition: レビュアー全員承認かつマージ可能な品質
         next: COMPLETE
       - condition: AI特有の問題のみ要修正
