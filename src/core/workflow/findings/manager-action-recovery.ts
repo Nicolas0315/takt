@@ -10,6 +10,7 @@ import type {
   FindingObservation,
   FindingReconcileContext,
 } from './types.js';
+import { findingMatchesMutationPrecondition } from './finding-preconditions.js';
 
 export interface ManagerActionRecoveryCandidate {
   provisionalFindingId: string;
@@ -22,6 +23,23 @@ interface ActionRecoveryPlan {
   failures: Map<string, string>;
 }
 
+function recoveryTargetsMatch(
+  ledger: FindingLedger,
+  recovery: FindingActionRecovery,
+): boolean {
+  const targetFindingIds = recovery.action === 'duplicate'
+    ? [recovery.canonicalFindingId, ...recovery.duplicateFindingIds]
+    : [recovery.findingId];
+  const preconditionIds = recovery.targetPreconditions.map(
+    (precondition) => precondition.targetFindingId,
+  );
+  return new Set(preconditionIds).size === targetFindingIds.length
+    && targetFindingIds.every((findingId) => preconditionIds.includes(findingId))
+    && recovery.targetPreconditions.every((precondition) => (
+      findingMatchesMutationPrecondition(ledger, precondition)
+    ));
+}
+
 export function collectManagerActionRecoveryCandidates(
   ledger: FindingLedger,
   roundsCompleted: number,
@@ -29,7 +47,7 @@ export function collectManagerActionRecoveryCandidates(
   return ledger.findings.flatMap((finding) => (
     isOpenProvisional(finding)
       && classifyProvisionalRecovery(finding.provisional, roundsCompleted) === 'action'
-      ? [{ provisionalFindingId: finding.id, expectedRevision: finding.revision ?? 1 }]
+      ? [{ provisionalFindingId: finding.id, expectedRevision: finding.revision }]
       : []
   ));
 }
@@ -131,11 +149,20 @@ function buildActionRecoveryPlan(input: {
     const process = input.ledger.findings.find((finding) => finding.id === candidate.provisionalFindingId);
     if (process === undefined
       || !isOpenProvisional(process)
-      || (process.revision ?? 1) !== candidate.expectedRevision
+      || process.revision !== candidate.expectedRevision
       || process.provisional.actionRecovery === undefined) {
       return plan;
     }
     const recovery = process.provisional.actionRecovery;
+    if (!recoveryTargetsMatch(input.ledger, recovery)) {
+      return {
+        ...plan,
+        failures: new Map([
+          ...plan.failures,
+          [process.id, 'the engine-issued action precondition no longer matches the current finding head'],
+        ]),
+      };
+    }
     const decision = recovery.action === 'invalidate'
       ? planInvalidate(input.ledger, input.cwd, recovery)
       : recovery.action === 'waive'
@@ -182,13 +209,13 @@ function recordActionRecoveryFailures(
       const reason = failures.get(finding.id);
       if (!isOpenProvisional(finding)
         || reason === undefined
-        || (finding.revision ?? 1) !== expectedById.get(finding.id)) {
+        || finding.revision !== expectedById.get(finding.id)) {
         return finding;
       }
       const attempts = finding.provisional.actionRecoveryAttempts ?? [];
       return {
         ...finding,
-        revision: (finding.revision ?? 1) + 1,
+        revision: finding.revision + 1,
         provisional: {
           ...finding.provisional,
           actionRecoveryAttempts: [

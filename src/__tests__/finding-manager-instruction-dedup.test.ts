@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { collectDuplicateLocusGroups } from '../core/workflow/findings/manager-agent.js';
+import {
+  buildManagerInstruction,
+  collectDuplicateLocusGroups,
+} from '../core/workflow/findings/manager-agent.js';
 import type { FindingLedger, FindingLedgerEntry } from '../core/workflow/findings/types.js';
 
 function openFinding(id: string, title: string, location?: string): FindingLedgerEntry {
@@ -7,6 +10,7 @@ function openFinding(id: string, title: string, location?: string): FindingLedge
     id,
     status: 'open',
     lifecycle: 'new',
+    revision: 1,
     severity: 'medium',
     title,
     ...(location !== undefined ? { location } : {}),
@@ -19,12 +23,12 @@ function openFinding(id: string, title: string, location?: string): FindingLedge
 
 function ledgerWith(findings: FindingLedgerEntry[]): FindingLedger {
   return {
-    version: 1,
     workflowName: 'peer-review',
     nextId: findings.length + 1,
     updatedAt: '2026-07-01T00:00:00.000Z',
     rawFindings: [],
     conflicts: [],
+    interpretations: [],
     findings,
   };
 }
@@ -67,5 +71,32 @@ describe('collectDuplicateLocusGroups', () => {
     const open = openFinding('F-0003', 'open 単独', 'src/a.ts:3');
 
     expect(collectDuplicateLocusGroups(ledgerWith([provisional, resolved, open])).size).toBe(0);
+  });
+});
+
+describe('buildManagerInstruction', () => {
+  it('inlines ledger and raw findings without presenting storage references as file paths', () => {
+    const instruction = buildManagerInstruction({
+      contract: {
+        ledgerPath: '.takt/findings/peer-review.json',
+        rawFindingsPath: '.takt/findings/raw',
+        manager: {
+          persona: 'findings-manager',
+          instruction: 'Reconcile findings.',
+          outputContract: 'Return structured output.',
+        },
+      },
+      previousLedger: ledgerWith([]),
+      residualRawFindings: [],
+      mechanicallyClassifiedCount: 0,
+      invalidLocationCandidates: new Map(),
+      dismissCandidates: new Map(),
+    });
+
+    expect(instruction).toContain('Previous ledger metadata:');
+    expect(instruction).toContain('Raw findings:');
+    expect(instruction).not.toContain('ledger copy path');
+    expect(instruction).not.toContain('Raw findings path');
+    expect(instruction).not.toContain('sqlite-run://');
   });
 });

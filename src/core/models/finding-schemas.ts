@@ -1,11 +1,14 @@
 import { z } from 'zod/v4';
 import { PROVIDER_TYPES } from '../../shared/types/provider.js';
+import { compareBinaryStrings } from '../../shared/utils/binary-string-comparator.js';
 import { normalizeRfc3339Timestamp } from './rfc3339.js';
+import { collectFindingLedgerProjectionInvariantViolations } from './finding-ledger-invariants.js';
 import type {
   FindingConflictAdjudicationOutput,
   FindingLedger,
   FindingManagerDecisions,
   FindingManagerOutput,
+  FindingMutationPrecondition,
   RawFinding,
   RawFindingRelation,
 } from './finding-types.js';
@@ -24,13 +27,25 @@ import {
   FINDING_SEVERITIES,
   FINDING_STATUSES,
   INTERPRETATION_APPLICATION_RESULTS,
-  INTERPRETATION_STAGES,
   RAW_DECISION_KINDS,
   RAW_FINDING_EVIDENCE_KINDS,
+  RAW_FINDING_DISPOSITION_OUTCOMES,
   REVIEWER_ANOMALY_KINDS,
 } from './finding-types.js';
 
 const nonEmptyString = z.string().min(1);
+const BinarySortedUniqueStringSetSchema = z.array(nonEmptyString).superRefine((values, ctx) => {
+  const canonical = [...new Set(values)].sort(compareBinaryStrings);
+  if (
+    canonical.length !== values.length
+    || canonical.some((value, index) => value !== values[index])
+  ) {
+    ctx.addIssue({
+      code: 'custom',
+      message: 'roundMarkers must be a binary-sorted unique set',
+    });
+  }
+});
 
 export const Rfc3339TimestampSchema = z.string().min(1).transform((timestamp, ctx) => {
   try {
@@ -74,6 +89,13 @@ export const FindingContractConfigRawSchema = z.object({
 export const FindingSeveritySchema = z.enum(FINDING_SEVERITIES);
 export const FindingStatusSchema = z.enum(FINDING_STATUSES);
 export const FindingLifecycleSchema = z.enum(FINDING_LIFECYCLES);
+
+export const FindingMutationPreconditionSchema = z.object({
+  targetFindingId: nonEmptyString,
+  targetRevision: z.number().int().positive(),
+  targetStatus: FindingStatusSchema,
+  targetEvidenceHash: z.string().regex(/^[0-9a-f]{64}$/),
+}).strict();
 
 export const FindingObservationSchema = z.object({
   runId: nonEmptyString,
@@ -122,7 +144,56 @@ export const ReviewerAnomalyEntrySchema = z.object({
   promotedFindingId: nonEmptyString.optional(),
 }).strict();
 
-/** provisional メタデータ。ledger v1 の optional field なので後方互換。 */
+const FindingActionRecoverySchema = z.discriminatedUnion('action', [
+  z.object({
+    action: z.literal('invalidate'),
+    findingId: nonEmptyString,
+    evidence: nonEmptyString,
+    targetPreconditions: z.array(FindingMutationPreconditionSchema).min(1),
+  }).strict(),
+  z.object({
+    action: z.literal('waive'),
+    findingId: nonEmptyString,
+    reason: nonEmptyString,
+    evidence: nonEmptyString,
+    targetPreconditions: z.array(FindingMutationPreconditionSchema).min(1),
+  }).strict(),
+  z.object({
+    action: z.literal('duplicate'),
+    canonicalFindingId: nonEmptyString,
+    duplicateFindingIds: z.array(nonEmptyString).min(1),
+    evidence: nonEmptyString,
+    targetPreconditions: z.array(FindingMutationPreconditionSchema).min(1),
+  }).strict(),
+  z.object({
+    action: z.literal('dismiss'),
+    findingId: nonEmptyString,
+    basis: z.enum(FINDING_DISMISSAL_BASES),
+    reason: nonEmptyString,
+    targetPreconditions: z.array(FindingMutationPreconditionSchema).min(1),
+  }).strict(),
+]).superRefine((recovery, ctx) => {
+  const targetFindingIds = recovery.action === 'duplicate'
+    ? [recovery.canonicalFindingId, ...recovery.duplicateFindingIds]
+    : [recovery.findingId];
+  const preconditionIds = recovery.targetPreconditions.map(
+    (precondition) => precondition.targetFindingId,
+  );
+  const uniqueTargetIds = new Set(targetFindingIds);
+  const uniquePreconditionIds = new Set(preconditionIds);
+  if (uniqueTargetIds.size !== targetFindingIds.length
+    || uniquePreconditionIds.size !== preconditionIds.length
+    || targetFindingIds.length !== preconditionIds.length
+    || targetFindingIds.some((findingId) => !uniquePreconditionIds.has(findingId))) {
+    ctx.addIssue({
+      code: 'custom',
+      message: 'actionRecovery targetPreconditions must exactly match the action target findings',
+      path: ['targetPreconditions'],
+    });
+  }
+});
+
+/** provisional メタデータ。 */
 export const FindingProvisionalMetadataSchema = z.object({
   kind: z.enum(FINDING_PROVISIONAL_KINDS),
   stableKey: nonEmptyString,
@@ -133,38 +204,14 @@ export const FindingProvisionalMetadataSchema = z.object({
   lastObservedAt: FindingObservationSchema,
   interpretationEpochs: z.number().int().min(0),
   gateEffect: z.literal('block'),
-  firstObservedRound: z.number().int().positive().optional(),
+  firstObservedRound: z.number().int().positive(),
   adjudicationAttempts: z.array(z.object({
     attempt: z.number().int().positive(),
     replayRawFindingId: nonEmptyString,
     reason: nonEmptyString,
     at: FindingObservationSchema,
   }).strict()).optional(),
-  actionRecovery: z.discriminatedUnion('action', [
-    z.object({
-      action: z.literal('invalidate'),
-      findingId: nonEmptyString,
-      evidence: nonEmptyString,
-    }).strict(),
-    z.object({
-      action: z.literal('waive'),
-      findingId: nonEmptyString,
-      reason: nonEmptyString,
-      evidence: nonEmptyString,
-    }).strict(),
-    z.object({
-      action: z.literal('duplicate'),
-      canonicalFindingId: nonEmptyString,
-      duplicateFindingIds: z.array(nonEmptyString).min(1),
-      evidence: nonEmptyString,
-    }).strict(),
-    z.object({
-      action: z.literal('dismiss'),
-      findingId: nonEmptyString,
-      basis: z.enum(FINDING_DISMISSAL_BASES),
-      reason: nonEmptyString,
-    }).strict(),
-  ]).optional(),
+  actionRecovery: FindingActionRecoverySchema.optional(),
   actionRecoveryAttempts: z.array(z.object({
     attempt: z.number().int().positive(),
     reason: nonEmptyString,
@@ -207,7 +254,7 @@ export const FindingLedgerEntrySchema = z.object({
     reason: nonEmptyString,
     decidedAt: FindingObservationSchema,
   }).strict().optional(),
-  revision: z.number().int().positive().optional(),
+  revision: z.number().int().positive(),
   provisional: FindingProvisionalMetadataSchema.optional(),
   rejectedObservations: z.array(z.object({
     rawFindingId: nonEmptyString,
@@ -219,6 +266,7 @@ export const FindingLedgerEntrySchema = z.object({
 interface RawFindingRelationFields {
   relation: RawFindingRelation;
   targetFindingId?: string;
+  targetPrecondition?: FindingMutationPrecondition;
 }
 
 /**
@@ -228,6 +276,7 @@ interface RawFindingRelationFields {
 function validateRawFindingRelation<T extends RawFindingRelationFields>(
   value: T,
   ctx: z.RefinementCtx,
+  requireEnginePrecondition: boolean,
 ): void {
   const relation = value.relation;
   if (relation === 'new' && value.targetFindingId !== undefined) {
@@ -235,6 +284,22 @@ function validateRawFindingRelation<T extends RawFindingRelationFields>(
   }
   if (relation !== 'new' && value.targetFindingId === undefined) {
     ctx.addIssue({ code: 'custom', message: `"${relation}" raw findings require targetFindingId`, path: ['targetFindingId'] });
+  }
+  if (!requireEnginePrecondition) {
+    return;
+  }
+  if (relation === 'new' && value.targetPrecondition !== undefined) {
+    ctx.addIssue({ code: 'custom', message: '"new" raw findings must not set targetPrecondition', path: ['targetPrecondition'] });
+  }
+  if (relation !== 'new' && value.targetPrecondition === undefined) {
+    ctx.addIssue({ code: 'custom', message: `"${relation}" raw findings require targetPrecondition`, path: ['targetPrecondition'] });
+  }
+  if (
+    value.targetFindingId !== undefined
+    && value.targetPrecondition !== undefined
+    && value.targetPrecondition.targetFindingId !== value.targetFindingId
+  ) {
+    ctx.addIssue({ code: 'custom', message: 'targetPrecondition must describe targetFindingId', path: ['targetPrecondition', 'targetFindingId'] });
   }
 }
 
@@ -252,12 +317,14 @@ const RawFindingFieldsSchema = z.object({
   suggestion: z.string().optional().transform((value) => (value ? value : undefined)),
   relation: z.enum(RAW_FINDING_RELATIONS),
   targetFindingId: nonEmptyString.optional(),
-  // typed evidence protocol（review-integrity protocol）。既存 v1 台帳の raw finding には
-  // 無いため optional — 欠損は「evidence なし」として扱う（migration 不要）。
+  targetPrecondition: FindingMutationPreconditionSchema.optional(),
+  // typed evidence protocol（review-integrity protocol）。欠損は「evidence なし」として扱う。
   evidence: RawFindingEvidenceSchema.optional(),
 }).strict();
 
-export const RawFindingSchema = RawFindingFieldsSchema.superRefine(validateRawFindingRelation);
+export const RawFindingSchema = RawFindingFieldsSchema.superRefine((value, ctx) => {
+  validateRawFindingRelation(value, ctx, true);
+});
 
 const ReviewerRawFindingFieldsSchema = z.object({
   rawFindingId: nonEmptyString,
@@ -276,7 +343,9 @@ const ReviewerRawFindingFieldsSchema = z.object({
   evidence: RawFindingEvidenceSchema.optional(),
 }).strict();
 
-export const ReviewerRawFindingSchema = ReviewerRawFindingFieldsSchema.superRefine(validateRawFindingRelation);
+export const ReviewerRawFindingSchema = ReviewerRawFindingFieldsSchema.superRefine((value, ctx) => {
+  validateRawFindingRelation(value, ctx, false);
+});
 
 export const FindingConflictAdjudicationOutcomeSchema = z.enum(FINDING_CONFLICT_ADJUDICATION_OUTCOMES);
 export const FindingConflictAdjudicationTransitionSchema = z.enum(FINDING_CONFLICT_ADJUDICATION_TRANSITIONS);
@@ -312,13 +381,6 @@ export const FindingLedgerConflictSchema = z.object({
 }).strict();
 
 /** 楽観的前提条件（CAS）。 */
-export const FindingMutationPreconditionSchema = z.object({
-  targetFindingId: nonEmptyString,
-  targetRevision: z.number().int().positive(),
-  targetStatus: FindingStatusSchema,
-  targetEvidenceHash: nonEmptyString,
-}).strict();
-
 /**
  * manager が ambiguous raw に返す「提案」。台帳操作そのものでは
  * ない。decision ごとの必須フィールドは AmbiguousInterpretationSchema の
@@ -367,39 +429,65 @@ export function toAmbiguousInterpretation(parsed: {
 }
 
 /** WAL に保存する検証済み提案。判別型を復元できる形で保存する。 */
-const StoredAmbiguousInterpretationSchema = z.object({
-  decision: z.enum(AMBIGUOUS_INTERPRETATION_DECISIONS),
-  rawFindingId: nonEmptyString,
-  proofId: nonEmptyString.optional(),
-  targetFindingId: nonEmptyString.optional(),
-  reason: nonEmptyString.optional(),
-}).strict().transform((value, ctx): AmbiguousInterpretation => {
-  const interpretation = toAmbiguousInterpretation(value);
-  if (interpretation === undefined) {
-    ctx.addIssue({ code: 'custom', message: `stored interpretation decision "${value.decision}" is missing its required field` });
-    return z.NEVER;
-  }
-  return interpretation;
-});
+const StoredAmbiguousInterpretationSchema: z.ZodType<AmbiguousInterpretation> = z.discriminatedUnion('decision', [
+  z.object({
+    decision: z.literal('create_independent'),
+    rawFindingId: nonEmptyString,
+  }).strict(),
+  z.object({
+    decision: z.literal('same_with_proof'),
+    rawFindingId: nonEmptyString,
+    proofId: nonEmptyString,
+  }).strict(),
+  z.object({
+    decision: z.literal('open_conflict'),
+    rawFindingId: nonEmptyString,
+    targetFindingId: nonEmptyString,
+  }).strict(),
+  z.object({
+    decision: z.literal('provisional'),
+    rawFindingId: nonEmptyString,
+    reason: nonEmptyString,
+  }).strict(),
+]);
 
-export const FindingInterpretationRecordSchema = z.object({
+const FindingInterpretationRecordBaseSchema = z.object({
   interpretationKey: nonEmptyString,
-  baseInterpretationKey: nonEmptyString.optional(),
-  attemptOrdinal: z.number().int().positive().optional(),
+  baseInterpretationKey: nonEmptyString,
+  attemptOrdinal: z.number().int().positive(),
   reviewerStableKey: nonEmptyString,
   lineageKey: nonEmptyString,
   candidateEvidenceHash: nonEmptyString,
-  policyVersion: z.literal(2),
-  stage: z.enum(INTERPRETATION_STAGES),
+  canonicalIntegrityDigest: z.string().regex(/^[0-9a-f]{64}$/),
   startedAt: FindingObservationSchema,
-  reservationToken: nonEmptyString.optional(),
   promptPreconditions: z.array(FindingMutationPreconditionSchema),
-  completedAt: FindingObservationSchema.optional(),
-  interruptedAt: FindingObservationSchema.optional(),
-  validatedDecision: StoredAmbiguousInterpretationSchema.optional(),
-  appliedAt: FindingObservationSchema.optional(),
-  applicationResult: z.enum(INTERPRETATION_APPLICATION_RESULTS).optional(),
-}).strict();
+});
+
+export const FindingInterpretationRecordSchema = z.discriminatedUnion('stage', [
+  FindingInterpretationRecordBaseSchema.extend({
+    stage: z.literal('interpretation_started'),
+    reservationToken: nonEmptyString,
+  }).strict(),
+  FindingInterpretationRecordBaseSchema.extend({
+    stage: z.literal('interpretation_interrupted'),
+    reservationToken: nonEmptyString,
+    interruptedAt: FindingObservationSchema,
+  }).strict(),
+  FindingInterpretationRecordBaseSchema.extend({
+    stage: z.literal('interpretation_completed'),
+    reservationToken: nonEmptyString,
+    completedAt: FindingObservationSchema,
+    validatedDecision: StoredAmbiguousInterpretationSchema,
+  }).strict(),
+  FindingInterpretationRecordBaseSchema.extend({
+    stage: z.literal('ledger_applied'),
+    reservationToken: nonEmptyString,
+    completedAt: FindingObservationSchema,
+    validatedDecision: StoredAmbiguousInterpretationSchema,
+    appliedAt: FindingObservationSchema,
+    applicationResult: z.enum(INTERPRETATION_APPLICATION_RESULTS),
+  }).strict(),
+]);
 
 /** ラウンド跨ぎの fixpoint 比較スナップショット。 */
 export const FindingLedgerFixpointSnapshotSchema = z.object({
@@ -415,39 +503,220 @@ export const FindingLedgerFixpointStateSchema = z.object({
 
 /** 有限停止予算のラウンド跨ぎ累積状態。roundsCompleted は roundMarkers.length から導出する（冪等な適用済み集合）。 */
 export const FindingLedgerStopBudgetStateSchema = z.object({
-  roundMarkers: z.array(nonEmptyString),
+  roundMarkers: BinarySortedUniqueStringSetSchema,
   firstRoundAt: Rfc3339TimestampSchema,
   exhausted: z.boolean(),
 }).strict();
 
 /** review-integrity 予算（review-integrity requirement）のラウンド跨ぎ累積状態。stopBudget と同形。 */
 export const FindingLedgerReviewIntegrityStateSchema = z.object({
-  roundMarkers: z.array(nonEmptyString),
+  roundMarkers: BinarySortedUniqueStringSetSchema,
   firstRoundAt: Rfc3339TimestampSchema,
   exhausted: z.boolean(),
 }).strict();
 
-export const FindingLedgerSchema = z.object({
+const FindingManagerValidationAttemptReportSchema = z.object({
+  attempt: z.number().int().positive(),
+  managerOutput: z.unknown(),
+  validationErrors: z.array(z.string()),
+}).strict();
+
+const RawAdmissionRejectionReportSchema = z.object({
+  rawFindingId: nonEmptyString,
+  location: z.string(),
+  reason: nonEmptyString,
+}).strict();
+
+const UnsupportedRawFindingReportSchema = z.object({
+  rawFindingId: nonEmptyString,
+  targetFindingId: nonEmptyString,
+  evidence: nonEmptyString,
+}).strict();
+
+const ReviewerOutputOverflowReportSchema = z.object({
+  reviewer: nonEmptyString,
+  reason: nonEmptyString,
+}).strict();
+
+const RawNormalizationAuditRecordSchema = z.object({
+  rawFindingId: nonEmptyString,
+  reviewer: nonEmptyString,
+  claimedRelation: z.string().optional(),
+  claimedTargetFindingId: z.string().optional(),
+  normalizedRelation: nonEmptyString,
+  wireTargetFindingId: z.string().optional(),
+  ambiguityCodes: z.array(nonEmptyString),
+  normalizations: z.array(z.enum([
+    'relation-normalized',
+    'target-dropped-from-wire',
+    'required-fields-missing',
+    'location-line-range-interpreted',
+    'location-not-applicable',
+  ])),
+}).strict();
+
+const LandingReportSchema = z.object({
+  kind: nonEmptyString,
+  stableKey: nonEmptyString,
+  reason: nonEmptyString,
+  sourceRawFindingIds: z.array(nonEmptyString),
+}).strict();
+
+const InterpretationStatsReportSchema = z.object({
+  ambiguousRawCount: z.number().int().nonnegative(),
+  managerCalls: z.number().int().nonnegative(),
+  estimatedInputTokens: z.number().int().nonnegative(),
+  estimatedOutputTokens: z.number().int().nonnegative(),
+  reusedCompletedDecisions: z.number().int().nonnegative(),
+  interruptedInterpretations: z.number().int().nonnegative(),
+  budgetExhaustedLineages: z.number().int().nonnegative(),
+}).strict();
+
+const RawFindingDispositionSchema = z.object({
+  rawFindingId: nonEmptyString,
+  outcome: z.enum(RAW_FINDING_DISPOSITION_OUTCOMES),
+  reason: nonEmptyString,
+}).strict();
+
+const InterpretationRecoveryOriginSettlementSchema = z.discriminatedUnion('outcome', [
+  z.object({
+    provisionalFindingId: nonEmptyString,
+    sourceRawFindingId: nonEmptyString,
+    outcome: z.literal('audit_only'),
+    failureKind: z.enum([
+      'source_missing',
+      'reviewer_provenance_missing',
+      'recovery_contract_mismatch',
+    ]),
+    reason: nonEmptyString,
+  }).strict(),
+  z.object({
+    provisionalFindingId: nonEmptyString,
+    sourceRawFindingId: nonEmptyString,
+    outcome: z.literal('stale'),
+    reason: nonEmptyString,
+  }).strict(),
+  z.object({
+    provisionalFindingId: nonEmptyString,
+    sourceRawFindingId: nonEmptyString,
+    outcome: z.literal('settled'),
+    targetFindingId: nonEmptyString,
+  }).strict(),
+  z.object({
+    provisionalFindingId: nonEmptyString,
+    sourceRawFindingId: nonEmptyString,
+    outcome: z.literal('retained'),
+  }).strict(),
+]);
+
+const FindingManagerValidationReportSchema = z.object({
   version: z.literal(1),
+  runId: nonEmptyString,
+  stepName: nonEmptyString,
+  retryCount: z.number().int().nonnegative(),
+  ledgerUpdated: z.boolean(),
+  finalErrors: z.array(z.string()),
+  attempts: z.array(FindingManagerValidationAttemptReportSchema),
+  rawAdmissionRejections: z.array(RawAdmissionRejectionReportSchema).optional(),
+  unsupportedRawFindings: z.array(UnsupportedRawFindingReportSchema).optional(),
+  reviewerOutputOverflows: z.array(ReviewerOutputOverflowReportSchema).optional(),
+  provisionalLandings: z.array(LandingReportSchema).optional(),
+  reviewerAnomalyLandings: z.array(LandingReportSchema).optional(),
+  rawNormalizations: z.array(RawNormalizationAuditRecordSchema).optional(),
+  interpretationStats: InterpretationStatsReportSchema.optional(),
+  relationClarifications: z.array(z.object({
+    reviewer: nonEmptyString,
+    flaggedRawFindingIds: z.array(nonEmptyString),
+  }).strict()).optional(),
+  rawFindingDispositions: z.array(RawFindingDispositionSchema).optional(),
+  interpretationRecoverySettlements: z.array(
+    InterpretationRecoveryOriginSettlementSchema,
+  ).optional(),
+}).strict();
+
+const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
+
+const FindingManagerCommitProjectionSchema = z.object({
+  nextId: z.number().int().positive(),
+  updatedAt: Rfc3339TimestampSchema,
+  findings: z.array(FindingLedgerEntrySchema),
+  rawFindings: z.array(RawFindingSchema),
+  conflicts: z.array(FindingLedgerConflictSchema),
+  interpretations: z.array(FindingInterpretationRecordSchema),
+  fixpoint: FindingLedgerFixpointStateSchema.optional(),
+  stopBudget: FindingLedgerStopBudgetStateSchema.optional(),
+  reviewerAnomalies: z.array(ReviewerAnomalyEntrySchema).optional(),
+  reviewIntegrity: FindingLedgerReviewIntegrityStateSchema.optional(),
+}).strict();
+
+const FindingManagerReportPublicationSchema = z.object({
+  publicationId: Sha256Schema,
+  domainId: Sha256Schema,
+  originRunId: nonEmptyString,
+  destinationRunId: nonEmptyString,
+  fileName: nonEmptyString,
+  contentSha256: Sha256Schema,
+  report: FindingManagerValidationReportSchema,
+}).strict();
+
+const FindingManagerPendingCommitSchema = z.object({
+  roundMarker: nonEmptyString,
+  publication: FindingManagerReportPublicationSchema,
+  completed: FindingManagerCommitProjectionSchema,
+}).strict();
+
+export const FindingLedgerSchema = z.object({
   workflowName: nonEmptyString,
   nextId: z.number().int().positive(),
   updatedAt: Rfc3339TimestampSchema,
   findings: z.array(FindingLedgerEntrySchema),
   rawFindings: z.array(RawFindingSchema),
   conflicts: z.array(FindingLedgerConflictSchema),
-  interpretations: z.array(FindingInterpretationRecordSchema).optional(),
+  interpretations: z.array(FindingInterpretationRecordSchema),
   fixpoint: FindingLedgerFixpointStateSchema.optional(),
   stopBudget: FindingLedgerStopBudgetStateSchema.optional(),
-  // 二系統台帳（review-integrity protocol）の review-integrity 側。optional なので既存
-  // v1 ledger は migration なしで読める。
+  // 二系統台帳（review-integrity protocol）の review-integrity 側。
   reviewerAnomalies: z.array(ReviewerAnomalyEntrySchema).optional(),
   // review-integrity 予算（review-integrity requirement）。optional。
   reviewIntegrity: FindingLedgerReviewIntegrityStateSchema.optional(),
-}).strict();
+  pendingManagerCommit: FindingManagerPendingCommitSchema.optional(),
+}).strict().superRefine((ledger, ctx) => {
+  const addProjectionIssues = (
+    projection: z.infer<typeof FindingManagerCommitProjectionSchema>,
+    pathPrefix: Array<string | number>,
+  ): void => {
+    for (const violation of collectFindingLedgerProjectionInvariantViolations(projection)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: [...pathPrefix, ...violation.path],
+        message: violation.message,
+      });
+    }
+  };
+  addProjectionIssues(ledger, []);
+  if (ledger.pendingManagerCommit !== undefined) {
+    const pending = ledger.pendingManagerCommit;
+    if (ledger.stopBudget?.roundMarkers.includes(pending.roundMarker) === true) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['pendingManagerCommit', 'roundMarker'],
+        message: 'Pending manager round marker must not also be completed',
+      });
+    }
+    if (pending.completed.stopBudget?.roundMarkers.includes(pending.roundMarker) !== true) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['pendingManagerCommit', 'completed', 'stopBudget', 'roundMarkers'],
+        message: 'Pending manager completed stop budget must include its round marker',
+      });
+    }
+    addProjectionIssues(pending.completed, ['pendingManagerCommit', 'completed']);
+  }
+});
 
 /**
  * findings-manager の ambiguous 解釈フェーズが返す structured output の JSON
- * schema。提案（proposal）だけを返させる — 台帳操作の8配列は返させない。
+ * schema。提案（proposal）だけを返させる — 台帳操作の配列は返させない。
  */
 export const AmbiguousInterpretationsOutputJsonSchema = {
   type: 'object',
@@ -521,7 +790,7 @@ export const FindingManagerOutputSchema = z.object({
     evidence: nonEmptyString,
   }).strict()),
   conflicts: z.array(z.object({
-    findingIds: z.array(nonEmptyString).optional().default([]),
+    findingIds: z.array(nonEmptyString),
     rawFindingIds: z.array(nonEmptyString),
     description: nonEmptyString,
   }).strict()),
@@ -533,18 +802,16 @@ export const FindingManagerOutputSchema = z.object({
     findingId: nonEmptyString,
     reason: nonEmptyString,
     evidence: nonEmptyString,
-  }).strict()).optional().default([]),
+  }).strict()),
   disputeNotes: z.array(z.object({
     findingId: nonEmptyString,
     reason: nonEmptyString,
     evidence: nonEmptyString,
-  }).strict()).optional().default([]),
-  // 追加的（既存台帳 v1 の内部表現に対して後方互換）。既存呼び出しはこの2配列を
-  // 渡さないことがあるため default([]) で補う。
+  }).strict()),
   invalidatedFindings: z.array(z.object({
     findingId: nonEmptyString,
     evidence: nonEmptyString,
-  }).strict()).optional().default([]),
+  }).strict()),
   duplicateFindings: z.array(z.object({
     canonicalFindingId: nonEmptyString,
     // 決定スキーマ側（FindingManagerDuplicateDecisionSchema）と対称に空配列を
@@ -552,24 +819,26 @@ export const FindingManagerOutputSchema = z.object({
     // canonical だけが transitionedFindingIds に載る等の副作用だけが残る。
     duplicateFindingIds: z.array(nonEmptyString).min(1),
     evidence: nonEmptyString,
-  }).strict()).optional().default([]),
+  }).strict()),
   dismissedFindings: z.array(z.object({
     findingId: nonEmptyString,
     basis: z.enum(FINDING_DISMISSAL_BASES),
     reason: nonEmptyString,
-  }).strict()).optional().default([]),
+  }).strict()),
 }).strict();
 
-// LLM に返させるのは判断だけ。8配列への組み立てと不変条件の強制は
+// LLM に返させるのは判断だけ。アクション配列への組み立てと不変条件の強制は
 // decision-assembly.ts（コード側）が行う。findingId は same/resolved/reopened/
 // conflict でのみ必須なため、strict 様式の制約上は required に含めつつ、
 // 該当なし（new/unsupported）は空文字で埋めさせて未指定として扱う。
 export const FindingManagerRawDecisionSchema = z.object({
   rawFindingId: nonEmptyString,
   decision: z.enum(RAW_DECISION_KINDS),
-  findingId: z.string().optional().transform((value) => (value ? value : undefined)),
+  findingId: z.string().optional(),
   evidence: nonEmptyString,
-}).strict();
+}).strict().transform(({ findingId, ...decision }) => (
+  findingId ? { ...decision, findingId } : decision
+));
 
 export const FindingManagerDisputeDecisionSchema = z.object({
   findingId: nonEmptyString,
@@ -607,9 +876,9 @@ export const FindingManagerDecisionsSchema = z.object({
   rawDecisions: z.array(FindingManagerRawDecisionSchema),
   disputeDecisions: z.array(FindingManagerDisputeDecisionSchema),
   conflictDecisions: z.array(FindingManagerConflictDecisionSchema),
-  invalidateDecisions: z.array(FindingManagerInvalidateDecisionSchema).optional().default([]),
-  duplicateDecisions: z.array(FindingManagerDuplicateDecisionSchema).optional().default([]),
-  dismissDecisions: z.array(FindingManagerDismissDecisionSchema).optional().default([]),
+  invalidateDecisions: z.array(FindingManagerInvalidateDecisionSchema),
+  duplicateDecisions: z.array(FindingManagerDuplicateDecisionSchema),
+  dismissDecisions: z.array(FindingManagerDismissDecisionSchema),
 }).strict();
 
 export const FindingManagerOutputJsonSchema = {
@@ -762,8 +1031,7 @@ export const FindingManagerOutputJsonSchema = {
 } as const;
 
 /**
- * findings-manager が実際に返す structured output。FindingManagerOutputJsonSchema
- * （8配列を自力で組み立てる旧形式、台帳の内部表現として残置）とは異なり、
+ * findings-manager が実際に返す structured output。
  * raw finding 1件・disputed finding 1件・conflict 1件ごとの「判断」だけを問う。
  * 組み立てと不変条件の強制は decision-assembly.ts が行うため、弱いモデルでも
  * 出力すべき形が単純になる。
@@ -950,7 +1218,7 @@ export const RawFindingsOutputJsonSchema = {
           rawFindingId: { type: 'string', minLength: 1 },
           relation: {
             enum: RAW_FINDING_RELATIONS,
-            description: 'This finding\'s relationship to the ledger. new = a fresh observation with no target (targetFindingId must be empty). persists = you still observe an existing open finding (targetFindingId required). reopened = a previously resolved/waived/dismissed finding reappeared (targetFindingId required). resolution_confirmation = you verified an open finding is fixed (targetFindingId required).',
+            description: 'This finding\'s relationship to the ledger. new = a fresh observation with no target (targetFindingId must be empty). persists = you still observe an existing open finding (targetFindingId required). reopened = a previously resolved/waived/dismissed finding reappeared (targetFindingId required). resolution_confirmation = you verified an open finding is fixed (targetFindingId required) and MUST provide evidenceKind source_quote, one contiguous file:line or file:startLine-endLine location, an exact complete current verbatimExcerpt, and the current snapshotId.',
           },
           targetFindingId: {
             type: 'string',
@@ -965,7 +1233,7 @@ export const RawFindingsOutputJsonSchema = {
           title: { type: 'string', minLength: 1 },
           location: {
             type: 'string',
-            description: 'file:line or file:startLine-endLine evidence. Empty string only when evidenceKind is locationless (a claim that something is ABSENT, e.g. a missing file or missing wiring — there is no single site to cite).',
+            description: 'Exactly one contiguous file:line or file:startLine-endLine evidence range. Comma-separated or multiple ranges are invalid. Empty string only when evidenceKind is locationless (a claim that something is ABSENT, e.g. a missing file or missing wiring — there is no single site to cite). resolution_confirmation never permits an empty or locationless value.',
           },
           evidenceKind: {
             enum: RAW_FINDING_EVIDENCE_KINDS,
@@ -973,11 +1241,11 @@ export const RawFindingsOutputJsonSchema = {
           },
           verbatimExcerpt: {
             type: 'string',
-            description: 'Required (non-empty) when evidenceKind is source_quote: the EXACT source text at location, copied verbatim from the file — the engine byte-compares it against the current file content and rejects any mismatch, so do not summarize, translate, or reformat it. Empty string when evidenceKind is locationless.',
+            description: 'Required (non-empty) when evidenceKind is source_quote: the EXACT complete current source text at location, copied verbatim from the file — the engine byte-compares it against the current file content and rejects any mismatch, so do not summarize, translate, omit lines, or reformat it. Empty string when evidenceKind is locationless.',
           },
           snapshotId: {
             type: 'string',
-            description: 'Required (non-empty) when evidenceKind is source_quote: copy the exact "Current review snapshot" value given to you elsewhere in this prompt, unchanged. Empty string when evidenceKind is locationless.',
+            description: 'Required (non-empty) when evidenceKind is source_quote: copy the exact current "Current review snapshot" value given to you elsewhere in this prompt, unchanged. Empty string when evidenceKind is locationless. resolution_confirmation always requires the current non-empty snapshotId.',
           },
           description: { type: 'string', minLength: 1 },
           suggestion: {
@@ -1029,16 +1297,12 @@ export function createRawFindingsOutputJsonSchema(reviewScopeSnapshotId: string)
  * - provider へ渡すのは strict 版のみ。
  * - schema が生成を拘束しない formless/劣化経路（opencode+ollama 等）の出力は
  *   こちらで検証する。
- * - typed evidence protocol（review-integrity protocol）の evidenceKind/verbatimExcerpt/
- *   snapshotId も同じ理由で required から外す。schema が生成を拘束できない
- *   経路のモデルがこれらを省略しても、structured output 全体を無効にしては
- *   ならない — 欠損は intake の canonicalization が「evidence なし」として
- *   寛容に扱い、location 付き claim なら reviewer anomaly へ隔離する
- *   （manager-runner.ts）。ここで丸ごと reject すると、台帳へすら届かず
- *   その安全な縮退経路自体が機能しない。
+ * - provider item は StepExecutor の未信頼 intake で data descriptor だけから
+ *   射影される。認識できない値は item 内の欠損へ落とし、ここでは required を
+ *   課さない。欠損は canonicalization が item 単位の ambiguity として隔離する。
+ *   1件の不正 item で structured output 全体を無効にすると、台帳へすら届かず
+ *   安全な provisional 経路が機能しない。
  */
-const LENIENT_RAW_FINDING_EVIDENCE_FIELDS = ['evidenceKind', 'verbatimExcerpt', 'snapshotId'] as const;
-
 export const RawFindingsOutputValidationJsonSchema = {
   ...RawFindingsOutputJsonSchema,
   properties: {
@@ -1046,9 +1310,7 @@ export const RawFindingsOutputValidationJsonSchema = {
       ...RawFindingsOutputJsonSchema.properties.rawFindings,
       items: {
         ...RawFindingsOutputJsonSchema.properties.rawFindings.items,
-        required: RawFindingsOutputJsonSchema.properties.rawFindings.items.required.filter(
-          (key: string) => !(LENIENT_RAW_FINDING_EVIDENCE_FIELDS as readonly string[]).includes(key),
-        ),
+        required: [],
       },
     },
   },

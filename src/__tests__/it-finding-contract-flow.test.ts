@@ -6,6 +6,8 @@ import { buildFindingsRuleContext as buildFindingsRuleContextWithCwd } from '../
 import { reconcileFindingLedger } from '../core/workflow/findings/reconciler.js';
 import type { FindingLedger } from '../core/workflow/findings/types.js';
 import type { WorkflowState } from '../core/models/types.js';
+import { computeLineageKey, computeReviewerStableKey } from '../core/workflow/findings/raw-canonicalization.js';
+import { storedRawReconcileProvenance } from './helpers/finding-integrity.js';
 
 function buildFindingsRuleContext(ledger: FindingLedger) {
   return buildFindingsRuleContextWithCwd(ledger, process.cwd());
@@ -13,12 +15,12 @@ function buildFindingsRuleContext(ledger: FindingLedger) {
 
 function makeEmptyLedger(): FindingLedger {
   return {
-    version: 1,
     workflowName: 'peer-review',
     nextId: 1,
     findings: [],
     rawFindings: [],
     conflicts: [],
+    interpretations: [],
     updatedAt: '2026-06-13T00:00:00.000Z',
   };
 }
@@ -37,6 +39,7 @@ function makeLedgerWithOptionalFields(): FindingLedger {
         id: 'F-0001',
         status: 'open',
         lifecycle: 'new',
+        revision: 1,
         severity: 'medium',
         title: 'Missing optional fields',
         reviewers: ['reviewer'],
@@ -48,6 +51,7 @@ function makeLedgerWithOptionalFields(): FindingLedger {
         id: 'F-0002',
         status: 'open',
         lifecycle: 'new',
+        revision: 1,
         severity: 'medium',
         title: 'Populated optional fields',
         location: 'value',
@@ -150,21 +154,20 @@ describe('Finding Contract integration flow', () => {
         },
       ],
     }, '/tmp/project');
+    const rawFinding = {
+      rawFindingId: 'raw-security-1',
+      familyTag: 'security',
+      stepName: 'security-review',
+      reviewer: 'security-reviewer',
+      severity: 'high' as const,
+      title: 'Secret is logged',
+      location: 'src/secret.ts:12',
+      description: 'The code logs a token.',
+      suggestion: 'Mask the token before logging.',
+    };
     const ledger = reconcileFindingLedger({
       previousLedger: makeEmptyLedger(),
-      rawFindings: [
-        {
-          rawFindingId: 'raw-security-1',
-          familyTag: 'security',
-          stepName: 'security-review',
-          reviewer: 'security-reviewer',
-          severity: 'high',
-          title: 'Secret is logged',
-          location: 'src/secret.ts:12',
-          description: 'The code logs a token.',
-          suggestion: 'Mask the token before logging.',
-        },
-      ],
+      rawFindings: [rawFinding],
       managerOutput: {
         matches: [],
         newFindings: [
@@ -182,7 +185,27 @@ describe('Finding Contract integration flow', () => {
         disputeNotes: [],
         invalidatedFindings: [],
         duplicateFindings: [],
+        dismissedFindings: [],
       },
+      provisionalFindings: [],
+      rawFindingDispositions: [],
+      rawProvenanceByRawFindingId: new Map([[
+        rawFinding.rawFindingId,
+        storedRawReconcileProvenance(
+          rawFinding,
+          computeReviewerStableKey({
+            workflowName: 'peer-review',
+            callNamespace: '',
+            parentStepName: 'peer-review',
+            reviewerPersonaKey: rawFinding.reviewer,
+          }),
+          computeLineageKey({
+            location: rawFinding.location,
+            title: rawFinding.title,
+            familyTag: rawFinding.familyTag,
+          }),
+        ),
+      ]]),
       context: {
         workflowName: 'peer-review',
         stepName: 'peer-review',

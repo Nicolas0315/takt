@@ -52,14 +52,11 @@ import { createFindingLedgerStore, type FindingLedgerStore } from '../findings/s
 import type { FindingLedger, FindingLedgerEntry, ReviewerAnomalyEntry } from '../findings/types.js';
 import { injectFindingConflictAdjudicationStep } from '../findings/adjudication-step.js';
 import { createFindingConflictAdjudicationRunner } from '../findings/adjudication-runner.js';
+import { rebindPendingManagerPublicationAtBootstrap } from '../findings/manager-commit.js';
 import { ERROR_MESSAGES } from '../constants.js';
 import { inheritReviewReports, writeReviewReportInheritanceDiagnostic } from '../report-inheritance.js';
 import {
-  resolveCurrentReviewReportPathsWithDiagnostics,
-} from '../instruction/report-handles.js';
-import {
   resolveInheritedReviewReportNamesWithDiagnostics,
-  type InheritedReviewReportNamesResult,
 } from '../review-report-discovery.js';
 import { getRemoteRepositoryIdentifiers } from '../../../infra/git/detect.js';
 const log = createLogger('workflow-engine');
@@ -107,6 +104,7 @@ export class WorkflowEngine extends EventEmitter {
   private readonly resumeStackPrefix: WorkflowResumePointEntry[];
   private readonly findingLedgerStore?: FindingLedgerStore;
   private readonly findingContract?: FindingContractConfig;
+  private findingContractBootstrap?: Promise<void>;
 
   private readonly optionsBuilder: WorkflowEngineServices['optionsBuilder'];
   private readonly stepExecutor: WorkflowEngineServices['stepExecutor'];
@@ -118,8 +116,6 @@ export class WorkflowEngine extends EventEmitter {
   private readonly workflowCallRunner: WorkflowEngineServices['workflowCallRunner'];
   private readonly stepCoordinator: WorkflowEngineStepCoordinator;
   private readonly structuredCaller: StructuredCaller;
-  private readonly inheritedReviewReports: Array<{ reportName: string; path: string }> = [];
-  private resolvedReviewReportNames: InheritedReviewReportNamesResult | undefined;
 
   constructor(config: WorkflowConfig, cwd: string, task: string, options: WorkflowEngineOptions) {
     super();
@@ -225,9 +221,12 @@ export class WorkflowEngine extends EventEmitter {
         workflowName: this.config.name,
         ledgerPath: this.findingContract.ledgerPath,
         rawFindingsPath: this.findingContract.rawFindingsPath,
+        ...(this.options.resumeSource?.sourceRunSlug === undefined
+          ? {}
+          : { trustedResumeSourceRunId: this.options.resumeSource.sourceRunSlug }),
       });
       this.refreshFindingsState();
-      this.findingLedgerStore.createRunCopy();
+      this.findingLedgerStore.saveLedgerSnapshot();
     }
     const services = createWorkflowEngineServices({
       config: this.config,
@@ -254,7 +253,6 @@ export class WorkflowEngine extends EventEmitter {
       updatePersonaSession: this.updatePersonaSession.bind(this),
       resolveNextStepFromDone: this.resolveNextStepFromDone.bind(this),
       resetCycleDetector: () => this.cycleDetector.reset(),
-      getInheritedPeerReportPaths: (step) => this.getReviewReportPaths(step),
       emitEvent: (event, ...args) => this.emit(event as never, ...args as []),
       createEngine: (nestedConfig, nestedCwd, nestedTask, nestedOptions): WorkflowCallChildEngine => {
         const nestedEngine = new WorkflowEngine(nestedConfig, nestedCwd, nestedTask, nestedOptions);
@@ -304,8 +302,10 @@ export class WorkflowEngine extends EventEmitter {
         })
         : undefined,
     });
-    workflowRunExecutors.set(this, () => this.runWithSystemCleanup(
-      () => runWithWorkflowSpan(
+    workflowRunExecutors.set(this, async () => {
+      await this.initializeFindingContract();
+      return this.runWithSystemCleanup(
+        () => runWithWorkflowSpan(
         this.buildWorkflowSpanParams('full'),
         () => runWorkflowToCompletion({
           state: this.state,
@@ -360,8 +360,9 @@ export class WorkflowEngine extends EventEmitter {
         }),
         (error) => this.buildWorkflowErrorSpanOutcome(error),
       ),
-      () => true,
-    ));
+        () => true,
+      );
+    });
 
     log.debug('WorkflowEngine initialized', {
       workflow: config.name,
@@ -381,6 +382,17 @@ export class WorkflowEngine extends EventEmitter {
       return;
     }
     this.state.findings = buildFindingsRuleContext(this.findingLedgerStore.loadLedger(), this.cwd);
+  }
+
+  private async initializeFindingContract(): Promise<void> {
+    if (this.findingLedgerStore === undefined) {
+      return;
+    }
+    this.findingContractBootstrap ??= rebindPendingManagerPublicationAtBootstrap(
+      this.findingLedgerStore,
+    );
+    await this.findingContractBootstrap;
+    this.refreshFindingsState();
   }
 
   /** Open findings still carrying provisional metadata. */
@@ -490,7 +502,14 @@ export class WorkflowEngine extends EventEmitter {
       return;
     }
     try {
-      const reportNameResult = this.resolveReviewReportNames(currentStep);
+      const reportNameResult = resolveInheritedReviewReportNamesWithDiagnostics({
+        step: currentStep,
+        workflow: this.config,
+        workflowCallResolver: this.options.workflowCallResolver,
+        projectCwd: this.projectCwd,
+        lookupCwd: this.cwd,
+        resumeStackPrefix: this.resumeStackPrefix,
+      });
       const result = inheritReviewReports({
         cwd: this.cwd,
         sourceRunSlug: resumeSource.sourceRunSlug,
@@ -499,10 +518,6 @@ export class WorkflowEngine extends EventEmitter {
         reviewReportNames: reportNameResult.reportNames,
         discoveryFailures: reportNameResult.failures,
       });
-      this.inheritedReviewReports.push(...result.copied.map((entry) => ({
-        reportName: entry.reportName,
-        path: entry.targetPath,
-      })));
       try {
         writeReviewReportInheritanceDiagnostic({
           cwd: this.cwd,
@@ -556,54 +571,6 @@ export class WorkflowEngine extends EventEmitter {
     return entry !== undefined
       && entry.step === step.name
       && workflowEntryMatchesWorkflow(entry, this.config);
-  }
-
-  private getReviewReportPaths(step: WorkflowStep): readonly string[] {
-    if (step.name !== FIX_STEP_NAME) {
-      return [];
-    }
-    try {
-      const reportNameResult = this.resolveReviewReportNames(step);
-      const inheritedReportPaths = new Set(this.inheritedReviewReports.map((entry) => entry.path));
-      const scanResult = resolveCurrentReviewReportPathsWithDiagnostics(
-        this.runPaths.reportsAbs,
-        reportNameResult.reportNames,
-        inheritedReportPaths,
-      );
-      if (scanResult.scanFailure) {
-        log.warn('Current review report scan completed with fallback', { error: scanResult.scanFailure });
-      }
-      if (reportNameResult.failures.length > 0) {
-        log.warn('Current review report discovery completed with fallback', {
-          failures: reportNameResult.failures,
-        });
-      }
-      const currentReports = scanResult.paths;
-      const currentReportNames = new Set(currentReports.map((entry) => entry.reportName));
-      return [
-        ...currentReports.map((entry) => entry.path),
-        ...this.inheritedReviewReports
-          .filter((entry) => !currentReportNames.has(entry.reportName))
-          .map((entry) => entry.path),
-      ];
-    } catch (error) {
-      log.warn('Failed to resolve current review report paths', { error: getErrorMessage(error) });
-      return this.inheritedReviewReports.map((entry) => entry.path);
-    }
-  }
-
-  private resolveReviewReportNames(step: WorkflowStep): InheritedReviewReportNamesResult {
-    if (!this.resolvedReviewReportNames) {
-      this.resolvedReviewReportNames = resolveInheritedReviewReportNamesWithDiagnostics({
-        step,
-        workflow: this.config,
-        workflowCallResolver: this.options.workflowCallResolver,
-        projectCwd: this.projectCwd,
-        lookupCwd: this.cwd,
-        resumeStackPrefix: this.resumeStackPrefix,
-      });
-    }
-    return this.resolvedReviewReportNames;
   }
 
   private buildResumePoint(step: WorkflowStep, iteration: number): WorkflowResumePoint {
@@ -761,6 +728,7 @@ export class WorkflowEngine extends EventEmitter {
     returnValue?: string;
     loopDetected?: boolean;
   }> {
+    await this.initializeFindingContract();
     return this.runWithSystemCleanup(
       () => runWithWorkflowSpan(
         this.buildWorkflowSpanParams('single_iteration'),

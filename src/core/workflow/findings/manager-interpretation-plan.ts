@@ -1,4 +1,5 @@
 import {
+  canonicalRawIntegrityDigestOf,
   computeRawEvidenceHash,
   detectRawFindingAmbiguities,
 } from './raw-canonicalization.js';
@@ -13,7 +14,10 @@ import type {
   DeterministicSameProof,
   FindingLedger,
 } from './types.js';
-import type { CanonicalIntakeItem } from './manager-admission.js';
+import {
+  assertCanonicalIntakeRecoveryStates,
+  type CanonicalIntakeItem,
+} from './manager-admission.js';
 import { provisionalSpecForRaw } from './manager-provisional.js';
 import type { LadderResult, LadderTarget } from './manager-contracts.js';
 import type { beginInterpretations } from './interpretation-wal.js';
@@ -21,6 +25,8 @@ import type { beginInterpretations } from './interpretation-wal.js';
 export function emptyLadderResult(ambiguousRawCount: number): LadderResult {
   return {
     interpretationReservations: new Map(),
+    interpretationIntegrityDigests: new Map(),
+    integrityStaleInterpretationKeys: new Set(),
     deferredRawFindingIds: new Set(),
     pendingSameWithProof: [],
     pendingIndependentNew: [],
@@ -28,7 +34,7 @@ export function emptyLadderResult(ambiguousRawCount: number): LadderResult {
     provisionalSpecs: [],
     provisionalByInterpretationKey: new Map(),
     pendingAppliedReattach: [],
-    recoveryProvisionalInterpretationKeys: new Set(),
+    recoveryProvisionalOrigins: new Map(),
     stats: {
       ambiguousRawCount,
       managerCalls: 0,
@@ -59,31 +65,41 @@ export function classifyInitialLadderTargets(input: {
   const proofsByRawId = new Map(
     [...issuedProofs].filter(([rawFindingId]) => !input.provisionalOnlyRawFindingIds.has(rawFindingId)),
   );
+  assertCanonicalIntakeRecoveryStates(input.tainted, input.previousLedger);
   const classified = input.tainted.reduce<Omit<InitialLadderPlan, 'proofsByRawId'>>((plan, item) => {
-    const recoveryEvidenceIsRecorded = item.recoveryOrigin !== undefined
-      && input.previousLedger.findings.some((finding) => (
-        finding.id === item.recoveryOrigin?.provisionalFindingId
-        && finding.provisional?.sourceRawFindingIds.some((rawFindingId) => (
-          input.previousLedger.rawFindings.some((raw) => (
-            raw.rawFindingId === rawFindingId
-            && computeRawEvidenceHash(raw) === item.canonical.evidenceHash
-          ))
-        )) === true
+    const recoveryEvidenceIsRecorded = item.recoveryOrigins !== undefined
+      && item.recoveryOrigins.every((origin) => (
+        input.previousLedger.findings.some((finding) => (
+          finding.id === origin.provisionalFindingId
+          && finding.provisional?.sourceRawFindingIds.some((rawFindingId) => (
+            input.previousLedger.rawFindings.some((raw) => (
+              raw.rawFindingId === rawFindingId
+              && computeRawEvidenceHash(raw) === item.canonical.evidenceHash
+            ))
+          )) === true
+        ))
       ));
     const attempt = resolveInterpretationAttempt({
       ledger: input.previousLedger,
       reviewerStableKey: item.canonical.reviewerStableKey,
       lineageKey: item.canonical.lineageKey,
       candidateEvidenceHash: item.canonical.evidenceHash,
+      canonicalIntegrityDigest: canonicalRawIntegrityDigestOf(item.canonical),
     });
-    const target: LadderTarget = {
-      canonical: item.canonical,
-      wire: item.wire,
-      ...attempt,
-      ...(item.interpretationRecoveryAttempt === true ? { interpretationRecoveryAttempt: true } : {}),
-      ...(item.recoveryOrigin !== undefined ? { recoveryOrigin: item.recoveryOrigin } : {}),
-    };
-    const proof = item.recoveryOrigin === undefined || recoveryEvidenceIsRecorded
+    const target: LadderTarget = item.interpretationRecoveryAttempt === true
+      ? {
+          canonical: item.canonical,
+          wire: item.wire,
+          ...attempt,
+          interpretationRecoveryAttempt: true,
+          recoveryOrigins: item.recoveryOrigins,
+        }
+      : {
+          canonical: item.canonical,
+          wire: item.wire,
+          ...attempt,
+        };
+    const proof = item.recoveryOrigins === undefined || recoveryEvidenceIsRecorded
       ? proofsByRawId.get(item.canonical.rawFindingId)
       : undefined;
     if (proof !== undefined) {
@@ -98,14 +114,19 @@ export function classifyInitialLadderTargets(input: {
     if (item.canonical.coherence === 'coherent' && item.canonical.relation === 'new') {
       const ambiguity = detectRawFindingAmbiguities(item.canonical, input.previousLedger);
       if (ambiguity.codes.length === 0) {
+        const pendingIndependent = target.interpretationRecoveryAttempt === true
+          ? {
+              wire: item.wire,
+              canonical: item.canonical,
+              interpretationRecoveryAttempt: true as const,
+              recoveryOrigins: target.recoveryOrigins,
+            }
+          : { wire: item.wire, canonical: item.canonical };
         return {
           ...plan,
           result: {
             ...plan.result,
-            pendingIndependentNew: [...plan.result.pendingIndependentNew, {
-              wire: item.wire,
-              ...(target.recoveryOrigin !== undefined ? { recoveryOrigin: target.recoveryOrigin } : {}),
-            }],
+            pendingIndependentNew: [...plan.result.pendingIndependentNew, pendingIndependent],
           },
         };
       }
@@ -156,6 +177,26 @@ export function classifyInterpretationWal(input: {
             target.wire.rawFindingId,
           ]),
         },
+      };
+    }
+    if (input.begin.integrityStaleKeys.has(key)) {
+      return {
+        ...plan,
+        result: {
+          ...plan.result,
+          integrityStaleInterpretationKeys: new Set([
+            ...plan.result.integrityStaleInterpretationKeys,
+            key,
+          ]),
+        },
+        decidedByKey: new Map([
+          ...plan.decidedByKey,
+          [key, {
+            decision: 'provisional',
+            rawFindingId: target.canonical.rawFindingId,
+            reason: 'A prior WAL decision has a different canonical integrity digest; the observation is stale and was kept provisional',
+          }],
+        ]),
       };
     }
     if (input.begin.appliedByKey.has(key)) {
@@ -236,13 +277,22 @@ export function applyInterpretationDecisions(input: {
       }
       : rawDecision;
     if (decision.decision === 'create_independent') {
+      const pendingIndependent = target.interpretationRecoveryAttempt === true
+        ? {
+            wire: target.wire,
+            canonical: target.canonical,
+            viaInterpretationKey: key,
+            interpretationRecoveryAttempt: true as const,
+            recoveryOrigins: target.recoveryOrigins,
+          }
+        : {
+            wire: target.wire,
+            canonical: target.canonical,
+            viaInterpretationKey: key,
+          };
       return {
         ...result,
-        pendingIndependentNew: [...result.pendingIndependentNew, {
-          wire: target.wire,
-          viaInterpretationKey: key,
-          ...(target.recoveryOrigin !== undefined ? { recoveryOrigin: target.recoveryOrigin } : {}),
-        }],
+        pendingIndependentNew: [...result.pendingIndependentNew, pendingIndependent],
       };
     }
     if (decision.decision === 'open_conflict') {
@@ -273,16 +323,11 @@ export function applyInterpretationDecisions(input: {
     });
     return {
       ...result,
-      provisionalSpecs: target.interpretationRecoveryAttempt === true
-        ? result.provisionalSpecs
-        : [...result.provisionalSpecs, spec],
+      provisionalSpecs: [...result.provisionalSpecs, spec],
       provisionalByInterpretationKey: new Map([...result.provisionalByInterpretationKey, [key, spec]]),
-      recoveryProvisionalInterpretationKeys: target.interpretationRecoveryAttempt === true
-        ? new Set([
-            ...result.recoveryProvisionalInterpretationKeys,
-            key,
-          ])
-        : result.recoveryProvisionalInterpretationKeys,
+      recoveryProvisionalOrigins: target.recoveryOrigins === undefined
+        ? result.recoveryProvisionalOrigins
+        : new Map([...result.recoveryProvisionalOrigins, [key, target.recoveryOrigins]]),
     };
   }, input.result);
 }

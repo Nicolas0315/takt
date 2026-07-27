@@ -35,20 +35,18 @@ export async function runManagerDecisionStage(params: {
   previousLedger: FindingLedger;
   admission: RawAdmissionEvaluation;
   managerStep: AgentWorkflowStep;
-  ledgerCopyPath: string;
-  rawFindingsPath: string;
   observation: FindingObservation;
   reviewScopeSnapshotId: string;
+  stopBudgetRoundMarker: string;
 }): Promise<ManagerDecisionStageResult> {
   const {
     input,
     previousLedger,
     admission,
     managerStep,
-    ledgerCopyPath,
-    rawFindingsPath,
     observation,
     reviewScopeSnapshotId,
+    stopBudgetRoundMarker,
   } = params;
   const {
     cleanWire,
@@ -59,7 +57,6 @@ export async function runManagerDecisionStage(params: {
     runInput: input,
     previousLedger,
     managerStep,
-    ledgerCopyPath,
     observation,
     reviewScopeSnapshotId,
   });
@@ -86,8 +83,6 @@ export async function runManagerDecisionStage(params: {
       const instruction = buildManagerInstruction({
         contract: input.contract,
         previousLedger,
-        ledgerCopyPath,
-        rawFindingsPath,
         residualRawFindings: mechanical.residualRawFindings,
         mechanicallyClassifiedCount: cleanWire.length - mechanical.residualRawFindings.length,
         priorStepResponseText: input.priorStepResponseText,
@@ -103,7 +98,7 @@ export async function runManagerDecisionStage(params: {
         });
         decisions = parseManagerDecisions(response);
       } catch (error) {
-        // manager の壊れた応答で run を殺さない（v2 の中核不変条件）。残余 raw は
+        // manager の壊れた応答で run を殺さない。残余 raw は
         // 全て provisional へ着地し、機械分類の確定分だけを適用する。
         const message = error instanceof Error ? error.message : String(error);
         log.warn('Finding manager decisions call failed; landing residual raws as provisional', { error: message });
@@ -161,6 +156,7 @@ export async function runManagerDecisionStage(params: {
       workflowName: input.workflowName,
       callNamespace: input.callNamespace,
       parentStepName: input.parentStep.name,
+      stopBudgetRoundMarker,
     });
 
     return {

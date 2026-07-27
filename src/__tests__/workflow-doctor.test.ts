@@ -222,11 +222,11 @@ steps:
     expect(mockError).toHaveBeenCalledWith(expect.stringContaining("provider 'opencode' requires model"));
   });
 
-  it('warns when a finding_contract workflow has no findings.provisional routing (v2 migration)', async () => {
+  it('warns when a finding_contract workflow has no provisional routing', async () => {
     // persona facet を用意する（missing-resource エラーを避ける）。
     writeWorkflow(projectDir, '.takt/facets/personas/reviewer.md', 'You are a reviewer.');
     writeWorkflow(projectDir, '.takt/facets/personas/planner.md', 'You are a planner.');
-    const filePath = writeWorkflow(projectDir, '.takt/workflows/legacy-fc-routing.yaml', `name: legacy-fc-routing
+    const filePath = writeWorkflow(projectDir, '.takt/workflows/missing-provisional-routing.yaml', `name: missing-provisional-routing
 max_steps: 10
 initial_step: reviewers
 finding_contract:
@@ -254,7 +254,7 @@ steps:
     await doctorWorkflowCommand([filePath], projectDir);
 
     expect(mockWarn).toHaveBeenCalledWith(expect.stringContaining('findings.provisional.count'));
-    expect(mockWarn).toHaveBeenCalledWith(expect.stringContaining('no longer auto-selects'));
+    expect(mockWarn).toHaveBeenCalledWith(expect.stringContaining('Undeterminable observations land as gate-blocking provisional findings'));
     expect(mockError).not.toHaveBeenCalled();
   });
 
@@ -427,7 +427,7 @@ ${parallelSteps}
   it('does not warn when fixpoint and exhausted budget route through a bounded requirements-preserving replan', async () => {
     writeWorkflow(projectDir, '.takt/facets/personas/reviewer.md', 'You are a reviewer.');
     writeWorkflow(projectDir, '.takt/facets/personas/planner.md', 'You are a planner.');
-    const filePath = writeWorkflow(projectDir, '.takt/workflows/v2-fc-routing.yaml', `name: v2-fc-routing
+    const filePath = writeWorkflow(projectDir, '.takt/workflows/bounded-fc-routing.yaml', `name: bounded-fc-routing
 max_steps: 10
 initial_step: reviewers
 finding_contract:
@@ -843,9 +843,7 @@ steps:
     expect(mockError).toHaveBeenCalledWith(expect.stringContaining('reserved for the internal resume snapshot manifest'));
   });
 
-  // codex 4巡目回帰: Windows 形式の区切り（sub\Resume-Artifacts.JSON）でも
-  // basename 判定が効き、Zod 検証を迂回できない。
-  it('rejects output contracts using the reserved name behind a backslash separator', async () => {
+  it('rejects output contracts using a noncanonical backslash separator', async () => {
     writeWorkflow(projectDir, '.takt/facets/output-contracts/simple-report.md', 'Write a short report.');
     const filePath = writeWorkflow(projectDir, '.takt/workflows/reserved-contract-backslash.yaml', `name: reserved-contract-backslash
 max_steps: 10
@@ -863,10 +861,31 @@ steps:
 `);
 
     await expect(doctorWorkflowCommand([filePath], projectDir)).rejects.toThrow('Workflow validation failed');
-    expect(mockError).toHaveBeenCalledWith(expect.stringContaining('reserved for the internal resume snapshot manifest'));
+    expect(mockError).toHaveBeenCalledWith(expect.stringContaining('non-canonical path separator'));
   });
 
-  it('reports an error when an instruction references the reserved name behind a backslash separator', async () => {
+  it('rejects output contracts containing a dotdot path segment before namespace classification', async () => {
+    writeWorkflow(projectDir, '.takt/facets/output-contracts/simple-report.md', 'Write a short report.');
+    const filePath = writeWorkflow(projectDir, '.takt/workflows/internal-contract-path.yaml', `name: internal-contract-path
+max_steps: 10
+initial_step: step1
+steps:
+  - name: step1
+    instruction: do the work
+    rules:
+      - condition: done
+        next: COMPLETE
+    output_contracts:
+      report:
+        - name: 'public/../.takt-report-internal/review.md'
+          format: simple-report
+`);
+
+    await expect(doctorWorkflowCommand([filePath], projectDir)).rejects.toThrow('Workflow validation failed');
+    expect(mockError).toHaveBeenCalledWith(expect.stringContaining('dot path segment'));
+  });
+
+  it('reports an error when an instruction uses a noncanonical backslash separator', async () => {
     const filePath = writeWorkflow(projectDir, '.takt/workflows/reserved-reference-backslash.yaml', `name: reserved-reference-backslash
 max_steps: 10
 initial_step: step1
@@ -879,7 +898,23 @@ steps:
 `);
 
     await expect(doctorWorkflowCommand([filePath], projectDir)).rejects.toThrow('Workflow validation failed');
-    expect(mockError).toHaveBeenCalledWith(expect.stringContaining('reserved internal file'));
+    expect(mockError).toHaveBeenCalledWith(expect.stringContaining('non-canonical path separator'));
+  });
+
+  it('reports an error when an instruction report reference contains a dotdot path segment', async () => {
+    const filePath = writeWorkflow(projectDir, '.takt/workflows/internal-reference.yaml', `name: internal-reference
+max_steps: 10
+initial_step: step1
+steps:
+  - name: step1
+    instruction: 'inspect {report:public/../.takt-report-internal/review.md}'
+    rules:
+      - condition: done
+        next: COMPLETE
+`);
+
+    await expect(doctorWorkflowCommand([filePath], projectDir)).rejects.toThrow('Workflow validation failed');
+    expect(mockError).toHaveBeenCalledWith(expect.stringContaining('dot path segment'));
   });
 
   it('reports an error when an instruction references the reserved resume-artifacts.json', async () => {

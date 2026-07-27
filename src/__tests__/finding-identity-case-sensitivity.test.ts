@@ -20,6 +20,7 @@ function finding(id: string, title: string, provisional = false): FindingLedgerE
     id,
     status: 'open',
     lifecycle: 'new',
+    revision: 1,
     severity: 'high',
     title,
     location: 'src/Path.ts:10',
@@ -39,6 +40,7 @@ function finding(id: string, title: string, provisional = false): FindingLedgerE
         lastObservedAt: observation,
         interpretationEpochs: 1,
         gateEffect: 'block' as const,
+        firstObservedRound: 1,
       },
     } : {}),
   };
@@ -46,13 +48,13 @@ function finding(id: string, title: string, provisional = false): FindingLedgerE
 
 function ledger(findings: FindingLedgerEntry[], rawFindings: RawFinding[] = []): FindingLedger {
   return {
-    version: 1,
     workflowName: 'peer-review',
     nextId: findings.length + 1,
     updatedAt: observation.timestamp,
     findings,
     rawFindings,
     conflicts: [],
+    interpretations: [],
   };
 }
 
@@ -82,6 +84,7 @@ function emptyOutput(): FindingManagerOutput {
     disputeNotes: [],
     invalidatedFindings: [],
     duplicateFindings: [],
+    dismissedFindings: [],
   };
 }
 
@@ -139,13 +142,15 @@ describe('finding identity case sensitivity', () => {
     const canonical = canonicalizeReviewerRawFinding(candidate, { ledger: currentLedger }).canonical;
     const ladder: LadderResult = {
       interpretationReservations: new Map(),
+      interpretationIntegrityDigests: new Map(),
+      integrityStaleInterpretationKeys: new Set(),
       deferredRawFindingIds: new Set(),
       pendingSameWithProof: [],
       pendingIndependentNew: [],
       pendingConflicts: [],
       provisionalSpecs: [],
       provisionalByInterpretationKey: new Map(),
-      recoveryProvisionalInterpretationKeys: new Set(),
+      recoveryProvisionalOrigins: new Map(),
       pendingAppliedReattach: [{
         target: {
           wire,
@@ -159,7 +164,7 @@ describe('finding identity case sensitivity', () => {
       stats: {} as LadderResult['stats'],
     };
 
-    const result = buildLadderCommitPlan(ladder, currentLedger);
+    const result = buildLadderCommitPlan(ladder, currentLedger, new Set());
 
     expect(result.output.matches).toEqual([]);
     expect(result.provisionalSpecs).toHaveLength(1);

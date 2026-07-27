@@ -9,6 +9,13 @@ import { createFindingLedgerStore, type FindingManagerValidationReport } from '.
 import { createFindingAdjudicationReservation } from './helpers/finding-adjudication-reservation.js';
 import { verifiedSourceQuoteFields } from './helpers/finding-evidence.js';
 import { initializeGitFixture } from './helpers/git-fixture.js';
+import { computeRoundMarker } from '../core/workflow/findings/round-marker.js';
+import { inheritResumeReportSnapshot } from '../core/workflow/run/resume-report-snapshot.js';
+import {
+  createFindingManagerPublicationDouble,
+  observeFindingLedgerMutations,
+  RevisionedFindingLedgerTestRepository,
+} from './helpers/finding-manager-publication.js';
 
 vi.mock('../agents/agent-usecases.js', () => ({
   executeAgent: vi.fn(),
@@ -22,6 +29,7 @@ const executeAgentMock = vi.mocked(executeAgent);
 // src/dup.ts:10）に対応する実ファイルを1つの共有 fixture ディレクトリへ用意する。
 const TEST_TMPDIR = realpathSync(tmpdir());
 const FIXTURE_CWD = mkdtempSync(join(TEST_TMPDIR, 'takt-findings-runner-fixtures-'));
+const REPORT_DIR = mkdtempSync(join(TEST_TMPDIR, 'takt-findings-runner-reports-'));
 function writeFixtureFile(relativePath: string, lineCount: number): void {
   const fullPath = join(FIXTURE_CWD, relativePath);
   mkdirSync(dirname(fullPath), { recursive: true });
@@ -35,11 +43,11 @@ initializeGitFixture(FIXTURE_CWD, ['src/a.ts', 'src/b.ts', 'src/c.ts', 'src/dup.
 
 afterAll(() => {
   rmSync(FIXTURE_CWD, { recursive: true, force: true });
+  rmSync(REPORT_DIR, { recursive: true, force: true });
 });
 
 function makeLedger(overrides: Partial<FindingLedger> = {}): FindingLedger {
   return {
-    version: 1,
     workflowName: 'peer-review',
     nextId: 2,
     updatedAt: '2026-06-13T00:00:00.000Z',
@@ -53,14 +61,17 @@ function makeLedger(overrides: Partial<FindingLedger> = {}): FindingLedger {
         title: 'Existing issue',
         location: 'src/a.ts:10',
         description: 'Existing issue body.',
+        relation: 'new',
       },
     ],
     conflicts: [],
+    interpretations: [],
     findings: [
       {
         id: 'F-0001',
         status: 'open',
         lifecycle: 'new',
+        revision: 1,
         severity: 'high',
         title: 'Existing issue',
         location: 'src/a.ts:10',
@@ -78,6 +89,8 @@ interface Harness {
   savedLedgers: FindingLedger[];
   savedRawFindings: RawFinding[][];
   savedValidationReports: FindingManagerValidationReport[];
+  ledgerStore: FindingLedgerStore;
+  currentLedger: () => FindingLedger;
   run: (input: {
     reviewerRawFindings: Array<Record<string, unknown>>;
     priorStepResponseText?: string;
@@ -85,32 +98,38 @@ interface Harness {
 }
 
 function makeHarness(initialLedger: FindingLedger): Harness {
-  // v2 では WAL（beginInterpretations / completeInterpretations）が保存を複数回
+  // WAL（beginInterpretations / completeInterpretations）が保存を複数回
   // 行うため、テスト double も状態を持つ（mutator の結果を次回の読み込みに使う）。
-  let ledger = initialLedger;
+  const ledgerRepository = new RevisionedFindingLedgerTestRepository(initialLedger);
   const savedLedgers: FindingLedger[] = [];
   const savedRawFindings: RawFinding[][] = [];
   const savedValidationReports: FindingManagerValidationReport[] = [];
-  const ledgerStore: FindingLedgerStore = {
-    workflowName: 'peer-review',
-    loadLedger: () => ledger,
-    saveLedger: (next) => { ledger = next; savedLedgers.push(next); },
-    updateLedger: (mutator) => {
-      const mutation = mutator(ledger);
-      ledger = mutation.ledger;
+  const saveManagerValidationReport = (report: FindingManagerValidationReport): void => {
+    savedValidationReports.push(report);
+  };
+  const publicationDouble = createFindingManagerPublicationDouble((report) => {
+    savedValidationReports.push(report);
+    return join(REPORT_DIR, `findings-manager-validation.${report.stepName}.json`);
+  }, ledgerRepository);
+  const observedMutations = observeFindingLedgerMutations(
+    ledgerRepository,
+    publicationDouble,
+    (ledger) => {
       savedLedgers.push(ledger);
-      return Promise.resolve(mutation);
     },
+  );
+  const ledgerStore: FindingLedgerStore = {
+    ledgerIdentity: '/test/finding-manager-mechanical-runner/harness-ledger.json',
+    workflowName: 'peer-review',
+    loadLedger: () => ledgerRepository.loadLedger(),
     ...createFindingAdjudicationReservation(),
-    createRunCopy: () => '/tmp/ledger-copy.json',
+    saveLedgerSnapshot: () => {},
     saveRawFindings: (_runId, _stepName, rawFindings) => {
       savedRawFindings.push(rawFindings);
-      return '/tmp/raw-findings.json';
     },
-    saveManagerValidationReport: (report) => {
-      savedValidationReports.push(report);
-      return '/tmp/manager-report.json';
-    },
+    saveManagerValidationReport,
+    ...publicationDouble,
+    ...observedMutations,
   };
   const optionsBuilder = {
     buildAgentOptions: () => ({}),
@@ -135,6 +154,8 @@ function makeHarness(initialLedger: FindingLedger): Harness {
     savedLedgers,
     savedRawFindings,
     savedValidationReports,
+    ledgerStore,
+    currentLedger: () => ledgerRepository.loadLedger(),
     run: (input) => runFindingManagerForStep({
       // テスト対象が使うメソッドだけを実装した最小 double。
       contract: contract as never,
@@ -200,18 +221,366 @@ const ANOTHER_UNMATCHED_ISSUE_RAW = {
   ...verifiedSourceQuoteFields(FIXTURE_CWD, 'src/c.ts', 1),
 };
 
+function runFindingManagerWithStore(input: {
+  ledgerStore: FindingLedgerStore;
+  cwd: string;
+  runId: string;
+  stepIteration: number;
+  reviewerRawFindings: Array<Record<string, unknown>>;
+}) {
+  return runFindingManagerForStep({
+    contract: {
+      ledgerPath: '.takt/findings/peer-review.json',
+      rawFindingsPath: '.takt/findings/raw',
+      manager: {
+        persona: 'findings-manager',
+        instruction: 'Reconcile findings.',
+        outputContract: 'Return JSON.',
+      },
+    } as never,
+    ledgerStore: input.ledgerStore,
+    optionsBuilder: {
+      buildAgentOptions: () => ({}),
+      resolveStepProviderModel: () => ({ provider: 'codex', model: 'gpt-test' }),
+    } as never,
+    stepExecutor: {
+      buildPhase1Instruction: (instruction: string) => instruction,
+      recordSynthesizedAgentUsage: () => {},
+      normalizeStructuredOutput: (_step: WorkflowStep, response: AgentResponse) => response,
+    } as never,
+    cwd: input.cwd,
+    parentStep: { kind: 'agent', name: 'reviewers', persona: 'reviewer', edit: false } as WorkflowStep,
+    stepIteration: input.stepIteration,
+    subResults: [{
+      subStep: { kind: 'agent', name: 'arch-review', persona: 'arch', edit: false } as WorkflowStep,
+      response: {
+        status: 'done',
+        content: '',
+        structuredOutput: { rawFindings: input.reviewerRawFindings },
+      } as unknown as AgentResponse,
+    }],
+    workflowName: 'peer-review',
+    runId: input.runId,
+    callNamespace: '',
+    timestamp: '2026-06-14T00:00:00.000Z',
+  });
+}
+
 beforeEach(() => {
   executeAgentMock.mockReset();
 });
 
 describe('runFindingManagerForStep mechanical path', () => {
+  it('Given the round marker is already applied When the same invocation is replayed Then the runner is a complete no-op before agent, WAL, raw artifacts, and reports', async () => {
+    const roundMarker = computeRoundMarker({
+      runId: 'run-2',
+      callNamespace: '',
+      parentStepName: 'reviewers',
+      stepIteration: 2,
+    });
+    const initialLedger = makeLedger({
+      stopBudget: {
+        roundMarkers: [roundMarker],
+        firstRoundAt: '2026-06-14T00:00:00.000Z',
+        exhausted: false,
+      },
+    });
+    const snapshot = structuredClone(initialLedger);
+    const harness = makeHarness(initialLedger);
+
+    const result = await harness.run({
+      reviewerRawFindings: [{
+        ...UNMATCHED_ISSUE_RAW,
+        relation: 'persists',
+      }],
+    });
+
+    expect(result.status).toBe('unchanged');
+    expect(executeAgentMock).not.toHaveBeenCalled();
+    expect(harness.savedLedgers).toEqual([]);
+    expect(harness.savedRawFindings).toEqual([]);
+    expect(harness.savedValidationReports).toEqual([]);
+    expect(result.ledger).toEqual(snapshot);
+  });
+
+  it('Given the same invocation races with itself When both enter the runner Then only the first applies and the second observes its marker under the same exclusion', async () => {
+    const harness = makeHarness(makeLedger());
+
+    const results = await Promise.all([
+      harness.run({ reviewerRawFindings: [CONFIRMATION_RAW] }),
+      harness.run({ reviewerRawFindings: [CONFIRMATION_RAW] }),
+    ]);
+
+    expect(results.map((result) => result.status).sort()).toEqual(['unchanged', 'updated']);
+    expect(executeAgentMock).not.toHaveBeenCalled();
+    expect(harness.savedLedgers).toHaveLength(1);
+    expect(harness.savedRawFindings).toHaveLength(1);
+    expect(harness.savedValidationReports).toEqual([]);
+  });
+
+  it('Given report publication fails after the ledger mutation When the same invocation is retried Then only the pending report is published before the completed marker is finalized', async () => {
+    executeAgentMock.mockResolvedValue({
+      status: 'done',
+      content: '',
+      structuredOutput: {
+        rawDecisions: [{
+          rawFindingId: 'run-2:reviewers:2:arch-review:i-1',
+          decision: 'new',
+          evidence: 'No related open finding.',
+        }],
+        disputeDecisions: [],
+        conflictDecisions: [],
+        invalidateDecisions: [],
+        duplicateDecisions: [],
+        dismissDecisions: [],
+      },
+    } as unknown as AgentResponse);
+    const harness = makeHarness(makeLedger());
+    const publishReport = harness.ledgerStore.publishManagerValidationPublication;
+    const reportSpy = vi.spyOn(harness.ledgerStore, 'publishManagerValidationPublication')
+      .mockImplementationOnce(() => {
+        throw new Error('injected manager report publication failure');
+      })
+      .mockImplementation(publishReport);
+    const invalidQuoteRaw = {
+      ...ANOTHER_UNMATCHED_ISSUE_RAW,
+      rawFindingId: 'quote-mismatch',
+      verbatimExcerpt: 'not the current source line',
+    };
+    const input = {
+      reviewerRawFindings: [UNMATCHED_ISSUE_RAW, invalidQuoteRaw],
+    };
+    const roundMarker = computeRoundMarker({
+      runId: 'run-2',
+      callNamespace: '',
+      parentStepName: 'reviewers',
+      stepIteration: 2,
+    });
+
+    await expect(harness.run(input)).rejects.toThrow('injected manager report publication failure');
+
+    expect(harness.currentLedger().stopBudget?.roundMarkers ?? []).not.toContain(roundMarker);
+    expect(executeAgentMock).toHaveBeenCalledTimes(1);
+    expect(harness.savedRawFindings).toHaveLength(1);
+
+    const retried = await harness.run(input);
+
+    expect(retried.status).toBe('unchanged');
+    expect(reportSpy).toHaveBeenCalledTimes(2);
+    expect(executeAgentMock).toHaveBeenCalledTimes(1);
+    expect(harness.savedRawFindings).toHaveLength(1);
+    expect(harness.currentLedger().stopBudget?.roundMarkers).toEqual([roundMarker]);
+    expect(harness.currentLedger().findings.filter(
+      (finding) => finding.title === UNMATCHED_ISSUE_RAW.title,
+    )).toHaveLength(1);
+  });
+
+  it('Given separate stores bind the same canonical ledger When the same round races Then only one reaches agent and artifacts', async () => {
+    const projectCwd = mkdtempSync(join(TEST_TMPDIR, 'takt-findings-round-identity-project-'));
+    const reportDirA = mkdtempSync(join(TEST_TMPDIR, 'takt-findings-round-identity-report-a-'));
+    const reportDirB = mkdtempSync(join(TEST_TMPDIR, 'takt-findings-round-identity-report-b-'));
+    mkdirSync(join(projectCwd, 'src'), { recursive: true });
+    writeFileSync(join(projectCwd, 'src/b.ts'), `${Array.from({ length: 10 }, (_, i) => `// line ${i + 1}`).join('\n')}\n`);
+    initializeGitFixture(projectCwd, ['src/b.ts']);
+
+    const createStore = (reportDir: string) => createFindingLedgerStore({
+      projectCwd,
+      reportDir,
+      workflowName: 'peer-review',
+      ledgerPath: '.takt/findings/peer-review.json',
+      rawFindingsPath: '.takt/findings/raw',
+    });
+    const storeA = createStore(reportDirA);
+    const storeB = createStore(reportDirB);
+    await storeA.updateLedger(() => ({
+      ledger: {
+        workflowName: 'peer-review',
+        nextId: 1,
+        updatedAt: '2026-06-13T00:00:00.000Z',
+        findings: [],
+        rawFindings: [],
+        conflicts: [],
+        interpretations: [],
+      },
+      result: undefined,
+    }));
+    const copySpies = [vi.spyOn(storeA, 'saveLedgerSnapshot'), vi.spyOn(storeB, 'saveLedgerSnapshot')];
+    const rawSpies = [vi.spyOn(storeA, 'saveRawFindings'), vi.spyOn(storeB, 'saveRawFindings')];
+    const reportSpies = [
+      vi.spyOn(storeA, 'saveManagerValidationReport'),
+      vi.spyOn(storeB, 'saveManagerValidationReport'),
+    ];
+    executeAgentMock.mockImplementation(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return {
+        status: 'done',
+        content: '',
+        structuredOutput: {
+          rawDecisions: [{
+            rawFindingId: 'shared-run:reviewers:1:arch-review:i-1',
+            decision: 'new',
+            evidence: 'No related open finding.',
+          }],
+          disputeDecisions: [],
+          conflictDecisions: [],
+          invalidateDecisions: [],
+          duplicateDecisions: [],
+          dismissDecisions: [],
+        },
+      } as unknown as AgentResponse;
+    });
+    const run = (ledgerStore: FindingLedgerStore) => runFindingManagerWithStore({
+      ledgerStore,
+      cwd: projectCwd,
+      runId: 'shared-run',
+      stepIteration: 1,
+      reviewerRawFindings: [{
+        ...UNMATCHED_ISSUE_RAW,
+        ...verifiedSourceQuoteFields(projectCwd, 'src/b.ts', 5),
+      }],
+    });
+
+    try {
+      const results = await Promise.all([run(storeA), run(storeB)]);
+
+      expect(results.map((result) => result.status).sort()).toEqual(['unchanged', 'updated']);
+      expect(executeAgentMock).toHaveBeenCalledTimes(1);
+      expect(copySpies.reduce((count, spy) => count + spy.mock.calls.length, 0)).toBe(1);
+      expect(rawSpies.reduce((count, spy) => count + spy.mock.calls.length, 0)).toBe(1);
+      expect(reportSpies.reduce((count, spy) => count + spy.mock.calls.length, 0)).toBe(0);
+      expect(storeA.loadLedger().interpretations).toEqual([]);
+      expect(storeA.loadLedger().rawFindings).toHaveLength(1);
+    } finally {
+      rmSync(projectCwd, { recursive: true, force: true });
+      rmSync(reportDirA, { recursive: true, force: true });
+      rmSync(reportDirB, { recursive: true, force: true });
+    }
+  });
+
+  it('Given a persisted pending report When resume uses a new run id Then it drains the old transaction and completes the new round in the same invocation', async () => {
+    const projectCwd = mkdtempSync(join(TEST_TMPDIR, 'takt-findings-pending-project-'));
+    const reportDirA = join(projectCwd, '.takt', 'runs', 'pending-run', 'reports');
+    mkdirSync(reportDirA, { recursive: true });
+    mkdirSync(join(projectCwd, 'src'), { recursive: true });
+    writeFileSync(join(projectCwd, 'src/b.ts'), '// line 1\n// line 2\n// line 3\n// line 4\n// line 5\n');
+    writeFileSync(join(projectCwd, 'src/c.ts'), '// line 1\n');
+    initializeGitFixture(projectCwd, ['src/b.ts', 'src/c.ts']);
+    const createStore = (reportDir: string, trustedResumeSourceRunId?: string) => createFindingLedgerStore({
+      projectCwd,
+      reportDir,
+      workflowName: 'peer-review',
+      ledgerPath: '.takt/findings/peer-review.json',
+      rawFindingsPath: '.takt/findings/raw',
+      ...(trustedResumeSourceRunId === undefined ? {} : { trustedResumeSourceRunId }),
+    });
+    const storeA = createStore(reportDirA);
+    await storeA.updateLedger(() => ({
+      ledger: {
+        workflowName: 'peer-review',
+        nextId: 1,
+        updatedAt: '2026-06-13T00:00:00.000Z',
+        findings: [],
+        rawFindings: [],
+        conflicts: [],
+        interpretations: [],
+      },
+      result: undefined,
+    }));
+    const reportSpyA = vi.spyOn(storeA, 'publishManagerValidationPublication')
+      .mockImplementationOnce(() => {
+        throw new Error('injected persisted report failure');
+      });
+    const reviewerRawFindings = [
+      {
+        ...UNMATCHED_ISSUE_RAW,
+        ...verifiedSourceQuoteFields(projectCwd, 'src/b.ts', 5),
+      },
+      {
+        ...ANOTHER_UNMATCHED_ISSUE_RAW,
+        rawFindingId: 'quote-mismatch',
+        ...verifiedSourceQuoteFields(projectCwd, 'src/c.ts', 1),
+        verbatimExcerpt: 'not the current source line',
+      },
+    ];
+    executeAgentMock.mockResolvedValue({
+      status: 'done',
+      content: '',
+      structuredOutput: {
+        rawDecisions: [{
+          rawFindingId: 'pending-run:reviewers:1:arch-review:i-1',
+          decision: 'new',
+          evidence: 'No related open finding.',
+        }],
+        disputeDecisions: [],
+        conflictDecisions: [],
+        invalidateDecisions: [],
+        duplicateDecisions: [],
+        dismissDecisions: [],
+      },
+    } as unknown as AgentResponse);
+
+    try {
+      await expect(runFindingManagerWithStore({
+        ledgerStore: storeA,
+        cwd: projectCwd,
+        runId: 'pending-run',
+        stepIteration: 1,
+        reviewerRawFindings,
+      })).rejects.toThrow('injected persisted report failure');
+      inheritResumeReportSnapshot({
+        cwd: projectCwd,
+        sourceRunSlug: 'pending-run',
+        targetRunSlug: 'different-run',
+      });
+      const reportDirB = join(projectCwd, '.takt', 'runs', 'different-run', 'reports');
+      const storeB = createStore(reportDirB, 'pending-run');
+      const copySpyB = vi.spyOn(storeB, 'saveLedgerSnapshot');
+      const rawSpyB = vi.spyOn(storeB, 'saveRawFindings');
+      const reportSpyB = vi.spyOn(storeB, 'publishManagerValidationPublication');
+      expect(storeB.loadLedger().pendingManagerCommit?.roundMarker).toBe(
+        computeRoundMarker({
+          runId: 'pending-run',
+          callNamespace: '',
+          parentStepName: 'reviewers',
+          stepIteration: 1,
+        }),
+      );
+
+      const resumed = await runFindingManagerWithStore({
+        ledgerStore: storeB,
+        cwd: projectCwd,
+        runId: 'different-run',
+        stepIteration: 1,
+        reviewerRawFindings: [{
+          ...CONFIRMATION_RAW,
+          ...verifiedSourceQuoteFields(projectCwd, 'src/b.ts', 5),
+          targetFindingId: 'F-0001',
+        }],
+      });
+
+      expect(resumed.status).toBe('updated');
+      expect(storeB.loadLedger().pendingManagerCommit).toBeUndefined();
+      expect(storeB.loadLedger().stopBudget?.roundMarkers).toHaveLength(2);
+      expect(storeB.loadLedger().findings.find(
+        (finding) => finding.title === UNMATCHED_ISSUE_RAW.title,
+      )?.status).toBe('resolved');
+      expect(executeAgentMock).toHaveBeenCalledTimes(1);
+      expect(copySpyB).toHaveBeenCalledTimes(1);
+      expect(rawSpyB).toHaveBeenCalledTimes(1);
+      expect(reportSpyA).toHaveBeenCalledTimes(1);
+      expect(reportSpyB).toHaveBeenCalledTimes(1);
+    } finally {
+      rmSync(projectCwd, { recursive: true, force: true });
+    }
+  });
+
   it('Given only mechanically classifiable confirmations and no prior response When run Then the manager agent is not called and the ledger is updated', async () => {
     const harness = makeHarness(makeLedger());
     const result = await harness.run({ reviewerRawFindings: [CONFIRMATION_RAW] });
 
     expect(executeAgentMock).not.toHaveBeenCalled();
     expect(result.status).toBe('updated');
-    const finding = harness.savedLedgers.at(-1)?.findings.find((entry) => entry.id === 'F-0001');
+    const finding = harness.currentLedger().findings.find((entry) => entry.id === 'F-0001');
     expect(finding?.status).toBe('resolved');
   });
 
@@ -225,6 +594,9 @@ describe('runFindingManagerForStep mechanical path', () => {
         ],
         disputeDecisions: [],
         conflictDecisions: [],
+        invalidateDecisions: [],
+        duplicateDecisions: [],
+        dismissDecisions: [],
       },
     } as unknown as AgentResponse);
 
@@ -238,7 +610,7 @@ describe('runFindingManagerForStep mechanical path', () => {
     expect(instruction).not.toContain('"run-2:reviewers:2:arch-review:c-1"');
 
     expect(result.status).toBe('updated');
-    const ledger = harness.savedLedgers.at(-1);
+    const ledger = harness.currentLedger();
     expect(ledger?.findings.find((entry) => entry.id === 'F-0001')?.status).toBe('resolved');
     expect(ledger?.findings.some((entry) => entry.title === 'New unmatched issue' && entry.status === 'open')).toBe(true);
   });
@@ -262,6 +634,9 @@ describe('runFindingManagerForStep mechanical path', () => {
         rawDecisions: [],
         disputeDecisions: [],
         conflictDecisions: [],
+        invalidateDecisions: [],
+        duplicateDecisions: [],
+        dismissDecisions: [],
       },
     } as unknown as AgentResponse);
 
@@ -276,9 +651,9 @@ describe('runFindingManagerForStep mechanical path', () => {
   });
 });
 
-describe('runFindingManagerForStep rejected decisions land as provisional (no retry, v2 ladder)', () => {
+describe('runFindingManagerForStep rejected decisions land as provisional without retry', () => {
   it('Given one rejected decision among several When run Then the manager is NOT re-asked; the accepted decision applies and the rejected raw lands as a gate-blocking provisional', async () => {
-    // v2: semantic retry は 0 回。i-1 は妥当な "new"（採用）、i-2 は存在しない
+    // semantic retry は 0 回。i-1 は妥当な "new"（採用）、i-2 は存在しない
     // finding への "same"（不採用 → provisional 着地。new への強制も drop もしない）。
     executeAgentMock.mockResolvedValueOnce({
       status: 'done',
@@ -290,6 +665,9 @@ describe('runFindingManagerForStep rejected decisions land as provisional (no re
         ],
         disputeDecisions: [],
         conflictDecisions: [],
+        invalidateDecisions: [],
+        duplicateDecisions: [],
+        dismissDecisions: [],
       },
     } as unknown as AgentResponse);
 
@@ -299,7 +677,7 @@ describe('runFindingManagerForStep rejected decisions land as provisional (no re
     expect(executeAgentMock).toHaveBeenCalledTimes(1);
 
     expect(result.status).toBe('updated');
-    const ledger = harness.savedLedgers.at(-1);
+    const ledger = harness.currentLedger();
     const accepted = ledger?.findings.find((entry) => entry.title === 'New unmatched issue');
     expect(accepted?.status).toBe('open');
     expect(accepted?.provisional).toBeUndefined();
@@ -327,12 +705,19 @@ describe('runFindingManagerForStep rejected decisions land as provisional (no re
     expect(executeAgentMock).not.toHaveBeenCalled();
 
     expect(result.status).toBe('updated');
-    const savedLedger = harness.savedLedgers.at(-1);
+    const savedLedger = harness.currentLedger();
     expect(savedLedger?.findings.find((entry) => entry.id === 'F-0001')?.status).toBe('resolved');
     expect(savedLedger?.findings.every((entry) => entry.provisional === undefined)).toBe(true);
     // 監査には不採用の事実が残る。
     const report = harness.savedValidationReports.at(-1) as FindingManagerValidationReport | undefined;
     expect(report?.unsupportedRawFindings?.some((entry) => entry.rawFindingId.endsWith(':c-1'))).toBe(true);
+    expect(report?.rawFindingDispositions).toEqual([
+      expect.objectContaining({
+        rawFindingId: expect.stringMatching(/:c-1$/),
+        outcome: 'unsupported',
+        reason: expect.any(String),
+      }),
+    ]);
   });
 
   it('Given the agent repeats an invalid decision When run Then the raw finding lands as provisional (never forced to "new")', async () => {
@@ -345,6 +730,9 @@ describe('runFindingManagerForStep rejected decisions land as provisional (no re
         ],
         disputeDecisions: [],
         conflictDecisions: [],
+        invalidateDecisions: [],
+        duplicateDecisions: [],
+        dismissDecisions: [],
       },
     } as unknown as AgentResponse);
 
@@ -353,7 +741,7 @@ describe('runFindingManagerForStep rejected decisions land as provisional (no re
 
     expect(executeAgentMock).toHaveBeenCalledTimes(1);
     expect(result.status).toBe('updated');
-    const ledger = harness.savedLedgers.at(-1);
+    const ledger = harness.currentLedger();
     const landed = ledger?.findings.find((entry) => entry.title === 'New unmatched issue');
     expect(landed?.status).toBe('open');
     expect(landed?.provisional).toMatchObject({ kind: 'raw-adjudication-unresolved' });
@@ -363,7 +751,7 @@ describe('runFindingManagerForStep rejected decisions land as provisional (no re
 
   it('Given the manager omits decisions for every residual raw finding When run Then nothing is silently dropped: the issue raw lands as a gate-blocking provisional and the tainted confirmation is audit-only', async () => {
     // decisions manager が rawDecisions: [] を返す（no-op gate bypass 攻撃の
-    // 基本形）。v2 では欠落 decision の issue raw は provisional へ。対象が
+    // 基本形）。欠落 decision の issue raw は provisional へ。対象が
     // resolved の confirmation は tainted confirmation として A-1 の対象になり、
     // provisional にはならず監査保存のみ（解消確認は問題の観測ではない）。
     executeAgentMock.mockResolvedValue({
@@ -373,6 +761,9 @@ describe('runFindingManagerForStep rejected decisions land as provisional (no re
         rawDecisions: [],
         disputeDecisions: [],
         conflictDecisions: [],
+        invalidateDecisions: [],
+        duplicateDecisions: [],
+        dismissDecisions: [],
       },
     } as unknown as AgentResponse);
 
@@ -384,13 +775,64 @@ describe('runFindingManagerForStep rejected decisions land as provisional (no re
     expect(executeAgentMock).toHaveBeenCalledTimes(1);
 
     expect(result.status).toBe('updated');
-    const savedLedger = harness.savedLedgers.at(-1);
+    const savedLedger = harness.currentLedger();
     expect(savedLedger?.findings.find((entry) => entry.id === 'F-0001')?.status).toBe('resolved');
     const provisionals = savedLedger?.findings.filter((entry) => entry.provisional !== undefined) ?? [];
     expect(provisionals).toHaveLength(1);
     expect(provisionals[0]?.title).toBe('New unmatched issue');
     const report = harness.savedValidationReports.at(-1) as FindingManagerValidationReport | undefined;
     expect(report?.unsupportedRawFindings?.some((entry) => entry.rawFindingId.endsWith(':c-1'))).toBe(true);
+    expect(report?.rawFindingDispositions).toContainEqual(expect.objectContaining({
+      rawFindingId: expect.stringMatching(/:c-1$/),
+      outcome: 'unsupported',
+      reason: expect.any(String),
+    }));
+  });
+
+  it('Given a resolved-target confirmation and a manager that incorrectly returns new for it When run Then the confirmation remains an unsupported finite audit outcome', async () => {
+    executeAgentMock.mockResolvedValue({
+      status: 'done',
+      content: '',
+      structuredOutput: {
+        rawDecisions: [
+          {
+            rawFindingId: 'run-2:reviewers:2:arch-review:c-1',
+            decision: 'new',
+            evidence: 'Incorrectly attempted to create from a confirmation.',
+          },
+          {
+            rawFindingId: 'run-2:reviewers:2:arch-review:i-1',
+            decision: 'new',
+            evidence: 'No related open finding.',
+          },
+        ],
+        disputeDecisions: [],
+        conflictDecisions: [],
+        invalidateDecisions: [],
+        duplicateDecisions: [],
+        dismissDecisions: [],
+      },
+    } as unknown as AgentResponse);
+    const resolved = makeLedger({
+      findings: [{
+        ...makeLedger().findings[0]!,
+        status: 'resolved',
+        lifecycle: 'resolved',
+      }],
+    });
+    const harness = makeHarness(resolved);
+
+    await harness.run({ reviewerRawFindings: [UNMATCHED_ISSUE_RAW, CONFIRMATION_RAW] });
+
+    const report = harness.savedValidationReports.at(-1);
+    expect(report?.rawFindingDispositions).toContainEqual(expect.objectContaining({
+      rawFindingId: 'run-2:reviewers:2:arch-review:c-1',
+      outcome: 'unsupported',
+      reason: expect.stringContaining('cannot serve as resolution evidence'),
+    }));
+    expect(harness.currentLedger().findings.filter(
+      (finding) => finding.rawFindingIds.includes('run-2:reviewers:2:arch-review:c-1'),
+    )).toEqual([]);
   });
 });
 
@@ -402,14 +844,17 @@ describe('runFindingManagerForStep conflict handling', () => {
       structuredOutput: {
         rawDecisions: [],
         disputeDecisions: [],
-        conflictDecisions: [{ conflictId: 'C-0001', decision: 'keep', evidence: 'Still unresolved.' }],
+        conflictDecisions: [{ conflictId: 'C-FA2947446963', decision: 'keep', evidence: 'Still unresolved.' }],
+        invalidateDecisions: [],
+        duplicateDecisions: [],
+        dismissDecisions: [],
       },
     } as unknown as AgentResponse);
 
     const ledger = makeLedger({
       conflicts: [
         {
-          id: 'C-0001',
+          id: 'C-FA2947446963',
           status: 'active',
           findingIds: ['F-0001'],
           rawFindingIds: ['raw-existing'],
@@ -435,7 +880,10 @@ describe('runFindingManagerForStep conflict handling', () => {
           { rawFindingId: 'run-2:reviewers:2:arch-review:i-1', decision: 'new', evidence: 'No related open finding.' },
         ],
         disputeDecisions: [],
-        conflictDecisions: [{ conflictId: 'C-0001', decision: 'keep', evidence: 'Still unresolved.' }],
+        conflictDecisions: [{ conflictId: 'C-FA2947446963', decision: 'keep', evidence: 'Still unresolved.' }],
+        invalidateDecisions: [],
+        duplicateDecisions: [],
+        dismissDecisions: [],
       },
     } as unknown as AgentResponse);
 
@@ -445,6 +893,7 @@ describe('runFindingManagerForStep conflict handling', () => {
           id: 'F-0001',
           status: 'resolved',
           lifecycle: 'resolved',
+          revision: 1,
           severity: 'high',
           title: 'Existing issue',
           location: 'src/a.ts:10',
@@ -457,7 +906,7 @@ describe('runFindingManagerForStep conflict handling', () => {
       ],
       conflicts: [
         {
-          id: 'C-0001',
+          id: 'C-FA2947446963',
           status: 'active',
           findingIds: ['F-0001'],
           rawFindingIds: ['raw-existing'],
@@ -491,27 +940,38 @@ describe('runFindingManagerForStep workflow_call sub-steps', () => {
         ],
         disputeDecisions: [],
         conflictDecisions: [],
+        invalidateDecisions: [],
+        duplicateDecisions: [],
+        dismissDecisions: [],
       },
     } as unknown as AgentResponse);
 
     const savedLedgers: FindingLedger[] = [];
     const savedRawFindings: RawFinding[][] = [];
-    const ledgerStore: FindingLedgerStore = {
-      workflowName: 'peer-review',
-      loadLedger: () => makeLedger(),
-      saveLedger: (next) => { savedLedgers.push(next); },
-      updateLedger: (mutator) => {
-        const mutation = mutator(makeLedger());
-        savedLedgers.push(mutation.ledger);
-        return Promise.resolve(mutation);
+    const ledgerRepository = new RevisionedFindingLedgerTestRepository(makeLedger());
+    const publicationDouble = createFindingManagerPublicationDouble(
+      (report) => join(REPORT_DIR, `findings-manager-validation.${report.stepName}.json`),
+      ledgerRepository,
+    );
+    const observedMutations = observeFindingLedgerMutations(
+      ledgerRepository,
+      publicationDouble,
+      (ledger) => {
+        savedLedgers.push(ledger);
       },
+    );
+    const ledgerStore: FindingLedgerStore = {
+      ledgerIdentity: '/test/finding-manager-mechanical-runner/workflow-call-ledger.json',
+      workflowName: 'peer-review',
+      loadLedger: () => ledgerRepository.loadLedger(),
       ...createFindingAdjudicationReservation(),
-      createRunCopy: () => '/tmp/ledger-copy.json',
+      saveLedgerSnapshot: () => {},
       saveRawFindings: (_runId, _stepName, rawFindings) => {
         savedRawFindings.push(rawFindings);
-        return '/tmp/raw-findings.json';
       },
-      saveManagerValidationReport: () => '/tmp/manager-report.json',
+      saveManagerValidationReport: () => {},
+      ...publicationDouble,
+      ...observedMutations,
     };
     const optionsBuilder = {
       buildAgentOptions: () => ({}),
@@ -599,9 +1059,9 @@ describe('runFindingManagerForStep concurrent workflow_call lost update', () => 
 
   it('Given two concurrent callers each reporting a distinct new issue When both resolve their LLM call around the same time Then neither new finding is lost', async () => {
     const projectCwd = mkdtempSync(join(TEST_TMPDIR, 'takt-findings-race-project-'));
-    const reportDir = mkdtempSync(join(TEST_TMPDIR, 'takt-findings-race-report-'));
+    const reportDir = join(projectCwd, '.takt', 'runs', 'shared-run', 'reports');
+    mkdirSync(reportDir, { recursive: true });
     cleanupDirs.add(projectCwd);
-    cleanupDirs.add(reportDir);
     // raw admission validation は projectCwd を cwd として使うため、この
     // テストが引用する location に対応する実ファイルを用意する。
     mkdirSync(join(projectCwd, 'src'), { recursive: true });
@@ -621,15 +1081,18 @@ describe('runFindingManagerForStep concurrent workflow_call lost update', () => 
     });
     const storeA = store;
     const storeB = store;
-    storeA.saveLedger({
-      version: 1,
-      workflowName: 'peer-review',
-      nextId: 1,
-      updatedAt: '2026-06-13T00:00:00.000Z',
-      findings: [],
-      rawFindings: [],
-      conflicts: [],
-    });
+    await storeA.updateLedger(() => ({
+      ledger: {
+        workflowName: 'peer-review',
+        nextId: 1,
+        updatedAt: '2026-06-13T00:00:00.000Z',
+        findings: [],
+        rawFindings: [],
+        conflicts: [],
+        interpretations: [],
+      },
+      result: undefined,
+    }));
 
     // workflow_call の並列子は WorkflowCallExecutor から同じ reportDirName
     // （= 親の runPaths.slug）を渡されるため、実運用では2子の runId は常に
@@ -651,6 +1114,9 @@ describe('runFindingManagerForStep concurrent workflow_call lost update', () => 
           rawDecisions: [{ rawFindingId, decision: 'new', evidence: 'No related open finding.' }],
           disputeDecisions: [],
           conflictDecisions: [],
+          invalidateDecisions: [],
+          duplicateDecisions: [],
+          dismissDecisions: [],
         },
       } as unknown as AgentResponse;
     });
@@ -759,15 +1225,18 @@ describe('runFindingManagerForStep concurrent workflow_call lost update', () => 
       ledgerPath: '.takt/findings/peer-review.json',
       rawFindingsPath: '.takt/findings/raw',
     });
-    store.saveLedger({
-      version: 1,
-      workflowName: 'peer-review',
-      nextId: 1,
-      updatedAt: '2026-06-13T00:00:00.000Z',
-      findings: [],
-      rawFindings: [],
-      conflicts: [],
-    });
+    await store.updateLedger(() => ({
+      ledger: {
+        workflowName: 'peer-review',
+        nextId: 1,
+        updatedAt: '2026-06-13T00:00:00.000Z',
+        findings: [],
+        rawFindings: [],
+        conflicts: [],
+        interpretations: [],
+      },
+      result: undefined,
+    }));
 
     // 上のテストと同じ理由で、2子の runId を揃え、callNamespace だけで区別する。
     const SHARED_RUN_ID = 'shared-run-dup';
@@ -783,6 +1252,9 @@ describe('runFindingManagerForStep concurrent workflow_call lost update', () => 
           rawDecisions: [{ rawFindingId, decision: 'new', evidence: 'No related open finding.' }],
           disputeDecisions: [],
           conflictDecisions: [],
+          invalidateDecisions: [],
+          duplicateDecisions: [],
+          dismissDecisions: [],
         },
       } as unknown as AgentResponse;
     });
@@ -872,12 +1344,11 @@ describe('runFindingManagerForStep concurrent workflow_call lost update', () => 
   });
 });
 
-describe('runFindingManagerForStep stale rejection excluded from unmentioned fallback', () => {
-  it('Given a "same" decision that the freshly re-read ledger rejects (target no longer open) When run Then the raw is excluded from the unmentioned-raw fallback and no duplicate finding is created', async () => {
+describe('runFindingManagerForStep stale rejection isolation', () => {
+  it('Given a "same" decision that the freshly re-read ledger rejects (target no longer open) When run Then the raw lands through the explicit provisional plan and no duplicate finding is created', async () => {
     // codex 指摘: assembleManagerOutput() は保存直前に最新台帳へ再照合するが、
-    // そこで不採用になった raw は reconcileFindingLedger() の「未言及の raw は
-    // 新規 finding にする」フォールバックにそのまま回っていた。項目単位の
-    // 不採用が実質不成立になっていたケースを再現する。
+    // そこで不採用になった raw が別の確定アクションへ流れると、項目単位の
+    // 不採用が実質不成立になるケースを再現する。
     executeAgentMock.mockResolvedValue({
       status: 'done',
       content: '',
@@ -892,6 +1363,9 @@ describe('runFindingManagerForStep stale rejection excluded from unmentioned fal
         ],
         disputeDecisions: [],
         conflictDecisions: [],
+        invalidateDecisions: [],
+        duplicateDecisions: [],
+        dismissDecisions: [],
       },
     } as unknown as AgentResponse);
 
@@ -913,22 +1387,32 @@ describe('runFindingManagerForStep stale rejection excluded from unmentioned fal
 
     const savedLedgers: FindingLedger[] = [];
     const savedValidationReports: FindingManagerValidationReport[] = [];
+    const saveManagerValidationReport = (report: FindingManagerValidationReport): string => {
+      savedValidationReports.push(report);
+      return join(REPORT_DIR, `findings-manager-validation.${report.stepName}.json`);
+    };
+    const ledgerRepository = new RevisionedFindingLedgerTestRepository(staleFreshLedger);
+    const publicationDouble = createFindingManagerPublicationDouble(
+      saveManagerValidationReport,
+      ledgerRepository,
+    );
+    const observedMutations = observeFindingLedgerMutations(
+      ledgerRepository,
+      publicationDouble,
+      (ledger) => {
+        savedLedgers.push(ledger);
+      },
+    );
     const ledgerStore: FindingLedgerStore = {
+      ledgerIdentity: '/test/finding-manager-mechanical-runner/stale-ledger.json',
       workflowName: 'peer-review',
       loadLedger: () => initialLedger,
-      saveLedger: (next) => { savedLedgers.push(next); },
-      updateLedger: (mutator) => {
-        const mutation = mutator(staleFreshLedger);
-        savedLedgers.push(mutation.ledger);
-        return Promise.resolve(mutation);
-      },
       ...createFindingAdjudicationReservation(),
-      createRunCopy: () => '/tmp/ledger-copy.json',
-      saveRawFindings: () => '/tmp/raw-findings.json',
-      saveManagerValidationReport: (report) => {
-        savedValidationReports.push(report);
-        return '/tmp/manager-report.json';
-      },
+      saveLedgerSnapshot: () => {},
+      saveRawFindings: () => {},
+      saveManagerValidationReport,
+      ...publicationDouble,
+      ...observedMutations,
     };
     const optionsBuilder = {
       buildAgentOptions: () => ({}),
@@ -989,9 +1473,9 @@ describe('runFindingManagerForStep stale rejection excluded from unmentioned fal
 
     expect(result.status).toBe('updated');
     expect(savedLedgers).toHaveLength(1);
-    const savedLedger = savedLedgers[0];
-    // v2: 不採用になった raw は「未言及」フォールバックで確定 finding に化けず、
-    // gate-blocking provisional として着地する（黙って消えてゲートが開くことも
+    const savedLedger = ledgerRepository.loadLedger();
+    // 不採用になった raw は明示的な計画入力により gate-blocking provisional
+    // として着地する（黙って消えてゲートが開くことも
     // 新規 finding として洗浄されることもない）。
     expect(savedLedger?.findings.find((f) => f.id === 'F-0001')?.status).toBe('resolved');
     const landed = savedLedger?.findings.find((f) => f.title === 'Restated existing issue');

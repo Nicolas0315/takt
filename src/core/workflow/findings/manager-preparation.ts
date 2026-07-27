@@ -4,7 +4,6 @@ import type { FindingLedger, FindingObservation } from './types.js';
 import type { ReviewerIntakeResult } from './manager-admission.js';
 import { intakeReviewerOutputs } from './manager-intake.js';
 import { buildFindingManagerStep } from './manager-step.js';
-import { computeRoundMarker } from './round-marker.js';
 import { resolveReviewIntegrityLimits } from './review-integrity.js';
 import { resolveStopBudgetLimits } from './stop-budget.js';
 import { stopBudgetRoundsCompleted } from './stop-budget.js';
@@ -17,35 +16,28 @@ import type { RunFindingManagerForStepInput } from './manager-contracts.js';
 
 export interface PreparedFindingManagerRound {
   previousLedger: FindingLedger;
-  ledgerCopyPath: string;
   observation: FindingObservation;
   stopBudgetLimits: ReturnType<typeof resolveStopBudgetLimits>;
   stopBudgetRoundMarker: string;
   reviewIntegrityLimits: ReturnType<typeof resolveReviewIntegrityLimits>;
   intake: ReviewerIntakeResult;
   interpretationRecoveryFailures: InterpretationRecoveryFailure[];
-  rawFindingsPath: string;
   managerStep: AgentWorkflowStep;
   providerInfo: StepProviderInfo;
 }
 
 export function prepareFindingManagerRound(
   input: RunFindingManagerForStepInput,
+  stopBudgetRoundMarker: string,
 ): PreparedFindingManagerRound {
   const previousLedger = input.ledgerStore.loadLedger();
-  const ledgerCopyPath = input.ledgerCopyPath ?? input.ledgerStore.createRunCopy();
+  input.ledgerStore.saveLedgerSnapshot();
   const observation: FindingObservation = {
     runId: input.runId,
     stepName: input.parentStep.name,
     timestamp: input.timestamp,
   };
   const stopBudgetLimits = resolveStopBudgetLimits(input.contract.stopBudget);
-  const stopBudgetRoundMarker = computeRoundMarker({
-    runId: input.runId,
-    callNamespace: input.callNamespace,
-    parentStepName: input.parentStep.name,
-    stepIteration: input.stepIteration,
-  });
   const reviewIntegrityLimits = resolveReviewIntegrityLimits(input.contract.reviewBudget);
   const reviewerIntake = intakeReviewerOutputs({
     subResults: input.subResults,
@@ -71,7 +63,7 @@ export function prepareFindingManagerRound(
     ...reviewerIntake,
     items: [...interpretationRecovery.items, ...currentItems],
   };
-  const rawFindingsPath = input.ledgerStore.saveRawFindings(
+  input.ledgerStore.saveRawFindings(
     input.runId,
     input.parentStep.name,
     intake.items.map((item) => item.wire),
@@ -102,14 +94,12 @@ export function prepareFindingManagerRound(
   });
   return {
     previousLedger,
-    ledgerCopyPath,
     observation,
     stopBudgetLimits,
     stopBudgetRoundMarker,
     reviewIntegrityLimits,
     intake,
     interpretationRecoveryFailures: interpretationRecovery.failures,
-    rawFindingsPath,
     managerStep,
     providerInfo: input.optionsBuilder.resolveStepProviderModel(managerStep),
   };

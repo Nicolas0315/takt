@@ -8,6 +8,8 @@ import type { StepExecutorDeps } from '../core/workflow/engine/StepExecutor.js';
 import type { ParallelRunnerDeps } from '../core/workflow/engine/ParallelRunner.js';
 import { createStructuredOutputNormalizerRegistry } from '../core/workflow/engine/structured-output-normalizer.js';
 import { createRawFindingsStructuredOutput } from '../core/workflow/findings/manager-agent.js';
+import { parseFindingLedger } from '../core/workflow/findings/schemas.js';
+import type { FindingLedger } from '../core/workflow/findings/types.js';
 import { makeRule, makeStep } from './test-helpers.js';
 
 const { compactSessionBeforePhase1Mock, ingestFindingContractResultsMock } = vi.hoisted(() => ({
@@ -197,10 +199,8 @@ describe('session compaction Phase 1 wiring', () => {
       getLanguage: () => undefined,
       getInteractive: () => false,
       getWorkflowSteps: () => [{ name: 'review' }],
-      getWorkflowDefinitionSteps: () => [step],
       getWorkflowName: () => 'test-workflow',
       getWorkflowDescription: () => undefined,
-      getInheritedPeerReportPaths: () => [],
       getRetryNote: () => undefined,
       structuredCaller: {
         evaluateCondition: vi.fn(),
@@ -245,10 +245,8 @@ describe('session compaction Phase 1 wiring', () => {
       getLanguage: () => undefined,
       getInteractive: () => false,
       getWorkflowSteps: () => [{ name: 'review' }],
-      getWorkflowDefinitionSteps: () => [step],
       getWorkflowName: () => 'test-workflow',
       getWorkflowDescription: () => undefined,
-      getInheritedPeerReportPaths: () => [],
       getRetryNote: () => undefined,
       structuredCaller: {
         evaluateCondition: vi.fn(), judgeStatus: vi.fn(), decomposeTask: vi.fn(), requestMoreParts: vi.fn(),
@@ -304,7 +302,6 @@ describe('session compaction Phase 1 wiring', () => {
         buildAgentOptions: vi.fn().mockReturnValue(phase1Options),
         buildPhaseRunnerContext: vi.fn().mockReturnValue({ childProcessEnv: undefined }),
         buildFindingContractInstructionContext: vi.fn().mockReturnValue({
-          ledgerCopyPath: '.takt/runs/test-run/reports/findings-ledger.json',
           ledgerSummary: '{"findings":[]}',
           reportLedgerSummary: '{"ids":[]}',
           hasOpenFindings: false,
@@ -322,10 +319,8 @@ describe('session compaction Phase 1 wiring', () => {
       getLanguage: () => undefined,
       getInteractive: () => false,
       getWorkflowSteps: () => [{ name: 'review' }],
-      getWorkflowDefinitionSteps: () => [step],
       getWorkflowName: () => 'test-workflow',
       getWorkflowDescription: () => undefined,
-      getInheritedPeerReportPaths: () => [],
       getRetryNote: () => undefined,
       structuredCaller: {
         evaluateCondition: vi.fn(), judgeStatus: vi.fn(), decomposeTask: vi.fn(), requestMoreParts: vi.fn(),
@@ -334,20 +329,21 @@ describe('session compaction Phase 1 wiring', () => {
       findingContract: {} as NonNullable<StepExecutorDeps['findingContract']>,
       findingLedgerStore: {
         loadLedger: vi.fn().mockReturnValue({
-          version: 1,
           workflowName: 'test-workflow',
           nextId: 1,
           updatedAt: '2026-07-16T00:00:00.000Z',
           findings: [],
           rawFindings: [],
           conflicts: [],
-        }),
+          interpretations: [],
+        } satisfies FindingLedger),
       } as NonNullable<StepExecutorDeps['findingLedgerStore']>,
       refreshFindingsState: vi.fn(),
       emitEvent: vi.fn(),
       getRunId: () => 'test-run',
       getFindingCallNamespace: () => '',
     };
+    expect(() => parseFindingLedger(deps.findingLedgerStore!.loadLedger())).not.toThrow();
     const state = makeState();
     state.personaSessions.set(
       '["reviewer","opencode","opencode/big-pickle"]',
@@ -435,10 +431,8 @@ describe('session compaction Phase 1 wiring', () => {
       getLanguage: () => undefined,
       getInteractive: () => false,
       getWorkflowSteps: () => [{ name: 'review' }],
-      getWorkflowDefinitionSteps: () => [step],
       getWorkflowName: () => 'test-workflow',
       getWorkflowDescription: () => undefined,
-      getInheritedPeerReportPaths: () => [],
       getRetryNote: () => undefined,
       structuredCaller: {
         evaluateCondition: vi.fn(),

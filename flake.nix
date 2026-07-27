@@ -22,7 +22,7 @@
         system:
         let
           pkgs = import nixpkgs { inherit system; };
-          nodejs = pkgs.nodejs_22;
+          nodejs = pkgs.nodejs_24;
         in
         {
           default = pkgs.buildNpmPackage {
@@ -30,7 +30,7 @@
             version = packageJson.version;
             src = ./.;
 
-            npmDepsHash = "sha256-a2N2GmfNhhq55qd9P3sYHDCVJuFC3y8LHVDIGbMVrEM=";
+            npmDepsHash = "sha256-dlbV3QO5oXcWWQLoE0AHQA0IVwWxINdeWtZzEVLUHXA=";
             nodejs = nodejs;
             ONNXRUNTIME_NODE_INSTALL = "skip";
             PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = "1";
@@ -49,7 +49,7 @@
         system:
         let
           pkgs = import nixpkgs { inherit system; };
-          nodejs = pkgs.nodejs_22;
+          nodejs = pkgs.nodejs_24;
         in
         {
           default = pkgs.mkShell {
