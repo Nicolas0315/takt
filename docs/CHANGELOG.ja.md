@@ -6,6 +6,16 @@
 
 フォーマットは [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) に基づいています。
 
+## [0.54.0] - 2026-07-28
+
+### Added
+
+- `simple` ワークフローファミリー (#1117)。有能なモデルの判断を信頼し、オーケストレーションを最小限に抑えた 7 つのビルトインワークフローです。`simple`（計画 → テスト作成 → 実装 → コードレビュー → 修正ループ → 最終監督）、`simple-mini`（専用のテスト作成と最終監督を省略）、およびドメイン別の `simple-frontend`、`simple-backend`、`simple-cqrs`、`simple-dual`、`simple-dual-cqrs` で、各バリアントは共有の内部サブワークフロー `simple-core` に対応するナレッジとポリシーを注入します。各ステップはモデル自身に関連する利用可能スキルの選択を指示し、codex ではリポジトリ・ユーザーの Skill を継承します（`provider_options.codex.skills.repo/user: true`）。カタログに ✨ Simple カテゴリが追加され、🚀 Quick Start カテゴリの先頭が `simple` になりました。
+
+### Internal
+
+- スキルドキュメントのテストから文面に結合したアサーションを削除し、ビルトインファセット配備テストが新しい `use-relevant-skills` インストラクションパーシャルをカバーするようにしました (#1117)。
+
 ## [0.53.0] - 2026-07-27
 
 ### Removed

@@ -6,6 +6,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.54.0] - 2026-07-28
+
+### Added
+
+- The `simple` workflow family (#1117). Seven builtin workflows for capable models that trust the model's judgment and keep orchestration minimal: `simple` (plan → write tests → implement → code review → fix loop → final supervision), `simple-mini` (omits dedicated test writing and final supervision), and the domain variants `simple-frontend`, `simple-backend`, `simple-cqrs`, `simple-dual`, and `simple-dual-cqrs`, which inject the matching knowledge and policies into a shared internal `simple-core` subworkflow. The steps direct the model to select relevant available skills on its own, and on codex the family inherits repository and user Skills (`provider_options.codex.skills.repo/user: true`). The catalog gained a ✨ Simple category, and `simple` now leads the 🚀 Quick Start category.
+
+### Internal
+
+- Prose-coupled assertions were removed from the skill-docs tests, and the builtin-facet deployment test covers the new `use-relevant-skills` instruction partial (#1117).
+
 ## [0.53.0] - 2026-07-27
 
 ### Removed
