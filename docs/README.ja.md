@@ -13,6 +13,12 @@
   <a href="./README.ja.md">日本語</a>
 </p>
 
+<p align="center">
+  <a href="https://nrslib.github.io/takt/#tutorial">
+    <img src="./assets/tutorial-preview.ja.gif" alt="タスクの説明、キューへの追加、複数の AI エージェントによる実行を示す TAKT チュートリアル" width="720">
+  </a>
+</p>
+
 **AI コーディングエージェントの見張り番をやめる。**
 
 TAKT は、AI コーディングエージェントを再現可能な開発ワークフローとして動かす OSS CLI です。計画、実装、レビュー、修正ループ、人間への確認、権限、出力契約を YAML で定義し、隔離された worktree と追跡可能なログ付きでタスクを実行します。
