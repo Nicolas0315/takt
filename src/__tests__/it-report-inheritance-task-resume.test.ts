@@ -53,6 +53,7 @@ function createEnvironment(withFindingContract: boolean): TestEnvironment {
     '  callable: true',
     ...(withFindingContract ? [
       'finding_contract:',
+      '  backend: file',
       '  ledger_path: .takt/findings/review-ledger.json',
       '  raw_findings_path: .takt/findings/raw',
       '  manager:',

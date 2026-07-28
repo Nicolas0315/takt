@@ -1,6 +1,7 @@
 import type { ProviderType } from '../../shared/types/provider.js';
 
 export const FINDING_SEVERITIES = ['critical', 'high', 'medium', 'low'] as const;
+export const FINDING_CONTRACT_BACKENDS = ['file', 'sqlite'] as const;
 // 'invalidated': the finding's premise does not hold (deterministically verified:
 // its location does not exist / is out of range). Distinct from 'waived' (the
 // finding is valid but won't be fixed) — critical findings can never be waived,
@@ -14,6 +15,7 @@ export const FINDING_LIFECYCLES = ['new', 'persists', 'resolved', 'reopened', 'w
 export const FINDING_CONFLICT_STATUSES = ['active', 'resolved'] as const;
 
 export type FindingSeverity = typeof FINDING_SEVERITIES[number];
+export type FindingContractBackend = typeof FINDING_CONTRACT_BACKENDS[number];
 export type FindingStatus = typeof FINDING_STATUSES[number];
 export type FindingLifecycle = typeof FINDING_LIFECYCLES[number];
 export type FindingConflictStatus = typeof FINDING_CONFLICT_STATUSES[number];
@@ -77,6 +79,7 @@ export interface FindingContractReviewBudgetConfig {
 }
 
 export interface FindingContractConfig {
+  backend: FindingContractBackend;
   ledgerPath: string;
   rawFindingsPath: string;
   manager: FindingContractManagerConfig;

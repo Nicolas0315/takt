@@ -306,6 +306,7 @@ describe('StepExecutor', () => {
       },
       structuredOutputNormalizers: createStructuredOutputNormalizerRegistry([]),
       findingContract: {
+        backend: 'file',
         ledgerPath: '.takt/findings/ledger.json',
         rawFindingsPath: '.takt/findings/raw',
         manager: { persona: 'findings-manager', instruction: 'Reconcile.', outputContract: 'Return JSON.' },

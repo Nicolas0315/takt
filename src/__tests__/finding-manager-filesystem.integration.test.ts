@@ -45,6 +45,7 @@ import { executeAgent } from '../agents/agent-usecases.js';
 const executeAgentMock = vi.mocked(executeAgent);
 
 const FINDING_CONTRACT: FindingContractConfig = {
+  backend: 'file',
   ledgerPath: '.takt/findings/peer-review.json',
   rawFindingsPath: '.takt/findings/raw',
   manager: {

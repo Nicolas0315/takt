@@ -193,6 +193,7 @@ function makeHarness(initialLedger: FindingLedger): {
   };
   const parentStep: WorkflowStep = { kind: 'agent', name: 'reviewers', persona: 'reviewer', edit: false } as WorkflowStep;
   const contract = {
+    backend: 'file' as const,
     ledgerPath: '.takt/findings/ledger.json',
     rawFindingsPath: '.takt/findings/raw',
     manager: {

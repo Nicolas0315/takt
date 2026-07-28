@@ -614,15 +614,19 @@ export class FindingLedgerRepository {
     readonly runId: string;
     readonly scopeId: string;
     readonly reservationToken: string;
+    readonly leaseGeneration: number;
     readonly claimedAt: number;
   }): boolean {
     assertFindingContractEnabled(context, input.runId);
     const result = context.run(`
       INSERT INTO finding_adjudication_reservations (
-        run_id, scope_id, reservation_token, claimed_at
-      ) VALUES (?, ?, ?, ?)
-      ON CONFLICT (run_id, scope_id, reservation_token) DO NOTHING
-    `, input.runId, input.scopeId, input.reservationToken, input.claimedAt);
+        run_id, scope_id, reservation_token, lease_generation, claimed_at
+      ) VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT (run_id, scope_id, reservation_token) DO UPDATE SET
+        lease_generation = excluded.lease_generation,
+        claimed_at = excluded.claimed_at
+      WHERE finding_adjudication_reservations.lease_generation < excluded.lease_generation
+    `, input.runId, input.scopeId, input.reservationToken, input.leaseGeneration, input.claimedAt);
     return Number(result.changes) === 1;
   }
 
@@ -630,12 +634,14 @@ export class FindingLedgerRepository {
     readonly runId: string;
     readonly scopeId: string;
     readonly reservationToken: string;
+    readonly leaseGeneration: number;
   }): void {
     assertFindingContractEnabled(context, input.runId);
     const result = context.run(`
       DELETE FROM finding_adjudication_reservations
       WHERE run_id = ? AND scope_id = ? AND reservation_token = ?
-    `, input.runId, input.scopeId, input.reservationToken);
+        AND lease_generation = ?
+    `, input.runId, input.scopeId, input.reservationToken, input.leaseGeneration);
     if (Number(result.changes) !== 1) {
       throw new Error(
         `Finding adjudication reservation "${input.reservationToken}" does not exist`,

@@ -1204,6 +1204,52 @@ describe('Finding manager SQLite adapter', () => {
     });
   });
 
+  it('reclaims an adjudication reservation with the next lease generation', () => {
+    const { root, clock } = createRealRunStorage({
+      findingContractEnabled: true,
+    });
+    const lease1 = root.claimLease({
+      ownerKey: 'owner-1',
+      leaseDurationMs: 1_000,
+    });
+    const runtime1 = root.runtime({ lease: lease1 });
+    const execution1 = runtime1.execution.startStep({
+      stepKey: 'findings-manager',
+      expectedScopeRevision: 0,
+    });
+    const store1 = runtime1.findingManager({
+      workflowName: 'default',
+      producer: execution1.handle,
+    });
+
+    expect(store1.claimAdjudicationReservation('shared-token')).toBe(true);
+    expect(store1.claimAdjudicationReservation('shared-token')).toBe(false);
+    runtime1.execution.finishStep({
+      execution: execution1.handle,
+      status: 'completed',
+    });
+
+    clock.set(2_000);
+    const lease2 = root.claimLease({
+      ownerKey: 'owner-2',
+      leaseDurationMs: 1_000,
+    });
+    const runtime2 = root.runtime({ lease: lease2 });
+    const execution2 = runtime2.execution.startStep({
+      stepKey: 'findings-manager',
+      expectedScopeRevision: runtime2.execution.loadRuntime().scopeRevision,
+    });
+    const store2 = runtime2.findingManager({
+      workflowName: 'default',
+      producer: execution2.handle,
+    });
+
+    expect(store2.claimAdjudicationReservation('shared-token')).toBe(true);
+    expect(() => store1.releaseAdjudicationReservation('shared-token'))
+      .toThrow(/lease owner is stale/i);
+    expect(store2.releaseAdjudicationReservation('shared-token')).toBeUndefined();
+  });
+
   it('rejects Finding authority when FC is disabled without affecting execution', () => {
     const { root } = createRealRunStorage({ findingContractEnabled: false });
     const owner = root.claimLease({

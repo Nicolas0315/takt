@@ -65,6 +65,7 @@ function createFakeLedgerStore(): FindingLedgerStore {
 }
 
 const FAKE_FINDING_CONTRACT: FindingContractConfig = {
+  backend: 'file',
   ledgerPath: '.takt/findings/peer-review.json',
   rawFindingsPath: '.takt/findings/raw',
   manager: {
@@ -75,6 +76,7 @@ const FAKE_FINDING_CONTRACT: FindingContractConfig = {
 };
 
 const FAKE_FINDING_CONTRACT_WITH_INVALID_MANAGER_PROVIDER: FindingContractConfig = {
+  backend: 'file',
   ledgerPath: '.takt/findings/peer-review.json',
   rawFindingsPath: '.takt/findings/raw',
   manager: {
@@ -138,6 +140,7 @@ describe('WorkflowCallExecutor', () => {
       getOptions: () => ({
         projectCwd: '/tmp/project',
         reportDirName: 'run',
+        findingRunId: 'sqlite-finding-run-id',
         traceTaskMetadata,
       }),
       getMaxSteps: () => 10,
@@ -180,6 +183,7 @@ describe('WorkflowCallExecutor', () => {
     );
     const childOptions = createEngine.mock.calls[0]?.[3];
     expect(childOptions?.traceTaskMetadata).toBe(traceTaskMetadata);
+    expect(childOptions?.findingRunId).toBe('sqlite-finding-run-id');
     expect(childOptions?.resumeStackPrefix).toEqual([{
       workflow: 'parent',
       step: 'delegate',

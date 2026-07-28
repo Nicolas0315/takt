@@ -47,6 +47,7 @@ import { verifiedSourceQuoteFields } from './helpers/finding-evidence.js';
 import { initializeGitFixture } from './helpers/git-fixture.js';
 
 const FINDING_CONTRACT: FindingContractConfig = {
+  backend: 'file',
   ledgerPath: '.takt/findings/peer-review.json',
   rawFindingsPath: '.takt/findings/raw',
   manager: {

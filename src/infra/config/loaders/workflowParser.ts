@@ -102,6 +102,7 @@ function normalizeFindingContractConfig(
   const providerRoutingPersonaKey = raw.manager.persona.trim();
 
   return {
+    backend: raw.backend,
     ledgerPath: raw.ledger_path,
     rawFindingsPath: raw.raw_findings_path,
     manager: {

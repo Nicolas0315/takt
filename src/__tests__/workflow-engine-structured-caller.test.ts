@@ -265,6 +265,7 @@ describe('WorkflowEngine structured caller defaults', () => {
       maxSteps: 3,
       initialStep: 'reviewers',
       findingContract: {
+        backend: 'file',
         ledgerPath: '.takt/findings/peer-review.json',
         rawFindingsPath: '.takt/findings/raw',
         manager: {
@@ -488,6 +489,7 @@ describe('WorkflowEngine structured caller defaults', () => {
       maxSteps: 3,
       initialStep: 'review',
       findingContract: {
+        backend: 'file',
         ledgerPath: '.takt/findings/peer-review.json',
         rawFindingsPath: '.takt/findings/raw',
         manager: {
@@ -609,6 +611,7 @@ describe('WorkflowEngine structured caller defaults', () => {
       maxSteps: 3,
       initialStep: 'review',
       findingContract: {
+        backend: 'file',
         ledgerPath: '.takt/findings/peer-review.json',
         rawFindingsPath: '.takt/findings/raw',
         manager: {
@@ -663,6 +666,7 @@ describe('WorkflowEngine structured caller defaults', () => {
       maxSteps: 2,
       initialStep: 'review',
       findingContract: {
+        backend: 'file',
         ledgerPath: '.takt/findings/peer-review.json',
         rawFindingsPath: '.takt/findings/raw',
         manager: { persona: 'findings-manager', instruction: 'findings-manager', outputContract: 'findings-manager' },
@@ -741,6 +745,7 @@ describe('WorkflowEngine structured caller defaults', () => {
       maxSteps: 3,
       initialStep: 'review',
       findingContract: {
+        backend: 'file',
         ledgerPath: '.takt/findings/peer-review.json',
         rawFindingsPath: '.takt/findings/raw',
         manager: {
@@ -824,6 +829,7 @@ describe('WorkflowEngine structured caller defaults', () => {
       maxSteps: 3,
       initialStep: 'review',
       findingContract: {
+        backend: 'file',
         ledgerPath: '.takt/findings/peer-review.json',
         rawFindingsPath: '.takt/findings/raw',
         manager: {
@@ -924,6 +930,7 @@ describe('WorkflowEngine structured caller defaults', () => {
       maxSteps: 3,
       initialStep: 'final-gate',
       findingContract: {
+        backend: 'file',
         ledgerPath: '.takt/findings/peer-review.json',
         rawFindingsPath: '.takt/findings/raw',
         manager: {
@@ -1023,6 +1030,7 @@ describe('WorkflowEngine structured caller defaults', () => {
       maxSteps: 3,
       initialStep: 'final-gate',
       findingContract: {
+        backend: 'file',
         ledgerPath: '.takt/findings/peer-review.json',
         rawFindingsPath: '.takt/findings/raw',
         manager: {
@@ -1132,6 +1140,7 @@ describe('WorkflowEngine structured caller defaults', () => {
       maxSteps: 2,
       initialStep: 'reviewers',
       findingContract: {
+        backend: 'file',
         ledgerPath: '.takt/findings/peer-review.json',
         rawFindingsPath: '.takt/findings/raw',
         manager: {
@@ -1230,6 +1239,7 @@ describe('WorkflowEngine structured caller defaults', () => {
       maxSteps: 2,
       initialStep: 'reviewers',
       findingContract: {
+        backend: 'file',
         ledgerPath: '.takt/findings/peer-review.json',
         rawFindingsPath: '.takt/findings/raw',
         manager: {
@@ -1337,6 +1347,7 @@ describe('WorkflowEngine structured caller defaults', () => {
       maxSteps: 2,
       initialStep: 'reviewers',
       findingContract: {
+        backend: 'file',
         ledgerPath: '.takt/findings/peer-review.json',
         rawFindingsPath: '.takt/findings/raw',
         manager: {
@@ -1476,6 +1487,7 @@ describe('WorkflowEngine structured caller defaults', () => {
       maxSteps: 3,
       initialStep: 'reviewers',
       findingContract: {
+        backend: 'file',
         ledgerPath: '.takt/findings/peer-review.json',
         rawFindingsPath: '.takt/findings/raw',
         manager: {
@@ -1654,6 +1666,7 @@ describe('WorkflowEngine structured caller defaults', () => {
       maxSteps: 3,
       initialStep: 'reviewers',
       findingContract: {
+        backend: 'file',
         ledgerPath: '.takt/findings/peer-review.json',
         rawFindingsPath: '.takt/findings/raw',
         manager: {
@@ -1851,6 +1864,7 @@ describe('WorkflowEngine structured caller defaults', () => {
       maxSteps: 3,
       initialStep: 'reviewers',
       findingContract: {
+        backend: 'file',
         ledgerPath: '.takt/findings/peer-review.json',
         rawFindingsPath: '.takt/findings/raw',
         manager: {
@@ -2006,6 +2020,7 @@ describe('WorkflowEngine structured caller defaults', () => {
       maxSteps: 3,
       initialStep: 'reviewers',
       findingContract: {
+        backend: 'file',
         ledgerPath: '.takt/findings/peer-review.json',
         rawFindingsPath: '.takt/findings/raw',
         manager: {
@@ -2200,6 +2215,7 @@ describe('WorkflowEngine structured caller defaults', () => {
       maxSteps: 3,
       initialStep: 'reviewers',
       findingContract: {
+        backend: 'file',
         ledgerPath: '.takt/findings/peer-review.json',
         rawFindingsPath: '.takt/findings/raw',
         manager: {
@@ -2386,6 +2402,7 @@ describe('WorkflowEngine structured caller defaults', () => {
       maxSteps: 3,
       initialStep: 'reviewers',
       findingContract: {
+        backend: 'file',
         ledgerPath: '.takt/findings/peer-review.json',
         rawFindingsPath: '.takt/findings/raw',
         manager: {
@@ -2609,6 +2626,7 @@ describe('WorkflowEngine structured caller defaults', () => {
       maxSteps: 3,
       initialStep: 'reviewers',
       findingContract: {
+        backend: 'file',
         ledgerPath: '.takt/findings/peer-review.json',
         rawFindingsPath: '.takt/findings/raw',
         manager: {
@@ -2791,6 +2809,7 @@ describe('WorkflowEngine structured caller defaults', () => {
       maxSteps: 2,
       initialStep: 'reviewers',
       findingContract: {
+        backend: 'file',
         ledgerPath: '.takt/findings/peer-review.json',
         rawFindingsPath: '.takt/findings/raw',
         manager: {
@@ -2883,6 +2902,7 @@ describe('WorkflowEngine structured caller defaults', () => {
       maxSteps: 2,
       initialStep: 'review',
       findingContract: {
+        backend: 'file',
         ledgerPath: '.takt/findings/peer-review.json',
         rawFindingsPath: '.takt/findings/raw',
         manager: {
@@ -2981,6 +3001,7 @@ describe('WorkflowEngine structured caller defaults', () => {
       maxSteps: 2,
       initialStep: 'reviewers',
       findingContract: {
+        backend: 'file',
         ledgerPath: '.takt/findings/peer-review.json',
         rawFindingsPath: '.takt/findings/raw',
         manager: {
@@ -3103,6 +3124,7 @@ describe('WorkflowEngine structured caller defaults', () => {
       maxSteps: 2,
       initialStep: 'reviewers',
       findingContract: {
+        backend: 'file',
         ledgerPath: '.takt/findings/peer-review.json',
         rawFindingsPath: '.takt/findings/raw',
         manager: {
@@ -3210,6 +3232,7 @@ describe('WorkflowEngine structured caller defaults', () => {
       maxSteps: 2,
       initialStep: 'reviewers',
       findingContract: {
+        backend: 'file',
         ledgerPath: '.takt/findings/peer-review.json',
         rawFindingsPath: '.takt/findings/raw',
         manager: {
@@ -3354,6 +3377,7 @@ describe('WorkflowEngine structured caller defaults', () => {
       maxSteps: 3,
       initialStep: 'reviewers',
       findingContract: {
+        backend: 'file',
         ledgerPath: '.takt/findings/peer-review.json',
         rawFindingsPath: '.takt/findings/raw',
         manager: {
@@ -3503,6 +3527,7 @@ describe('WorkflowEngine structured caller defaults', () => {
       maxSteps: 3,
       initialStep: 'delegate',
       findingContract: {
+        backend: 'file',
         ledgerPath: '.takt/findings/peer-review.json',
         rawFindingsPath: '.takt/findings/raw',
         manager: {
@@ -3586,6 +3611,7 @@ describe('WorkflowEngine structured caller defaults', () => {
       maxSteps: 3,
       initialStep: 'fanout',
       findingContract: {
+        backend: 'file',
         ledgerPath: '.takt/findings/peer-review.json',
         rawFindingsPath: '.takt/findings/raw',
         manager: {
@@ -3760,6 +3786,7 @@ describe('WorkflowEngine structured caller defaults', () => {
       maxSteps: 10,
       initialStep: 'delegate',
       findingContract: {
+        backend: 'file',
         ledgerPath: '.takt/findings/peer-review.json',
         rawFindingsPath: '.takt/findings/raw',
         manager: {

@@ -442,6 +442,9 @@ export interface WorkflowEngineOptions {
     contract: FindingContractConfig;
     ledgerStore: FindingLedgerStore;
   };
+  findingLedgerStore?: FindingLedgerStore;
+  /** Identifier stamped into Finding observations and raw finding identities. */
+  findingRunId?: string;
   /**
    * workflow_call の呼び出しスタックを表す名前空間。raw finding id にこの値を
    * 混ぜることで、親の parallel から同じ子ワークフローを複数同時に呼んだ場合の

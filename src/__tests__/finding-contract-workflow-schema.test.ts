@@ -22,10 +22,53 @@ function makeWorkflowWithFindingContract(findingContract: unknown) {
 }
 
 describe('workflow finding_contract schema', () => {
+  it.each(['file', 'sqlite'] as const)(
+    'should require and preserve the %s finding_contract backend',
+    (backend) => {
+      const workflow = normalizeWorkflowConfig(
+        makeWorkflowWithFindingContract({
+          backend,
+          ledger_path: '.takt/findings/peer-review.json',
+          raw_findings_path: '.takt/findings/raw',
+          manager: {
+            persona: 'findings-manager',
+            instruction: 'findings-manager',
+            output_contract: 'findings-manager',
+          },
+        }),
+        '/tmp/project',
+      );
+
+      expect(workflow.findingContract?.backend).toBe(backend);
+    },
+  );
+
+  it.each([undefined, 'memory', 'FILE'])(
+    'should reject missing or unsupported finding_contract backend %s',
+    (backend) => {
+      const findingContract = {
+        ledger_path: '.takt/findings/peer-review.json',
+        raw_findings_path: '.takt/findings/raw',
+        manager: {
+          persona: 'findings-manager',
+          instruction: 'findings-manager',
+          output_contract: 'findings-manager',
+        },
+        ...(backend === undefined ? {} : { backend }),
+      };
+
+      expect(() => normalizeWorkflowConfig(
+        makeWorkflowWithFindingContract(findingContract),
+        '/tmp/project',
+      )).toThrow();
+    },
+  );
+
   it('should normalize top-level finding_contract without changing step definitions', () => {
     const workflow = normalizeWorkflowConfig({
       name: 'finding-contract-workflow',
       finding_contract: {
+        backend: 'file',
         ledger_path: '.takt/findings/peer-review.json',
         raw_findings_path: '.takt/findings/raw',
         manager: {
@@ -47,6 +90,7 @@ describe('workflow finding_contract schema', () => {
     }, '/tmp/project');
 
     expect(workflow.findingContract).toMatchObject({
+      backend: 'file',
       ledgerPath: '.takt/findings/peer-review.json',
       rawFindingsPath: '.takt/findings/raw',
       manager: {
@@ -70,6 +114,7 @@ describe('workflow finding_contract schema', () => {
     const workflow = normalizeWorkflowConfig({
       name: 'finding-contract-workflow-no-stop-budget',
       finding_contract: {
+        backend: 'file',
         ledger_path: '.takt/findings/peer-review.json',
         raw_findings_path: '.takt/findings/raw',
         manager: {
@@ -97,6 +142,7 @@ describe('workflow finding_contract schema', () => {
     const workflow = normalizeWorkflowConfig({
       name: 'finding-contract-workflow-stop-budget',
       finding_contract: {
+        backend: 'file',
         ledger_path: '.takt/findings/peer-review.json',
         raw_findings_path: '.takt/findings/raw',
         manager: {
@@ -128,6 +174,7 @@ describe('workflow finding_contract schema', () => {
     const workflow = normalizeWorkflowConfig({
       name: 'finding-contract-workflow-partial-stop-budget',
       finding_contract: {
+        backend: 'file',
         ledger_path: '.takt/findings/peer-review.json',
         raw_findings_path: '.takt/findings/raw',
         manager: {
@@ -159,6 +206,7 @@ describe('workflow finding_contract schema', () => {
       normalizeWorkflowConfig({
         name: 'invalid-stop-budget-workflow',
         finding_contract: {
+          backend: 'file',
           ledger_path: '.takt/findings/peer-review.json',
           raw_findings_path: '.takt/findings/raw',
           manager: {
@@ -201,6 +249,7 @@ describe('workflow finding_contract schema', () => {
         normalizeWorkflowConfig({
           name: 'invalid-stop-budget-shape-workflow',
           finding_contract: {
+            backend: 'file',
             ledger_path: '.takt/findings/peer-review.json',
             raw_findings_path: '.takt/findings/raw',
             manager: {
@@ -229,6 +278,7 @@ describe('workflow finding_contract schema', () => {
     const workflow = normalizeWorkflowConfig({
       name: 'finding-contract-manager-provider-workflow',
       finding_contract: {
+        backend: 'file',
         ledger_path: '.takt/findings/peer-review.json',
         raw_findings_path: '.takt/findings/raw',
         manager: {
@@ -277,6 +327,7 @@ describe('workflow finding_contract schema', () => {
       const workflow = normalizeWorkflowConfig({
         name: 'finding-contract-workflow',
         finding_contract: {
+          backend: 'file',
           ledger_path: '.takt/findings/peer-review.json',
           raw_findings_path: '.takt/findings/raw',
           manager: {
@@ -382,6 +433,7 @@ describe('workflow finding_contract schema', () => {
         requires_finding_contract: true,
       },
       finding_contract: {
+        backend: 'file',
         ledger_path: '.takt/findings/child.json',
         raw_findings_path: '.takt/findings/child/raw',
         manager: {
@@ -488,6 +540,7 @@ describe('workflow finding_contract schema', () => {
     const workflow = normalizeWorkflowConfig({
       name: 'parallel-findings-rule-workflow',
       finding_contract: {
+        backend: 'file',
         ledger_path: '.takt/findings/peer-review.json',
         raw_findings_path: '.takt/findings/raw',
         manager: {
@@ -527,6 +580,7 @@ describe('workflow finding_contract schema', () => {
     const workflow = normalizeWorkflowConfig({
       name: 'aggregate-findings-guard-workflow',
       finding_contract: {
+        backend: 'file',
         ledger_path: '.takt/findings/peer-review.json',
         raw_findings_path: '.takt/findings/raw',
         manager: {
@@ -574,6 +628,7 @@ describe('workflow finding_contract schema', () => {
     const workflow = normalizeWorkflowConfig({
       name: 'loop-monitor-findings-rule-workflow',
       finding_contract: {
+        backend: 'file',
         ledger_path: '.takt/findings/peer-review.json',
         raw_findings_path: '.takt/findings/raw',
         manager: {
@@ -616,6 +671,7 @@ describe('workflow finding_contract schema', () => {
       normalizeWorkflowConfig({
         name: 'invalid-finding-contract-workflow',
         finding_contract: {
+          backend: 'file',
           raw_findings_path: '.takt/findings/raw',
           manager: {
             persona: 'findings-manager',
@@ -642,6 +698,7 @@ describe('workflow finding_contract schema', () => {
       normalizeWorkflowConfig({
         name: 'invalid-finding-contract-workflow',
         finding_contract: {
+          backend: 'file',
           ledger_path: '.takt/findings/peer-review.json',
           raw_findings_path: '.takt/findings/raw',
           manager: {
@@ -667,6 +724,7 @@ describe('workflow finding_contract schema', () => {
 
   it('should reject invalid finding_contract raw shapes', () => {
     const validFindingContract = {
+      backend: 'file',
       ledger_path: '.takt/findings/peer-review.json',
       raw_findings_path: '.takt/findings/raw',
       manager: {

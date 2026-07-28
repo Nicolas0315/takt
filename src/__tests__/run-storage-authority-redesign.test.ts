@@ -192,6 +192,73 @@ describe('run storage authority redesign', () => {
     expect(store.loadLedger()).toEqual(staged);
   });
 
+  it('runs SQLite ledger callbacks outside the write transaction', async () => {
+    const { root } = createRealRunStorage({ findingContractEnabled: true });
+    const owner = claim(root);
+    const runtime = root.runtime({ lease: owner });
+    const execution = runtime.execution.startStep({
+      stepKey: 'findings-manager-short-ledger-update',
+      expectedScopeRevision: 0,
+    });
+    const store = runtime.findingManager({
+      workflowName: 'default',
+      producer: execution.handle,
+    });
+
+    await store.updateLedger((current) => {
+      expect(store.claimAdjudicationReservation('reservation-in-mutator')).toBe(true);
+      store.releaseAdjudicationReservation('reservation-in-mutator');
+      return {
+        ledger: { ...current, nextId: 2 },
+        result: undefined,
+      };
+    }, (current, mutation) => {
+      expect(root.readResumeSnapshot().run.runId).toBeDefined();
+      return {
+        mutation: {
+          ledger: {
+            ...mutation.ledger,
+            workflowName: current.workflowName,
+          },
+          result: mutation.result,
+        },
+        publish: true,
+      };
+    });
+
+    expect(store.loadLedger().nextId).toBe(2);
+  });
+
+  it('fails fast on a SQLite ledger revision change between read and CAS write', async () => {
+    const { root } = createRealRunStorage({ findingContractEnabled: true });
+    const owner = claim(root);
+    const runtime = root.runtime({ lease: owner });
+    const execution = runtime.execution.startStep({
+      stepKey: 'findings-manager-ledger-cas',
+      expectedScopeRevision: 0,
+    });
+    const store = runtime.findingManager({
+      workflowName: 'default',
+      producer: execution.handle,
+    });
+    let nestedUpdate: ReturnType<typeof store.updateLedger> | undefined;
+
+    await expect(Promise.resolve().then(() => store.updateLedger((current) => {
+      nestedUpdate = store.updateLedger((nestedCurrent) => ({
+        ledger: { ...nestedCurrent, nextId: 2 },
+        result: undefined,
+      }));
+      return {
+        ledger: { ...current, nextId: 3 },
+        result: undefined,
+      };
+    }))).rejects.toThrow(/Finding ledger CAS mismatch/);
+
+    expect(nestedUpdate).toBeDefined();
+    await nestedUpdate;
+    expect(store.loadLedger().nextId).toBe(2);
+  });
+
   it('does not expose raw SQL write contexts from the public root or package boundary', () => {
     const { root } = createRealRunStorage();
 

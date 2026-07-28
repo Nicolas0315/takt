@@ -211,6 +211,7 @@ describe('previewPrompts', () => {
       name: 'finding-contract-preview',
       maxSteps: 1,
       findingContract: {
+        backend: 'file',
         ledgerPath: '.takt/findings/peer-review.json',
         rawFindingsPath: '.takt/findings/raw',
         manager: {
@@ -243,6 +244,7 @@ describe('previewPrompts', () => {
       name: 'finding-contract-preview',
       maxSteps: 1,
       findingContract: {
+        backend: 'file',
         ledgerPath: '.takt/findings/peer-review.json',
         rawFindingsPath: '.takt/findings/raw',
         manager: {
@@ -283,6 +285,7 @@ describe('previewPrompts', () => {
       name: 'finding-contract-preview',
       maxSteps: 1,
       findingContract: {
+        backend: 'file',
         ledgerPath: '.takt/findings/peer-review.json',
         rawFindingsPath: '.takt/findings/raw',
         manager: {
@@ -317,6 +320,7 @@ describe('previewPrompts', () => {
       name: 'finding-contract-preview',
       maxSteps: 1,
       findingContract: {
+        backend: 'file',
         ledgerPath: '.takt/findings/peer-review.json',
         rawFindingsPath: '.takt/findings/raw',
         manager: {
@@ -352,6 +356,7 @@ describe('previewPrompts', () => {
       name: 'finding-contract-preview',
       maxSteps: 1,
       findingContract: {
+        backend: 'file',
         ledgerPath: '.takt/findings/peer-review.json',
         rawFindingsPath: '.takt/findings/raw',
         manager: {
@@ -402,6 +407,7 @@ describe('previewPrompts', () => {
       name: 'finding-contract-preview',
       maxSteps: 1,
       findingContract: {
+        backend: 'file',
         ledgerPath: '.takt/findings/peer-review.json',
         rawFindingsPath: '.takt/findings/raw',
         manager: {
@@ -444,6 +450,7 @@ describe('previewPrompts', () => {
       name: 'finding-contract-preview',
       maxSteps: 1,
       findingContract: {
+        backend: 'file',
         ledgerPath: '.takt/findings/peer-review.json',
         rawFindingsPath: '.takt/findings/raw',
         manager: {

@@ -203,6 +203,7 @@ TAKT は 5 種類の step をサポートしています。必要な構造に応
 
 ```yaml
 finding_contract:
+  backend: sqlite
   ledger_path: .takt/findings/review.json
   raw_findings_path: .takt/findings/review/raw
   manager:
@@ -212,6 +213,8 @@ finding_contract:
     provider: codex
     model: gpt-5.5
 ```
+
+`backend` は必須です。`sqlite` は Finding Contract の正準状態をrun内の `run.sqlite` に保存します。`file` は `ledger_path` と `raw_findings_path` を使う従来のファイル保存を維持します。
 
 指定した値は Finding Manager の step レベル `provider` / `model` として扱われます。CLI と環境変数の明示 override は、これらより高い優先順位を維持します。manager の値は `provider_routing`、deprecated の `persona_providers.findings-manager`、effective auto routing、workflow/project/global fallback より優先されます。両方とも未指定の場合、manager は通常の workflow step provider/model 解決を維持します。`provider` だけを指定すると、下位優先度の model fallback は停止し、選択した provider 自身のデフォルトを使います。明示 model が必須の provider では検証エラーになります。
 

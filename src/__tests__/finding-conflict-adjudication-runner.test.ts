@@ -95,6 +95,7 @@ const executeAgentMock = vi.mocked(executeAgent);
 
 function makeContract(cwd: string): FindingContractConfig {
   return {
+    backend: 'file',
     ledgerPath: '.takt/findings/peer-review.json',
     rawFindingsPath: '.takt/findings/raw',
     manager: {

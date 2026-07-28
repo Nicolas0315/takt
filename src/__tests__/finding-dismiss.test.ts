@@ -453,6 +453,7 @@ describe('runFindingManagerForStep dismiss round trip', () => {
     try {
       const result = await runFindingManagerForStep({
       contract: {
+        backend: 'file',
         ledgerPath: '.takt/findings/ledger.json',
         rawFindingsPath: '.takt/findings/raw',
         manager: { persona: 'findings-manager', instruction: 'Reconcile findings.', outputContract: 'Return JSON.' },

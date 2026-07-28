@@ -132,6 +132,7 @@ describe('Finding Contract integration flow', () => {
     const workflow = normalizeWorkflowConfig({
       name: 'finding-contract-workflow',
       finding_contract: {
+        backend: 'file',
         ledger_path: '.takt/findings/peer-review.json',
         raw_findings_path: '.takt/findings/raw',
         manager: {

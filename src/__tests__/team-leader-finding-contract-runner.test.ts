@@ -132,6 +132,7 @@ describe('TeamLeaderRunner finding_contract_fix', () => {
       saveLedgerSnapshot: vi.fn(),
     } as unknown as FindingLedgerStore;
     const findingContract: FindingContractConfig = {
+      backend: 'file',
       ledgerPath: '.takt/findings.json',
       rawFindingsPath: '.takt/raw',
       manager: {
@@ -593,6 +594,7 @@ describe('TeamLeaderRunner finding_contract_fix', () => {
       saveLedgerSnapshot: vi.fn(),
     } as unknown as FindingLedgerStore;
     const findingContract: FindingContractConfig = {
+      backend: 'file',
       ledgerPath: '.takt/findings.json',
       rawFindingsPath: '.takt/raw',
       manager: {

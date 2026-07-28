@@ -40,6 +40,7 @@ function readEncodedRows(
 }
 
 export interface ExecutionRuntimeState {
+  readonly scopeRevision: number;
   readonly scope: RuntimeRow;
   readonly stepIterations: Readonly<Record<string, number>>;
   readonly stepExecutions: readonly RuntimeRow[];
@@ -80,6 +81,9 @@ export function readExecutionRuntime(
   if (scope === undefined) {
     throw new Error(`Scope "${runId}/${scopeId}" does not exist`);
   }
+  if (!Number.isSafeInteger(scope.revision) || (scope.revision as number) < 0) {
+    throw new Error(`Scope "${runId}/${scopeId}" revision is invalid`);
+  }
   const counters = context.all<{ stepId: string; iteration: number }>(`
     SELECT step_id AS stepId, max(iteration) AS iteration
     FROM step_executions
@@ -103,6 +107,7 @@ export function readExecutionRuntime(
     assertEncodedRows([latestResponse], 'response');
   }
   return {
+    scopeRevision: scope.revision as number,
     scope,
     stepIterations: Object.fromEntries(
       counters.map((counter) => [counter.stepId, counter.iteration]),

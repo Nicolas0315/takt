@@ -5,6 +5,7 @@ instructions:
 report_formats:
   findings-manager: Return the Finding Manager JSON contract.
 finding_contract:
+  backend: file
   ledger_path: .takt/findings/peer-review.json
   raw_findings_path: .takt/findings/raw
   manager:

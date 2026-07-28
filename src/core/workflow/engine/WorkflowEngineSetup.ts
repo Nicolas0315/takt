@@ -50,7 +50,10 @@ interface WorkflowEngineSetupParams {
   getReportDir: () => string;
   getRunPaths: () => RunPaths;
   getMaxSteps: () => WorkflowMaxSteps;
-  options: WorkflowEngineOptions & { structuredOutputNormalizers: StructuredOutputNormalizerRegistry };
+  options: WorkflowEngineOptions & {
+    structuredOutputNormalizers: StructuredOutputNormalizerRegistry;
+    findingRunId: string;
+  };
   structuredCaller: StructuredCaller;
   sharedRuntime: WorkflowSharedRuntimeState;
   resumeStackPrefix: WorkflowEngineOptions['resumeStackPrefix'];
@@ -217,7 +220,7 @@ export function createWorkflowEngineServices(params: WorkflowEngineSetupParams):
     emitEvent: params.emitEvent,
     recordSynthesizedAgentUsage: (stepName, providerInfo, success, usage) =>
       recordAgentUsageEvent(params.options, stepName, 'normal', providerInfo, success, usage),
-    getRunId: () => params.runPaths.slug,
+    getRunId: () => params.options.findingRunId,
     getFindingCallNamespace: () => params.options.findingCallNamespace ?? '',
     ...phaseRelay,
   });
@@ -264,7 +267,7 @@ export function createWorkflowEngineServices(params: WorkflowEngineSetupParams):
     getWorkflowCallRunner: () => workflowCallRunner,
     updateMaxSteps: params.updateMaxSteps,
     setActiveResumePoint: params.setActiveResumePoint,
-    getRunId: () => params.runPaths.slug,
+    getRunId: () => params.options.findingRunId,
     getFindingCallNamespace: () => params.options.findingCallNamespace ?? '',
     runQualityGates,
     ...phaseRelay,

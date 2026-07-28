@@ -150,6 +150,7 @@ Team Leader はタスクを独立 part に分解する。`initial_max_parts` を
 
 ```yaml
 finding_contract:
+  backend: sqlite
   ledger_path: .takt/findings/review.json
   raw_findings_path: .takt/findings/review/raw
   manager:
@@ -159,6 +160,8 @@ finding_contract:
     provider: codex
     model: gpt-5.5
 ```
+
+`backend` は必須。`sqlite` は Finding Contract の正準状態をrun内の `run.sqlite` に保存し、`file` は `ledger_path` / `raw_findings_path` を使う従来のファイル保存を維持する。
 
 指定値は step レベル provider/model として扱われ、`provider_routing`、deprecated の `persona_providers.findings-manager`、workflow 既定値、解決済み入力より優先される。両方とも未指定の場合は通常の workflow step provider/model 解決を使う。`provider` だけを指定すると下位優先度の model fallback は停止し、明示 model が必須の provider では検証エラーになる。
 

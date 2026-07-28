@@ -264,6 +264,7 @@ function makeHarness(
   } as never);
   const runInput = {
     contract: {
+      backend: 'file',
       ledgerPath: '.takt/findings/ledger.json',
       rawFindingsPath: '.takt/findings/raw',
       manager: {

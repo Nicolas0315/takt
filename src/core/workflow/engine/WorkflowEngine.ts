@@ -64,6 +64,7 @@ const log = createLogger('workflow-engine');
 type WorkflowEngineRuntimeOptions = WorkflowEngineOptions & {
   structuredOutputNormalizers: StructuredOutputNormalizerRegistry;
   autoRoutingEstimatorSource: AutoRoutingEstimatorSource;
+  findingRunId: string;
 };
 export type {
   WorkflowEvents,
@@ -186,6 +187,7 @@ export class WorkflowEngine extends EventEmitter {
       routingRuntime,
       routingSensitiveValues,
       traceTaskMetadata,
+      findingRunId: options.findingRunId ?? runPaths.slug,
     };
     this.projectCwd = this.options.projectCwd;
     this.cwd = cwd;
@@ -211,11 +213,16 @@ export class WorkflowEngine extends EventEmitter {
     // 自前 finding_contract と継承の同時指定は WorkflowValidator で設定エラーに
     // しているため、ここでは「継承 or 自前」のどちらか一方だけが来る前提で良い。
     this.findingContract = this.options.inheritedFindingContract?.contract ?? this.config.findingContract;
+    if (this.findingContract === undefined && this.options.findingLedgerStore !== undefined) {
+      throw new Error('FindingLedgerStore requires finding_contract');
+    }
     if (this.findingContract) {
       // 継承時は親と同一の FindingLedgerStore インスタンスをそのまま使う。
       // ledger_path / raw_findings_path はワークフロー名に紐づくため、子が
       // 自前で store を作り直すと親の when(findings.*) と別の台帳を見てしまう。
-      this.findingLedgerStore = this.options.inheritedFindingContract?.ledgerStore ?? createFindingLedgerStore({
+      this.findingLedgerStore = this.options.inheritedFindingContract?.ledgerStore
+        ?? this.options.findingLedgerStore
+        ?? createFindingLedgerStore({
         projectCwd: this.projectCwd,
         reportDir: this.runPaths.reportsAbs,
         workflowName: this.config.name,
@@ -296,7 +303,7 @@ export class WorkflowEngine extends EventEmitter {
           // （子の名前）を使うと reconcile 文脈が親の台帳の workflowName と
           // 食い違う（StepExecutor / ParallelRunner の manager 経路と同じ理由）。
           workflowName: this.findingLedgerStore.workflowName,
-          runId: this.runPaths.slug,
+          runId: this.options.findingRunId,
           refreshFindingsState: this.refreshFindingsState.bind(this),
           emitEvent: (event, ...args) => this.emit(event as never, ...args as []),
         })

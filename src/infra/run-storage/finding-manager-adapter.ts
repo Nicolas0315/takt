@@ -279,31 +279,43 @@ export function createRunFindingManagerStore(
         mutation: FindingLedgerMutation<Result>,
       ) => FindingLedgerPublicationDecision<Result>,
     ): Promise<FindingLedgerMutation<Result>> => {
+      const record = access.read((context) => findings.loadLedger(context, {
+        runId: options.runId,
+        scopeId: options.scopeId,
+      }));
+      const current = normalizeFindingLedger(record.ledger, options.workflowName);
+      const mutation = normalizeFindingLedgerMutation(
+        current,
+        mutator(structuredClone(current)),
+        options.workflowName,
+      );
+      const decision = revalidateBeforeSave === undefined
+        ? { mutation, publish: true }
+        : normalizeDecision(
+            current,
+            revalidateBeforeSave(
+              structuredClone(current),
+              cloneFindingLedgerMutation(mutation),
+            ),
+            options.workflowName,
+          );
       const committed = access.write(options.owner, (context, now) => {
-        const record = findings.loadLedger(context, {
-          runId: options.runId,
-          scopeId: options.scopeId,
-        });
-        const current = normalizeFindingLedger(record.ledger, options.workflowName);
-        const mutation = normalizeFindingLedgerMutation(
-          current,
-          mutator(structuredClone(current)),
-          options.workflowName,
-        );
-        const decision = revalidateBeforeSave === undefined
-          ? { mutation, publish: true }
-          : normalizeDecision(
-              current,
-              revalidateBeforeSave(
-                structuredClone(current),
-                cloneFindingLedgerMutation(mutation),
-              ),
-              options.workflowName,
-            );
         if (
           current.pendingManagerCommit !== undefined
           && canonicalJson(decision.mutation.ledger) === canonicalJson(current)
         ) {
+          const latest = findings.loadLedger(context, {
+            runId: options.runId,
+            scopeId: options.scopeId,
+          });
+          if (
+            latest.workflowName !== options.workflowName
+            || latest.revision !== record.revision
+          ) {
+            throw new Error(
+              `Finding ledger CAS mismatch for "${options.runId}/${options.scopeId}"`,
+            );
+          }
           return {
             ledger: current,
             result: decision.mutation.result,
@@ -359,6 +371,7 @@ export function createRunFindingManagerStore(
           runId: options.runId,
           scopeId: options.scopeId,
           reservationToken,
+          leaseGeneration: options.owner.generation,
           claimedAt: now,
         })
       ))
@@ -369,6 +382,7 @@ export function createRunFindingManagerStore(
           runId: options.runId,
           scopeId: options.scopeId,
           reservationToken,
+          leaseGeneration: options.owner.generation,
         });
       });
     },

@@ -10,6 +10,10 @@ const {
   disabledObservability,
   mockIsDebugEnabled,
   mockWritePromptLog,
+  mockCreateSqliteFindingContractLifecycle,
+  mockLifecycleDispose,
+  mockEngineOptions,
+  workflowPrimaryError,
   MockWorkflowEngine,
 } = vi.hoisted(() => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -17,13 +21,22 @@ const {
 
   const mockIsDebugEnabled = vi.fn().mockReturnValue(true);
   const mockWritePromptLog = vi.fn();
+  const mockLifecycleDispose = vi.fn();
+  const mockCreateSqliteFindingContractLifecycle = vi.fn(() => ({
+    findingRunId: 'sqlite-finding-run-id',
+    store: {},
+    dispose: mockLifecycleDispose,
+  }));
+  const mockEngineOptions: unknown[] = [];
+  const workflowPrimaryError = new Error('mock workflow primary failure');
 
   class MockWorkflowEngine extends EE {
     private config: WorkflowConfig;
     private task: string;
 
-    constructor(config: WorkflowConfig, _cwd: string, task: string, _options: unknown) {
+    constructor(config: WorkflowConfig, _cwd: string, task: string, options: unknown) {
       super();
+      mockEngineOptions.push(options);
       if (task === 'constructor-throw-task') {
         throw new Error('mock constructor failure');
       }
@@ -34,6 +47,9 @@ const {
     abort(): void {}
 
     async run(): Promise<{ status: string; iteration: number }> {
+      if (this.task === 'workflow-failure-task') {
+        throw workflowPrimaryError;
+      }
       const step = this.config.steps[0]!;
       const timestamp = new Date('2026-02-07T00:00:00.000Z');
       const shouldAbort = this.task === 'abort-task';
@@ -170,6 +186,10 @@ const {
     },
     mockIsDebugEnabled,
     mockWritePromptLog,
+    mockCreateSqliteFindingContractLifecycle,
+    mockLifecycleDispose,
+    mockEngineOptions,
+    workflowPrimaryError,
     MockWorkflowEngine,
   };
 });
@@ -184,6 +204,10 @@ vi.mock('../core/workflow/index.js', async () => {
 
 vi.mock('../infra/claude/query-manager.js', () => ({
   interruptAllQueries: vi.fn(),
+}));
+
+vi.mock('../features/tasks/execute/sqliteFindingContractLifecycle.js', () => ({
+  createSqliteFindingContractLifecycle: mockCreateSqliteFindingContractLifecycle,
 }));
 
 vi.mock('../infra/config/index.js', () => ({
@@ -284,6 +308,7 @@ import { normalizeRule } from '../infra/config/loaders/workflowRuleNormalizer.js
 describe('executeWorkflow debug prompts logging', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockEngineOptions.length = 0;
   });
 
   function makeConfig(): WorkflowConfig {
@@ -301,6 +326,22 @@ describe('executeWorkflow debug prompts logging', () => {
           rules: [normalizeRule({ condition: 'done', next: 'COMPLETE' })],
         },
       ],
+    };
+  }
+
+  function makeSqliteFindingContractConfig(): WorkflowConfig {
+    return {
+      ...makeConfig(),
+      findingContract: {
+        backend: 'sqlite',
+        ledgerPath: '.takt/findings/unused.json',
+        rawFindingsPath: '.takt/findings/unused',
+        manager: {
+          persona: 'findings-manager',
+          instruction: 'findings-manager',
+          outputContract: 'findings-manager',
+        },
+      },
     };
   }
 
@@ -546,6 +587,55 @@ describe('executeWorkflow debug prompts logging', () => {
     expect(firstMeta.endTime).toBeUndefined();
     expect(secondMeta.status).toBe('aborted');
     expect(secondMeta.endTime).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  });
+
+  it('preserves the workflow error with SQLite cleanup failures', async () => {
+    const cleanupError = new Error('mock SQLite cleanup failure');
+    mockLifecycleDispose.mockImplementationOnce(() => {
+      throw cleanupError;
+    });
+
+    let thrown: unknown;
+    try {
+      await executeWorkflow(
+        makeSqliteFindingContractConfig(),
+        'workflow-failure-task',
+        '/tmp/project',
+        {
+          projectCwd: '/tmp/project',
+          reportDirName: 'test-report-dir',
+        },
+      );
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(AggregateError);
+    expect((thrown as AggregateError).errors).toEqual([
+      workflowPrimaryError,
+      cleanupError,
+    ]);
+    expect(mockEngineOptions).toHaveLength(1);
+    expect(mockEngineOptions[0]).toEqual(expect.objectContaining({
+      findingRunId: 'sqlite-finding-run-id',
+    }));
+  });
+
+  it('fails a successful workflow when SQLite cleanup fails', async () => {
+    const cleanupError = new Error('mock SQLite cleanup failure');
+    mockLifecycleDispose.mockImplementationOnce(() => {
+      throw cleanupError;
+    });
+
+    await expect(executeWorkflow(
+      makeSqliteFindingContractConfig(),
+      'task',
+      '/tmp/project',
+      {
+        projectCwd: '/tmp/project',
+        reportDirName: 'test-report-dir',
+      },
+    )).rejects.toBe(cleanupError);
   });
 
   it('should write trace.md on workflow completion', async () => {

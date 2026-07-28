@@ -202,6 +202,7 @@ steps:
 max_steps: 10
 initial_step: step1
 finding_contract:
+  backend: file
   ledger_path: .takt/findings/peer-review.json
   raw_findings_path: .takt/findings/raw
   manager:
@@ -230,6 +231,7 @@ steps:
 max_steps: 10
 initial_step: reviewers
 finding_contract:
+  backend: file
   ledger_path: .takt/findings/peer-review.json
   raw_findings_path: .takt/findings/raw
   manager:
@@ -264,6 +266,7 @@ steps:
 max_steps: 10
 initial_step: reviewers
 finding_contract:
+  backend: file
   ledger_path: .takt/findings/peer-review.json
   raw_findings_path: .takt/findings/raw
   manager:
@@ -307,6 +310,7 @@ steps:
 max_steps: 10
 initial_step: reviewers
 finding_contract:
+  backend: file
   ledger_path: .takt/findings/peer-review.json
   raw_findings_path: .takt/findings/raw
   manager:
@@ -345,6 +349,7 @@ steps:
 max_steps: 10
 initial_step: reviewers
 finding_contract:
+  backend: file
   ledger_path: .takt/findings/peer-review.json
   raw_findings_path: .takt/findings/raw
   manager:
@@ -401,6 +406,7 @@ steps:
 max_steps: 10
 initial_step: reviewers
 finding_contract:
+  backend: file
   ledger_path: .takt/findings/peer-review.json
   raw_findings_path: .takt/findings/raw
   manager:
@@ -431,6 +437,7 @@ ${parallelSteps}
 max_steps: 10
 initial_step: reviewers
 finding_contract:
+  backend: file
   ledger_path: .takt/findings/peer-review.json
   raw_findings_path: .takt/findings/raw
   manager:
@@ -498,6 +505,7 @@ steps:
 max_steps: 10
 initial_step: reviewers
 finding_contract:
+  backend: file
   ledger_path: .takt/findings/peer-review.json
   raw_findings_path: .takt/findings/raw
   manager:
@@ -546,6 +554,7 @@ steps:
 max_steps: 10
 initial_step: reviewers
 finding_contract:
+  backend: file
   ledger_path: .takt/findings/peer-review.json
   raw_findings_path: .takt/findings/raw
   manager:
@@ -1716,6 +1725,7 @@ steps:
 max_steps: 10
 initial_step: step1
 finding_contract:
+  backend: file
   ledger_path: .takt/findings/adjudication-wired.json
   raw_findings_path: .takt/findings/adjudication-wired/raw
   manager:
@@ -1765,6 +1775,7 @@ steps:
 max_steps: 10
 initial_step: step1
 finding_contract:
+  backend: file
   ledger_path: .takt/findings/adjudication-parallel-sub.json
   raw_findings_path: .takt/findings/adjudication-parallel-sub/raw
   manager:

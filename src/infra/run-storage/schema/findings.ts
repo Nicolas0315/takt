@@ -83,6 +83,7 @@ export const FINDINGS_DDL = [
     run_id TEXT NOT NULL,
     scope_id TEXT NOT NULL,
     reservation_token TEXT NOT NULL CHECK (length(reservation_token) > 0),
+    lease_generation INTEGER NOT NULL CHECK (lease_generation > 0),
     claimed_at INTEGER NOT NULL CHECK (claimed_at >= 0),
     PRIMARY KEY (run_id, scope_id, reservation_token),
     FOREIGN KEY (run_id, scope_id)

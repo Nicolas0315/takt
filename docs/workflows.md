@@ -204,6 +204,7 @@ Sub-steps execute concurrently, and the parent aggregates sub-step matches via `
 
 ```yaml
 finding_contract:
+  backend: sqlite
   ledger_path: .takt/findings/review.json
   raw_findings_path: .takt/findings/review/raw
   manager:
@@ -213,6 +214,8 @@ finding_contract:
     provider: codex
     model: gpt-5.5
 ```
+
+`backend` is required. `sqlite` keeps the authoritative Finding Contract state in the run-local `run.sqlite` database. `file` keeps the existing file-backed behavior using `ledger_path` and `raw_findings_path`.
 
 When set, these values are applied as step-level `provider` / `model` for the Finding Manager. Explicit CLI and environment overrides remain higher priority. The manager values take priority over `provider_routing`, deprecated `persona_providers.findings-manager`, effective auto routing, and workflow/project/global fallbacks. When neither field is set, the manager keeps the normal workflow step provider/model resolution behavior. Setting only `provider` stops lower-priority model fallback, so the selected provider uses its own default; providers that require an explicit model fail validation.
 

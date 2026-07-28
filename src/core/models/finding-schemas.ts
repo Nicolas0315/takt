@@ -18,6 +18,7 @@ import {
   RAW_FINDING_RELATIONS,
   CONFLICT_DECISION_KINDS,
   DISPUTE_DECISION_KINDS,
+  FINDING_CONTRACT_BACKENDS,
   FINDING_CONFLICT_ADJUDICATION_OUTCOMES,
   FINDING_CONFLICT_ADJUDICATION_TRANSITIONS,
   FINDING_CONFLICT_STATUSES,
@@ -79,6 +80,7 @@ export const FindingContractReviewBudgetRawSchema = z.object({
 }).strict();
 
 export const FindingContractConfigRawSchema = z.object({
+  backend: z.enum(FINDING_CONTRACT_BACKENDS),
   ledger_path: nonEmptyString,
   raw_findings_path: nonEmptyString,
   manager: FindingContractManagerConfigRawSchema,

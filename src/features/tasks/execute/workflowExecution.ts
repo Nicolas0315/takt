@@ -22,6 +22,11 @@ import {
 import type { GitProvider } from '../../../infra/git/index.js';
 import { USAGE_MISSING_REASONS } from '../../../core/logging/contracts.js';
 import { createPullRequestContext } from '../../../core/workflow/pr-context.js';
+import {
+  createSqliteFindingContractLifecycle,
+  type SqliteFindingContractLifecycle,
+} from './sqliteFindingContractLifecycle.js';
+import { throwAfterCleanup } from '../../../infra/run-storage/cleanup-error.js';
 
 export type { WorkflowExecutionResult, WorkflowExecutionOptions };
 
@@ -104,6 +109,52 @@ function resolvePhase1ProcessSafetyByStep(
       protectedParentRunPid: parentRunPid,
     },
   };
+}
+
+function applySynchronousCleanup(
+  outcome: WorkflowExecutionOutcome,
+  cleanupActions: ReadonlyArray<() => void>,
+): WorkflowExecutionOutcome {
+  if (outcome.kind === 'error') {
+    try {
+      throwAfterCleanup(outcome.error, cleanupActions);
+    } catch (error) {
+      return { kind: 'error', error };
+    }
+  }
+  for (let index = 0; index < cleanupActions.length; index += 1) {
+    try {
+      cleanupActions[index]!();
+    } catch (error) {
+      try {
+        throwAfterCleanup(error, cleanupActions.slice(index + 1));
+      } catch (cleanupError) {
+        return { kind: 'error', error: cleanupError };
+      }
+    }
+  }
+  return outcome;
+}
+
+type WorkflowExecutionOutcome =
+  | {
+      readonly kind: 'result';
+      readonly result: WorkflowExecutionResult;
+    }
+  | {
+      readonly kind: 'error';
+      readonly error: unknown;
+    };
+
+function aggregateWorkflowErrors(
+  primaryError: unknown,
+  secondaryError: unknown,
+): AggregateError {
+  return new AggregateError(
+    [primaryError, secondaryError],
+    getErrorMessage(primaryError),
+    { cause: primaryError },
+  );
 }
 
 export async function executeWorkflow(
@@ -195,12 +246,24 @@ async function executeWorkflowInternal(
     internalController: runAbortController,
     getEngine: () => engine,
   });
+  let findingContractLifecycle: SqliteFindingContractLifecycle | undefined;
+  let outcome: WorkflowExecutionOutcome;
   const handleProviderStream = (event: StreamEvent): void => {
     bootstrap.streamHandler(event);
     eventBridge?.emitProviderOutput(event);
   };
 
   try {
+    if (bootstrap.effectiveWorkflowConfig.findingContract?.backend === 'sqlite') {
+      findingContractLifecycle = createSqliteFindingContractLifecycle({
+        runPaths: bootstrap.runPaths,
+        workflowConfig: bootstrap.effectiveWorkflowConfig,
+        abortController: runAbortController,
+        ...(options.resumeSource === undefined
+          ? {}
+          : { resumeSource: options.resumeSource }),
+      });
+    }
     const childProcessEnv = resolveNestedChildProcessEnv(bootstrap.observability, process.env);
     engine = new WorkflowEngine(bootstrap.effectiveWorkflowConfig, cwd, task, {
       abortSignal: runAbortController.signal,
@@ -266,6 +329,12 @@ async function executeWorkflowInternal(
         ...(runContext?.gitProvider !== undefined ? { gitProvider: runContext.gitProvider } : {}),
       }),
       workflowCallResolver,
+      ...(findingContractLifecycle === undefined
+        ? {}
+        : {
+            findingLedgerStore: findingContractLifecycle.store,
+            findingRunId: findingContractLifecycle.findingRunId,
+          }),
     });
 
     eventBridge = bindWorkflowExecutionEvents({
@@ -306,72 +375,83 @@ async function executeWorkflowInternal(
     abortHandler.install();
     const finalState = await engine.run();
     await eventBridge.flushEventSink();
-    return {
-      success: finalState.status === 'completed',
-      reason: eventBridge.state.abortReason,
-      lastStep: eventBridge.state.lastStepName,
-      lastMessage: eventBridge.state.lastStepContent,
-      runDirectory: bootstrap.runPaths.runRootAbs,
-      reportDirectory: bootstrap.runPaths.reportsAbs,
-      ndjsonLogPath: bootstrap.ndjsonLogPath,
-      exceeded: eventBridge.state.exceededInfo != null,
-      ...(eventBridge.state.exceededInfo ? { exceededInfo: eventBridge.state.exceededInfo } : {}),
+    outcome = {
+      kind: 'result',
+      result: {
+        success: finalState.status === 'completed',
+        reason: eventBridge.state.abortReason,
+        lastStep: eventBridge.state.lastStepName,
+        lastMessage: eventBridge.state.lastStepContent,
+        runDirectory: bootstrap.runPaths.runRootAbs,
+        reportDirectory: bootstrap.runPaths.reportsAbs,
+        ndjsonLogPath: bootstrap.ndjsonLogPath,
+        exceeded: eventBridge.state.exceededInfo != null,
+        ...(eventBridge.state.exceededInfo ? { exceededInfo: eventBridge.state.exceededInfo } : {}),
+      },
     };
-  } catch (error) {
-    if (!bootstrap.runMetaManager.isFinalized) {
-      eventBridge?.syncLatestResumePoint();
-      const reason = getErrorMessage(error);
-      const iteration = eventBridge?.state.currentIteration ?? 0;
-      const sessionLog = finalizeWorkflowAbort(
-        eventBridge?.state.sessionLog ?? bootstrap.sessionLog,
-        reason,
-        task,
-        bootstrap.effectiveWorkflowConfig.name,
-        eventBridge?.state.lastStepName,
-        options.projectCwd,
-        bootstrap.out.warn,
-      );
-      if (eventBridge) {
-        eventBridge.state.abortReason = reason;
-        eventBridge.state.sessionLog = sessionLog;
-      }
-      bootstrap.runMetaManager.finalize('aborted', iteration);
-      reportWorkflowAbort(
-        bootstrap.out,
-        sessionLog,
-        iteration,
-        reason,
-        bootstrap.ndjsonLogPath,
-        bootstrap.shouldNotifyWorkflowAbort,
-        bootstrap.traceDiscovery,
-      );
-      if (eventBridge) {
-        eventBridge.emitWorkflowFailed({
-          type: 'completed',
-          success: false,
-          reportDirectory: bootstrap.runPaths.reportsAbs,
+  } catch (primaryError) {
+    outcome = { kind: 'error', error: primaryError };
+    try {
+      if (!bootstrap.runMetaManager.isFinalized) {
+        eventBridge?.syncLatestResumePoint();
+        const reason = getErrorMessage(primaryError);
+        const iteration = eventBridge?.state.currentIteration ?? 0;
+        const sessionLog = finalizeWorkflowAbort(
+          eventBridge?.state.sessionLog ?? bootstrap.sessionLog,
           reason,
-        });
-        try {
-          await eventBridge.flushEventSink();
-        } catch (flushError) {
-          log.warn('Failed to flush event sink after workflow failure', {
-            error: getErrorMessage(flushError),
+          task,
+          bootstrap.effectiveWorkflowConfig.name,
+          eventBridge?.state.lastStepName,
+          options.projectCwd,
+          bootstrap.out.warn,
+        );
+        if (eventBridge) {
+          eventBridge.state.abortReason = reason;
+          eventBridge.state.sessionLog = sessionLog;
+        }
+        bootstrap.runMetaManager.finalize('aborted', iteration);
+        reportWorkflowAbort(
+          bootstrap.out,
+          sessionLog,
+          iteration,
+          reason,
+          bootstrap.ndjsonLogPath,
+          bootstrap.shouldNotifyWorkflowAbort,
+          bootstrap.traceDiscovery,
+        );
+        if (eventBridge) {
+          eventBridge.emitWorkflowFailed({
+            type: 'completed',
+            success: false,
+            reportDirectory: bootstrap.runPaths.reportsAbs,
+            reason,
           });
+          await eventBridge.flushEventSink();
         }
       }
-    }
-    throw error;
-  } finally {
-    bootstrap.warnIfAutoStrategyUnused();
-    bootstrap.prefixWriter?.flush();
-    abortHandler.cleanup();
-    try {
-      await bootstrap.observabilityHandle.shutdown();
-    } catch (error) {
-      log.warn('Observability shutdown failed', {
-        error: error instanceof Error ? error.message : String(error),
-      });
+    } catch (reportingError) {
+      outcome = {
+        kind: 'error',
+        error: aggregateWorkflowErrors(primaryError, reportingError),
+      };
     }
   }
+
+  outcome = applySynchronousCleanup(outcome, [
+    () => bootstrap.warnIfAutoStrategyUnused(),
+    () => bootstrap.prefixWriter?.flush(),
+    () => findingContractLifecycle?.dispose(),
+    () => abortHandler.cleanup(),
+  ]);
+  try {
+    await bootstrap.observabilityHandle.shutdown();
+  } catch (error) {
+    log.warn('Observability shutdown failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+  if (outcome.kind === 'error') {
+    throw outcome.error;
+  }
+  return outcome.result;
 }

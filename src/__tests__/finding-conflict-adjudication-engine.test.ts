@@ -89,6 +89,7 @@ function baseConfig(cwd: string, rules: ReturnType<typeof makeRule>[]): Workflow
     initialStep: 'reviewers',
     provider: 'claude',
     findingContract: {
+      backend: 'file',
       ledgerPath: '.takt/findings/peer-review.json',
       rawFindingsPath: '.takt/findings/raw',
       manager: {
@@ -376,6 +377,7 @@ describe('finding-conflict-adjudication engine detour', () => {
       projectCwd: cwd,
       provider: 'claude',
       reportDirName: 'test-report-dir',
+      findingRunId: 'sqlite-finding-run-id',
       inheritedFindingContract: { contract: inheritedContract!, ledgerStore: parentLedgerStore },
     }).run();
 
@@ -386,6 +388,7 @@ describe('finding-conflict-adjudication engine detour', () => {
     // workflowName と食い違う。
     const runnerDeps = vi.mocked(createFindingConflictAdjudicationRunner).mock.calls.at(-1)?.[0];
     expect(runnerDeps?.workflowName).toBe('parent-workflow');
+    expect(runnerDeps?.runId).toBe('sqlite-finding-run-id');
 
     // 裁定適用と保存を経ても ledger.workflowName は親名のまま
     // （store の assertLedgerWorkflowName 検証を通る）。
@@ -989,6 +992,7 @@ describe('finding-conflict-adjudication engine detour', () => {
       initialStep: 'reviewers',
       provider: 'claude',
       findingContract: {
+        backend: 'file',
         ledgerPath: '.takt/findings/peer-review.json',
         rawFindingsPath: '.takt/findings/raw',
         manager: {
@@ -1046,6 +1050,7 @@ describe('finding-conflict-adjudication engine detour', () => {
       initialStep: 'reviewers',
       provider: 'claude',
       findingContract: {
+        backend: 'file',
         ledgerPath: '.takt/findings/peer-review.json',
         rawFindingsPath: '.takt/findings/raw',
         manager: {
@@ -1186,6 +1191,7 @@ describe('finding-conflict-adjudication engine detour', () => {
       initialStep: 'reviewers',
       provider: 'claude',
       findingContract: {
+        backend: 'file',
         ledgerPath: '.takt/findings/peer-review.json',
         rawFindingsPath: '.takt/findings/raw',
         manager: {
@@ -1375,6 +1381,7 @@ describe('finding-conflict-adjudication engine detour', () => {
       initialStep: 'review',
       provider: 'claude',
       findingContract: {
+        backend: 'file',
         ledgerPath: '.takt/findings/peer-review.json',
         rawFindingsPath: '.takt/findings/raw',
         manager: {
@@ -1528,6 +1535,7 @@ describe('finding-conflict-adjudication engine detour', () => {
       initialStep: 'review',
       provider: 'claude',
       findingContract: {
+        backend: 'file',
         ledgerPath: '.takt/findings/peer-review.json',
         rawFindingsPath: '.takt/findings/raw',
         manager: {
