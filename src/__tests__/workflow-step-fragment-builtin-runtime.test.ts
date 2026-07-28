@@ -319,8 +319,8 @@ describe('builtin step fragment runtime contracts', () => {
       'architecture-reviewer',
       'ai-antipattern-reviewer',
       'coding-reviewer',
-      'security-reviewer',
-      'testing-reviewer',
+      'implementation-semantics-reviewer',
+      'contract-lifecycle-reviewer',
       'robustness-reviewer',
     ];
     mockRunAgentSequence([
