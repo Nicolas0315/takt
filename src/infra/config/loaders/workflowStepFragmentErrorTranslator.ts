@@ -6,6 +6,10 @@ import {
   findFragmentProvenanceForStep,
   type WorkflowStepFragmentProvenance,
 } from './workflowStepFragmentProvenance.js';
+import {
+  hasVisitedWorkflowErrorContext,
+  markVisitedWorkflowErrorContext,
+} from './workflowFragmentErrorVisitTracker.js';
 
 interface FragmentErrorContext {
   readonly provenance: readonly WorkflowStepFragmentProvenance[];
@@ -14,7 +18,6 @@ interface FragmentErrorContext {
 }
 
 const contexts = new WeakMap<object, FragmentErrorContext>();
-const translatedErrors = new WeakMap<Error, Set<string>>();
 
 export function registerWorkflowStepFragmentErrorContext(
   workflow: object,
@@ -42,8 +45,7 @@ export function translateWorkflowStepFragmentError(workflow: WorkflowConfig, err
   if (!context) {
     return normalized;
   }
-  const visited = translatedErrors.get(normalized);
-  if (visited?.has(context.workflowPath)) {
+  if (hasVisitedWorkflowErrorContext(normalized, 'normalized', context.workflowPath)) {
     return normalized;
   }
   const path = getWorkflowConfigErrorPath(error);
@@ -61,9 +63,7 @@ export function translateWorkflowStepFragmentError(workflow: WorkflowConfig, err
   }
   const details = formatWorkflowStepFragmentErrorContext(context.workflowPath, source, exact === undefined);
   const translated = new Error(`${normalized.message} (${details})`, { cause: normalized });
-  const nextVisited = new Set(visited);
-  nextVisited.add(context.workflowPath);
-  translatedErrors.set(translated, nextVisited);
+  markVisitedWorkflowErrorContext(normalized, translated, 'normalized', context.workflowPath);
   return translated;
 }
 

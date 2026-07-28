@@ -78,11 +78,11 @@ describe('ejectBuiltin rollback', () => {
     });
   });
 
-  it('should remove the new workflow file and directory when the workflow write fails', async () => {
+  it('should delegate workflow cleanup to the safe writer when the workflow write fails', async () => {
     await expect(ejectBuiltin('default', { projectDir: '/project' })).rejects.toThrow('simulated workflow write failure');
 
     expect(mocks.copyFragments.mock.results[0]?.value).toHaveBeenCalledOnce();
-    expect(mocks.rmSync).toHaveBeenCalledWith('/project/.takt/workflows/default.yaml', { force: true });
-    expect(mocks.rmdirSync).toHaveBeenCalledWith('/project/.takt/workflows');
+    expect(mocks.rmSync).not.toHaveBeenCalled();
+    expect(mocks.rmdirSync).not.toHaveBeenCalled();
   });
 });

@@ -49,9 +49,9 @@ describe('repertoire reference integrity scanner errors', () => {
     })).toThrow(`Failed to inspect directory while scanning references: ${path}`);
   });
 
-  it('surfaces a mandatory step fragment directory lstat failure instead of treating it as empty', () => {
+  it('surfaces a mandatory step fragment directory stat failure instead of treating it as empty', () => {
     const path = '/config/steps';
-    lstatSyncMock.mockImplementationOnce(() => {
+    statSyncMock.mockImplementationOnce(() => {
       const error = Object.assign(new Error('permission denied'), { code: 'EACCES' });
       throw error;
     });

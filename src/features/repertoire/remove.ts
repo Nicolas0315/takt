@@ -2,6 +2,7 @@
 import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { isPathInside } from '../../shared/utils/pathBoundary.js';
+import { isStepFragmentExtension } from './file-filter.js';
 
 function isNotFoundError(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT';
@@ -76,7 +77,7 @@ function scanYamlFilesInDir(
       continue;
     }
 
-    if (!entry.endsWith('.yaml') && !entry.endsWith('.yml')) continue;
+    if (!isStepFragmentExtension(entry)) continue;
 
     addScopeReferenceIfPresent(filePath, scope, results, false);
   }
@@ -84,18 +85,18 @@ function scanYamlFilesInDir(
 
 /** Scans direct step fragment files while rejecting links that escape the steps root. */
 function scanStepFragmentFilesInDir(dir: string, scope: string, results: ScopeReference[]): void {
-  let directoryStats: ReturnType<typeof lstatSync>;
+  let directoryStats: ReturnType<typeof statSync>;
   try {
-    directoryStats = lstatSync(dir);
+    directoryStats = statSync(dir);
   } catch (err) {
     if (isNotFoundError(err)) return;
     throw new Error(`Failed to inspect steps directory while scanning references: ${dir}`, { cause: err });
   }
-  if (directoryStats.isSymbolicLink() || !directoryStats.isDirectory()) return;
+  if (!directoryStats.isDirectory()) return;
   const realDir = resolveStepDirectoryForReferenceScan(dir);
 
   for (const entry of readDirectoryForReferenceScan(dir)) {
-    if (!entry.endsWith('.yaml') && !entry.endsWith('.yml')) continue;
+    if (!isStepFragmentExtension(entry)) continue;
 
     const filePath = join(dir, entry);
     let stats: ReturnType<typeof lstatSync>;
@@ -198,6 +199,7 @@ export function shouldRemoveOwnerDir(ownerDir: string, repoBeingRemoved: string)
     try {
       return statSync(entryPath).isDirectory();
     } catch (error) {
+      if (isNotFoundError(error)) return false;
       throw new Error(`Failed to inspect owner directory entry while scanning references: ${entryPath}`, { cause: error });
     }
   });

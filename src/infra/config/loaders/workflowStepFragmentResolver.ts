@@ -117,7 +117,9 @@ function expandParallel(
   stepPath: readonly PropertyKey[],
 ): ExpandedStep {
   const parallel = getOwnValue(step, 'parallel');
-  if (!Array.isArray(parallel)) return { value: step, provenance: [], dependencies: [], referenceCount };
+  if (!Array.isArray(parallel)) {
+    return { value: { ...step }, provenance: [], dependencies: [], referenceCount };
+  }
   let nextReferenceCount = referenceCount;
   const provenance: WorkflowStepFragmentProvenance[] = [];
   const dependencies: WorkflowStepFragmentDependency[] = [];
@@ -152,7 +154,7 @@ function expandStep(
       return expandParallel(value, scope, stack, referenceCount, options, stepPath);
     }
     return {
-      value,
+      value: { ...value },
       provenance: [],
       dependencies: [],
       referenceCount,
@@ -197,10 +199,11 @@ function expandStep(
     candidateDirs: options.nestedCandidateDirs?.(resolved) ?? resolved.candidateDirs,
     scopedCandidateDirs: scope.scopedCandidateDirs,
   };
+  const fragmentStack = [...stack, { ref: uses, sourcePath: resolved.path, realPath }];
   const expandedBase = expandStep(
     fragment,
     fragmentScope,
-    [...stack, { ref: uses, sourcePath: resolved.path, realPath }],
+    fragmentStack,
     referenceCount + 1,
     options,
     stepPath,
@@ -230,7 +233,6 @@ function expandStep(
     );
   }
   const merged = mergeStepValues(fragmentValue, inlineStep);
-  const fragmentStack = [...stack, { ref: uses, sourcePath: resolved.path, realPath }];
   const fragmentParallelContext = getOwnValue(fragmentInline, 'parallel') === undefined
     ? expandedBase.parallelContext
     : { scope: fragmentScope, stack: fragmentStack };
@@ -275,7 +277,15 @@ function expandStep(
 }
 
 export function resolveWorkflowStepFragments(raw: unknown, options: WorkflowStepFragmentResolverOptions): WorkflowStepFragmentResolution {
-  if (!isRecord(raw) || !Array.isArray(raw.steps)) {
+  if (!isRecord(raw)) {
+    return {
+      raw,
+      provenance: Object.freeze([]),
+      dependencies: Object.freeze([]),
+    };
+  }
+  const rawSteps = getOwnValue(raw, 'steps');
+  if (!Array.isArray(rawSteps)) {
     return {
       raw,
       provenance: Object.freeze([]),
@@ -294,7 +304,7 @@ export function resolveWorkflowStepFragments(raw: unknown, options: WorkflowStep
   const provenance: WorkflowStepFragmentProvenance[] = [];
   const dependencies: WorkflowStepFragmentDependency[] = [];
   const steps: unknown[] = [];
-  for (const [index, step] of raw.steps.entries()) {
+  for (const [index, step] of rawSteps.entries()) {
     const result = expandStep(step, scope, [], referenceCount, options, ['steps', index], true);
     referenceCount = result.referenceCount;
     provenance.push(...result.provenance);

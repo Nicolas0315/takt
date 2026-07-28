@@ -362,7 +362,7 @@ export function normalizeStepFromRaw(
     outputContracts: step.output_contracts?.report && step.output_contracts.report.length > 0
       ? step.output_contracts.report.map((entry, index) => normalizeStepField(
         stepPath,
-        ['output_contracts', 'report', index, 'format'],
+        ['output_contracts', 'report', index],
         () => normalizeOutputContract(entry, (reference, field) => {
           const content = normalizeStepField(
             stepPath,

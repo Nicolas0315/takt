@@ -35,6 +35,7 @@ import {
   mockRuleEvaluationSequence,
   mockRunAgentSequence,
 } from './engine-test-helpers.js';
+import { isolateStepFragmentTestConfig } from './helpers/step-fragment-test-helpers.js';
 import { initializeGitFixture } from './helpers/git-fixture.js';
 
 function writeFile(root: string, relativePath: string, content: string): string {
@@ -119,17 +120,23 @@ function resumableWorkflowSteps(fragmentName?: string): string {
 describe('workflow step fragment runtime contract', () => {
   let projectDir: string;
   let engines: WorkflowEngine[];
+  let testCwds: string[];
+  let restoreConfig: () => void;
 
   beforeEach(() => {
+    restoreConfig = isolateStepFragmentTestConfig('takt-step-fragment-runtime-config-');
     projectDir = mkdtempSync(join(tmpdir(), 'takt-step-fragment-runtime-'));
     engines = [];
+    testCwds = [];
     vi.resetAllMocks();
     applyDefaultMocks();
   });
 
   afterEach(() => {
     for (const engine of engines) cleanupWorkflowEngine(engine);
+    for (const cwd of testCwds) rmSync(cwd, { recursive: true, force: true });
     if (existsSync(projectDir)) rmSync(projectDir, { recursive: true, force: true });
+    restoreConfig();
   });
 
   it('executes fragment and inline steps with identical transitions, finding contract, resume point, and loop monitor result', async () => {
@@ -157,6 +164,7 @@ describe('workflow step fragment runtime contract', () => {
 
     const execute = async (config: typeof inline) => {
       const cwd = createTestTmpDir();
+      testCwds.push(cwd);
       writeFile(cwd, 'src/reviewed.ts', 'export const reviewed = true;\n');
       initializeGitFixture(cwd, ['src/reviewed.ts']);
       const engine = new WorkflowEngine(config, cwd, 'test task', { projectCwd: cwd });
@@ -211,7 +219,6 @@ describe('workflow step fragment runtime contract', () => {
 
       const state = await engine.run();
       const resumePoint = engine.getResumePoint();
-      rmSync(cwd, { recursive: true, force: true });
       const runAgentCalls = vi.mocked(runAgent).mock.calls.map(([, , options]) => ({
         stepName: options?.workflowMeta?.currentStep,
         allowedTools: options?.allowedTools,
@@ -283,6 +290,7 @@ describe('workflow step fragment runtime contract', () => {
 
     const saveResumePointAtFixStart = async (config: typeof inline) => {
       const cwd = createTestTmpDir();
+      testCwds.push(cwd);
       writeFile(cwd, 'src/reviewed.ts', 'export const reviewed = true;\n');
       initializeGitFixture(cwd, ['src/reviewed.ts']);
       const engine = new WorkflowEngine(config, cwd, 'test task', { projectCwd: cwd });
@@ -299,7 +307,6 @@ describe('workflow step fragment runtime contract', () => {
       mockRuleEvaluationSequence([{ index: 0, method: 'phase3_tag' }]);
 
       await engine.run();
-      rmSync(cwd, { recursive: true, force: true });
       if (resumePoint === undefined) {
         throw new Error('Failed to save resume point at fix step start');
       }
@@ -311,6 +318,7 @@ describe('workflow step fragment runtime contract', () => {
       resumePoint: NonNullable<ReturnType<WorkflowEngine['getResumePoint']>>,
     ) => {
       const cwd = createTestTmpDir();
+      testCwds.push(cwd);
       writeFile(cwd, 'src/fixed.ts', 'export const fixed = true;\n');
       initializeGitFixture(cwd, ['src/fixed.ts']);
       const engine = new WorkflowEngine(config, cwd, 'test task', {
@@ -327,7 +335,6 @@ describe('workflow step fragment runtime contract', () => {
 
       const result = await engine.runSingleIteration();
       const state = engine.getState();
-      rmSync(cwd, { recursive: true, force: true });
       return { result, state, restoredStepIterations };
     };
 

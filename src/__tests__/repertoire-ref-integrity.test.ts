@@ -178,6 +178,68 @@ describe('repertoire reference integrity: detection', () => {
       workflowFile,
     ].sort());
   });
+
+  it('should scan file and directory symlinks that workflow discovery can load', () => {
+    const workflowsDir = join(tempDir, 'workflows');
+    const outsideDir = join(tempDir, 'outside');
+    mkdirSync(workflowsDir, { recursive: true });
+    mkdirSync(outsideDir, { recursive: true });
+    const outsideFile = join(outsideDir, 'referencing.yaml');
+    writeFileSync(outsideFile, 'persona: "@nrslib/takt-ensemble-fixture/coder"');
+    symlinkSync(outsideFile, join(workflowsDir, 'file-link.yaml'));
+    symlinkSync(outsideDir, join(workflowsDir, 'directory-link'));
+
+    const refs = findScopeReferences('@nrslib/takt-ensemble-fixture', makeScanConfig(tempDir));
+
+    expect(refs).toHaveLength(2);
+    expect(refs.map((ref) => ref.filePath)).toEqual(expect.arrayContaining([
+      join(workflowsDir, 'file-link.yaml'),
+      join(workflowsDir, 'directory-link', 'referencing.yaml'),
+    ]));
+  });
+
+  it('should detect a root-level step fragment symlink that resolves inside the steps directory', () => {
+    const stepsDir = join(tempDir, 'steps');
+    const targetPath = join(stepsDir, 'source.yaml');
+    const linkPath = join(stepsDir, 'review.yaml');
+    mkdirSync(stepsDir, { recursive: true });
+    writeFileSync(targetPath, 'uses: "@nrslib/takt-ensemble-fixture/review"');
+    symlinkSync(targetPath, linkPath);
+
+    const refs = findScopeReferences('@nrslib/takt-ensemble-fixture', makeScanConfig(tempDir));
+
+    expect(refs.map((ref) => ref.filePath)).toContain(linkPath);
+  });
+
+  it('should detect a root-level step fragment symlink whose target directory begins with two dots', () => {
+    const stepsDir = join(tempDir, 'steps');
+    const targetDir = join(stepsDir, '..visible');
+    const targetPath = join(targetDir, 'source.yaml');
+    const linkPath = join(stepsDir, 'review.yaml');
+    mkdirSync(targetDir, { recursive: true });
+    writeFileSync(targetPath, 'uses: "@nrslib/takt-ensemble-fixture/review"');
+    symlinkSync(targetPath, linkPath);
+
+    const refs = findScopeReferences('@nrslib/takt-ensemble-fixture', makeScanConfig(tempDir));
+
+    expect(refs.map((ref) => ref.filePath)).toContain(linkPath);
+  });
+
+  it('should scan a configured steps directory symlink through its resolved root', () => {
+    const realStepsDir = join(tempDir, 'real-steps');
+    const linkedStepsDir = join(tempDir, 'steps');
+    const stepFile = join(linkedStepsDir, 'review.yaml');
+    mkdirSync(realStepsDir, { recursive: true });
+    writeFileSync(
+      join(realStepsDir, 'review.yaml'),
+      'uses: "@nrslib/takt-ensemble-fixture/review"',
+    );
+    symlinkSync(realStepsDir, linkedStepsDir);
+
+    const refs = findScopeReferences('@nrslib/takt-ensemble-fixture', makeScanConfig(tempDir));
+
+    expect(refs.map((ref) => ref.filePath)).toContain(stepFile);
+  });
 });
 
 describe('repertoire reference integrity: non-detection', () => {
@@ -227,52 +289,6 @@ describe('repertoire reference integrity: non-detection', () => {
     const refs = findScopeReferences('@nrslib/takt-ensemble-fixture', makeScanConfig(tempDir));
 
     expect(refs).toHaveLength(0);
-  });
-
-  it('should scan file and directory symlinks that workflow discovery can load', () => {
-    const workflowsDir = join(tempDir, 'workflows');
-    const outsideDir = join(tempDir, 'outside');
-    mkdirSync(workflowsDir, { recursive: true });
-    mkdirSync(outsideDir, { recursive: true });
-    const outsideFile = join(outsideDir, 'referencing.yaml');
-    writeFileSync(outsideFile, 'persona: "@nrslib/takt-ensemble-fixture/coder"');
-    symlinkSync(outsideFile, join(workflowsDir, 'file-link.yaml'));
-    symlinkSync(outsideDir, join(workflowsDir, 'directory-link'));
-
-    const refs = findScopeReferences('@nrslib/takt-ensemble-fixture', makeScanConfig(tempDir));
-
-    expect(refs).toHaveLength(2);
-    expect(refs.map((ref) => ref.filePath)).toEqual(expect.arrayContaining([
-      join(workflowsDir, 'file-link.yaml'),
-      join(workflowsDir, 'directory-link', 'referencing.yaml'),
-    ]));
-  });
-
-  it('should detect a root-level step fragment symlink that resolves inside the steps directory', () => {
-    const stepsDir = join(tempDir, 'steps');
-    const targetPath = join(stepsDir, 'source.yaml');
-    const linkPath = join(stepsDir, 'review.yaml');
-    mkdirSync(stepsDir, { recursive: true });
-    writeFileSync(targetPath, 'uses: "@nrslib/takt-ensemble-fixture/review"');
-    symlinkSync(targetPath, linkPath);
-
-    const refs = findScopeReferences('@nrslib/takt-ensemble-fixture', makeScanConfig(tempDir));
-
-    expect(refs.map((ref) => ref.filePath)).toContain(linkPath);
-  });
-
-  it('should detect a root-level step fragment symlink whose target directory begins with two dots', () => {
-    const stepsDir = join(tempDir, 'steps');
-    const targetDir = join(stepsDir, '..visible');
-    const targetPath = join(targetDir, 'source.yaml');
-    const linkPath = join(stepsDir, 'review.yaml');
-    mkdirSync(targetDir, { recursive: true });
-    writeFileSync(targetPath, 'uses: "@nrslib/takt-ensemble-fixture/review"');
-    symlinkSync(targetPath, linkPath);
-
-    const refs = findScopeReferences('@nrslib/takt-ensemble-fixture', makeScanConfig(tempDir));
-
-    expect(refs.map((ref) => ref.filePath)).toContain(linkPath);
   });
 
   it('should ignore a root-level step fragment symlink that resolves outside the steps directory', () => {

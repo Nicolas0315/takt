@@ -12,7 +12,6 @@ import {
   rmdirSync,
   writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import {
@@ -24,6 +23,9 @@ import {
 import { resolveWorkflowStepFragments } from '../../infra/config/loaders/workflowStepFragmentResolver.js';
 import type { Language } from '../../core/models/index.js';
 import { isPathInside } from '../../shared/utils/pathBoundary.js';
+import { ensureCurrentTmpDirExists } from '../../shared/utils/index.js';
+import { warn } from '../../shared/ui/index.js';
+import { sanitizeTerminalText } from '../../shared/utils/text.js';
 
 interface PlannedStepFragmentCopy {
   sourcePath: string;
@@ -32,6 +34,7 @@ interface PlannedStepFragmentCopy {
 interface EjectStepFragmentPlan {
   copies: readonly PlannedStepFragmentCopy[];
   stagedSources: ReadonlyMap<string, string>;
+  retainedPaths: readonly string[];
 }
 
 function isSamePath(left: string, right: string): boolean {
@@ -148,20 +151,30 @@ function createEjectStepFragmentPlan(
   lang: Language,
   targetDir: string,
   workflowPath: string,
+  isProjectEject: boolean,
 ): EjectStepFragmentPlan {
   const builtinLanguageDir = getBuiltinLanguageStepsDir(lang);
   const builtinStepsDir = getBuiltinStepsDir();
   const outputCandidateDirs = [targetDir, getGlobalStepsDir(), builtinLanguageDir, builtinStepsDir];
   const copiesByName = new Map<string, PlannedStepFragmentCopy>();
   const stagedSources = new Map<string, string>();
+  const retainedPaths = new Set<string>();
+  const projectDir = isProjectEject ? dirname(dirname(targetDir)) : dirname(targetDir);
   const parsed = parseYaml(workflowContent);
   const dependencies = resolveWorkflowStepFragments(parsed, {
     workflowPath,
     candidateDirs: outputCandidateDirs,
     context: {
       lang,
+      projectDir,
       workflowDir: dirname(workflowPath),
       repertoireDir: getRepertoireDir(),
+    },
+    trustInfo: {
+      source: 'user',
+      sourcePath: workflowPath,
+      isProjectTrustRoot: false,
+      isProjectWorkflowRoot: false,
     },
     nestedCandidateDirs: (fragment) => {
       const sourceIsBuiltin = isSamePath(fragment.candidateDir, builtinLanguageDir)
@@ -176,6 +189,7 @@ function createEjectStepFragmentPlan(
       || isSamePath(dependency.sourceRoot, builtinStepsDir);
     if (sourceIsTarget) {
       stagedSources.set(basename(dependency.sourcePath), dependency.sourcePath);
+      retainedPaths.add(dependency.sourcePath);
       continue;
     }
     if (!sourceIsBuiltin) continue;
@@ -187,7 +201,7 @@ function createEjectStepFragmentPlan(
     copiesByName.set(name, { sourcePath: dependency.sourcePath });
     stagedSources.set(name, dependency.sourcePath);
   }
-  return { copies: [...copiesByName.values()], stagedSources };
+  return { copies: [...copiesByName.values()], stagedSources, retainedPaths: [...retainedPaths] };
 }
 
 function validateEjectStepFragmentPlan(
@@ -196,11 +210,11 @@ function validateEjectStepFragmentPlan(
   lang: Language,
   isProjectEject: boolean,
 ): void {
-  const stagingProjectDir = mkdtempSync(join(tmpdir(), 'takt-eject-step-fragments-'));
+  const stagingProjectDir = mkdtempSync(join(ensureCurrentTmpDirExists(), 'takt-eject-step-fragments-'));
   try {
     const stagingStepsDir = join(stagingProjectDir, '.takt', 'steps');
+    mkdirSync(stagingStepsDir, { recursive: true });
     for (const [name, sourcePath] of plan.stagedSources) {
-      mkdirSync(stagingStepsDir, { recursive: true });
       copyFileSync(sourcePath, join(stagingStepsDir, name));
     }
     const stagingWorkflowPath = join(stagingProjectDir, '.takt', 'workflows', 'ejected.yaml');
@@ -241,8 +255,13 @@ export function copyReferencedBuiltinStepFragments(
   workflowPath: string,
   isProjectEject: boolean,
 ): () => void {
-  const plan = createEjectStepFragmentPlan(workflowContent, lang, targetDir, workflowPath);
+  const plan = createEjectStepFragmentPlan(workflowContent, lang, targetDir, workflowPath, isProjectEject);
   validateEjectStepFragmentPlan(plan, workflowContent, lang, isProjectEject);
+
+  for (const retainedPath of plan.retainedPaths) {
+    warn(`User step fragment already exists: ${sanitizeTerminalText(retainedPath)}`);
+    warn('Skipping step fragment copy (user version takes priority).');
+  }
 
   const trustedRoot = dirname(dirname(targetDir));
   const targetDirExisted = pathExistsForEject(targetDir);
@@ -250,7 +269,7 @@ export function copyReferencedBuiltinStepFragments(
   const rollbackDirectories: Array<() => void> = [];
   const rollback = (): void => {
     for (const path of [...createdPaths].reverse()) rmSync(path, { force: true });
-    if (!targetDirExisted && existsSync(targetDir)) rmdirSync(targetDir);
+    if (!targetDirExisted && existsSync(targetDir)) removeEmptyEjectDirectories([targetDir]);
     for (const rollbackDirectory of [...rollbackDirectories].reverse()) rollbackDirectory();
   };
 
@@ -258,6 +277,8 @@ export function copyReferencedBuiltinStepFragments(
     for (const fragment of plan.copies) {
       const targetPath = join(targetDir, basename(fragment.sourcePath));
       if (pathExistsForEject(targetPath)) {
+        warn(`User step fragment already exists: ${sanitizeTerminalText(targetPath)}`);
+        warn('Skipping step fragment copy (user version takes priority).');
         continue;
       }
       rollbackDirectories.push(writeNewEjectedFile(

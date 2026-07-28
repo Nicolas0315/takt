@@ -6,7 +6,7 @@ export type RawRecord = Record<string, unknown>;
 const FORBIDDEN_OBJECT_KEYS = new Set(['__proto__']);
 const MAX_STEP_FRAGMENT_BYTES = 1024 * 1024;
 
-class StepFragmentConfigurationError extends Error {
+export class StepFragmentConfigurationError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options);
   }
@@ -28,9 +28,11 @@ export function collectStepFragmentUses(value: unknown, refs = new Set<string>()
   if (!isRecord(value)) return refs;
   if (visited.has(value)) throw new Error('Step fragment contains a circular YAML structure');
   visited.add(value);
-  if (typeof value.uses === 'string') refs.add(value.uses);
-  if (Array.isArray(value.parallel)) {
-    for (const subStep of value.parallel) collectStepFragmentUses(subStep, refs, visited);
+  const uses = getOwnValue(value, 'uses');
+  if (typeof uses === 'string') refs.add(uses);
+  const parallel = getOwnValue(value, 'parallel');
+  if (Array.isArray(parallel)) {
+    for (const subStep of parallel) collectStepFragmentUses(subStep, refs, visited);
   }
   visited.delete(value);
   return refs;
@@ -72,7 +74,7 @@ export function readStepFragment(path: string, workflowPath: string, ref: string
     if (stat.size > MAX_STEP_FRAGMENT_BYTES) {
       throw workflowError(workflowPath, `step fragment "${ref}" at ${path} exceeds ${MAX_STEP_FRAGMENT_BYTES} bytes`);
     }
-    const contentBuffer = Buffer.allocUnsafe(MAX_STEP_FRAGMENT_BYTES + 1);
+    const contentBuffer = Buffer.allocUnsafe(Math.min(stat.size, MAX_STEP_FRAGMENT_BYTES) + 1);
     let bytesRead = 0;
     while (bytesRead < contentBuffer.length) {
       const read = readSync(fileDescriptor, contentBuffer, bytesRead, contentBuffer.length - bytesRead, bytesRead);
@@ -81,6 +83,9 @@ export function readStepFragment(path: string, workflowPath: string, ref: string
     }
     if (bytesRead > MAX_STEP_FRAGMENT_BYTES) {
       throw workflowError(workflowPath, `step fragment "${ref}" at ${path} exceeds ${MAX_STEP_FRAGMENT_BYTES} bytes`);
+    }
+    if (bytesRead > stat.size) {
+      throw workflowError(workflowPath, `step fragment "${ref}" at ${path} changed size while being read`);
     }
     parsed = parseYaml(contentBuffer.toString('utf-8', 0, bytesRead));
   } catch (error) {

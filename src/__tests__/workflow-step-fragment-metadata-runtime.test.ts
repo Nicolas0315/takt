@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 vi.mock('../agents/runner.js', () => ({
   runAgent: vi.fn(),
 }));
@@ -42,13 +42,7 @@ import {
   applyDefaultMocks,
   makeResponse,
 } from './engine-test-helpers.js';
-
-function write(root: string, relativePath: string, content: string): string {
-  const path = join(root, relativePath);
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, content, 'utf-8');
-  return path;
-}
+import { writeStepFragmentTestFile as write } from './helpers/step-fragment-test-helpers.js';
 
 function engineConfig(engine: WorkflowEngine): WorkflowConfig {
   return (engine as unknown as { config: WorkflowConfig }).config;

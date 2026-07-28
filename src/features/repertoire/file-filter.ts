@@ -9,6 +9,7 @@ import { lstatSync, readdirSync, type Stats } from 'node:fs';
 import { join, extname, relative, sep } from 'node:path';
 
 export const ALLOWED_EXTENSIONS = Object.freeze(['.md', '.yaml', '.yml'] as const);
+export const STEP_FRAGMENT_EXTENSIONS = Object.freeze(['.yaml', '.yml'] as const);
 
 /** Top-level package directories that can be copied. */
 export const ALLOWED_DIRS = Object.freeze(['facets', 'workflows', 'provider-options', 'steps'] as const);
@@ -27,6 +28,10 @@ export interface CopyTarget {
 export function isAllowedExtension(filename: string): boolean {
   const ext = extname(filename);
   return (ALLOWED_EXTENSIONS as readonly string[]).includes(ext);
+}
+
+export function isStepFragmentExtension(filename: string): boolean {
+  return (STEP_FRAGMENT_EXTENSIONS as readonly string[]).includes(extname(filename));
 }
 
 function shouldCopyFile(
@@ -102,7 +107,7 @@ function collectStepFragments(
   for (const entry of entries) {
     const absolutePath = join(stepsDir, entry);
     const stats = inspectPackageEntry(absolutePath);
-    if (stats.isSymbolicLink() || !stats.isFile() || !['.yaml', '.yml'].includes(extname(entry))) {
+    if (stats.isSymbolicLink() || !stats.isFile() || !isStepFragmentExtension(entry)) {
       continue;
     }
     if (stats.size > MAX_FILE_SIZE) {

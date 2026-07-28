@@ -1,16 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { invalidateAllResolvedConfigCache, invalidateGlobalConfigCache } from '../infra/config/index.js';
 import { loadWorkflowFromFile } from '../infra/config/loaders/workflowFileLoader.js';
-
-function write(root: string, relativePath: string, content: string): string {
-  const path = join(root, relativePath);
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, content, 'utf-8');
-  return path;
-}
+import { resolveWorkflowStepFragments } from '../infra/config/loaders/workflowStepFragmentResolver.js';
+import { StepFragmentConfigurationError } from '../infra/config/loaders/workflowStepFragmentReader.js';
+import {
+  captureConfigError,
+  writeStepFragmentTestFile as write,
+} from './helpers/step-fragment-test-helpers.js';
 
 describe('step fragment trust boundaries', () => {
   let projectDir: string;
@@ -91,5 +90,31 @@ describe('step fragment trust boundaries', () => {
     ].join('\n'));
 
     expect(() => loadWorkflowFromFile(workflowPath, projectDir)).toThrow(`allow_git_commit from step fragment "@owner/repo/base" at ${fragmentPath}`);
+  });
+
+  it.each([
+    ['workflow_call', 'kind: workflow_call\ncall: child\n', 'workflow_call'],
+    ['allow_git_commit', 'instruction: review\nallow_git_commit: true\n', 'allow_git_commit'],
+  ])('fails closed for fragment-derived %s without projectDir', (_field, fragment, expected) => {
+    const stepsDir = join(projectDir, '.takt', 'steps');
+    write(projectDir, '.takt/steps/unsafe.yaml', fragment);
+
+    const error = captureConfigError(() => resolveWorkflowStepFragments({
+      steps: [{ uses: 'unsafe' }],
+    }, {
+      workflowPath: join(projectDir, '.takt', 'workflows', 'default.yaml'),
+      candidateDirs: [stepsDir],
+      context: { lang: 'en' },
+      trustInfo: {
+        source: 'project',
+        sourcePath: join(projectDir, '.takt', 'workflows', 'default.yaml'),
+        isProjectTrustRoot: true,
+        isProjectWorkflowRoot: true,
+      },
+    }));
+
+    expect(error).toBeInstanceOf(StepFragmentConfigurationError);
+    expect(error.message).toContain(expected);
+    expect(error.message).toContain('without projectDir');
   });
 });

@@ -105,7 +105,7 @@ function createDoctorGraph(raw: RawWorkflow): DoctorGraph {
       judge: {
         rules: monitor.judge.rules.map((rule, ruleIndex) => ({
           next: rule.next,
-          path: ['loop_monitors', monitorIndex, 'judge', 'rules', ruleIndex],
+          path: ['loop_monitors', monitorIndex, 'judge', 'rules', ruleIndex, 'next'],
         })),
       },
     })),
@@ -115,12 +115,12 @@ function createDoctorGraph(raw: RawWorkflow): DoctorGraph {
         name: substep.name,
         rules: substep.rules?.map((rule, ruleIndex) => ({
           next: rule.next,
-          path: ['steps', stepIndex, 'parallel', subStepIndex, 'rules', ruleIndex],
+          path: ['steps', stepIndex, 'parallel', subStepIndex, 'rules', ruleIndex, 'next'],
         })),
       })),
       rules: step.rules?.map((rule, ruleIndex) => ({
         next: rule.next,
-        path: ['steps', stepIndex, 'rules', ruleIndex],
+        path: ['steps', stepIndex, 'rules', ruleIndex, 'next'],
       })),
     })),
   };

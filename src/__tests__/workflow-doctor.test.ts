@@ -1817,6 +1817,42 @@ steps:
     }]);
   });
 
+  it('attributes a parallel sub-step routing warning to its fragment next field', () => {
+    const fragmentPath = writeWorkflow(projectDir, '.takt/steps/reviewers.yaml', `parallel:
+  - name: sub-review
+    rules:
+      - condition: conflict
+        next: finding-conflict-adjudication
+      - condition: approved
+        next: COMPLETE
+rules:
+  - condition: done
+    next: COMPLETE
+`);
+    const filePath = writeWorkflow(projectDir, '.takt/workflows/adjudication-parallel-fragment.yaml', `name: adjudication-parallel-fragment
+max_steps: 10
+initial_step: step1
+finding_contract:
+  ledger_path: .takt/findings/adjudication-parallel-fragment.json
+  raw_findings_path: .takt/findings/adjudication-parallel-fragment/raw
+  manager:
+    persona: findings-manager
+    instruction: findings-manager
+    output_contract: findings-manager
+steps:
+  - uses: reviewers
+    name: step1
+`);
+
+    const warning = inspectWorkflowFile(filePath, projectDir).diagnostics.find(
+      (diagnostic) => diagnostic.level === 'warning',
+    );
+
+    expect(warning?.message).toContain('ignored by parallel aggregation');
+    expect(warning?.message).toContain('from step fragment "reviewers"');
+    expect(warning?.message).toContain(fragmentPath);
+  });
+
   it('reports a parallel sub-step routing to finding-conflict-adjudication without finding_contract configured', () => {
     const filePath = writeWorkflow(projectDir, '.takt/workflows/adjudication-parallel-sub-unconfigured.yaml', `name: adjudication-parallel-sub-unconfigured
 max_steps: 10

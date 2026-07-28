@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { captureError } from '../helpers/repertoire-test-helpers.js';
 
 const {
   mockMkdtempSync,
@@ -96,6 +97,8 @@ vi.mock('../../features/repertoire/takt-repertoire-config.js', () => ({
 }));
 
 vi.mock('../../features/repertoire/file-filter.js', () => ({
+  STEP_FRAGMENT_EXTENSIONS: ['.yaml', '.yml'],
+  isStepFragmentExtension: (extension: string) => extension === '.yaml' || extension === '.yml',
   collectCopyTargets: vi.fn(() => [{
     absolutePath: `${secureTempDir}/extract/facets/personas/coder.md`,
     relativePath: 'facets/personas/coder.md',
@@ -385,15 +388,3 @@ describe('repertoireAddCommand temporary directory handling', () => {
     expect(mockAtomicReplace).not.toHaveBeenCalled();
   });
 });
-
-async function captureError(action: () => Promise<void>): Promise<Error> {
-  try {
-    await action();
-  } catch (error) {
-    if (error instanceof Error) {
-      return error;
-    }
-    throw error;
-  }
-  throw new Error('Expected action to reject');
-}

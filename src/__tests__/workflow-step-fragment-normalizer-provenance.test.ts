@@ -1,40 +1,27 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { loadWorkflowFromFile } from '../infra/config/loaders/workflowFileLoader.js';
 import { WorkflowEngine } from '../core/workflow/index.js';
-
-function write(root: string, relativePath: string, content: string): string {
-  const path = join(root, relativePath);
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, content, 'utf-8');
-  return path;
-}
-
-function thrownMessage(action: () => unknown): string {
-  try {
-    action();
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    try {
-      return JSON.parse(message).map((issue: { message: string }) => issue.message).join('\n');
-    } catch {
-      return message;
-    }
-  }
-  throw new Error('Expected configuration loading to fail');
-}
+import {
+  captureConfigErrorMessage as thrownMessage,
+  isolateStepFragmentTestConfig,
+  writeStepFragmentTestFile as write,
+} from './helpers/step-fragment-test-helpers.js';
 
 describe('workflow step fragment normalizer provenance', () => {
   let projectDir: string;
+  let restoreConfig: () => void;
 
   beforeEach(() => {
+    restoreConfig = isolateStepFragmentTestConfig('takt-step-normalizer-provenance-config-');
     projectDir = mkdtempSync(join(tmpdir(), 'takt-step-normalizer-provenance-'));
   });
 
   afterEach(() => {
     rmSync(projectDir, { recursive: true, force: true });
+    restoreConfig();
   });
 
   it('attributes an Arpeggio inline JavaScript policy error to the fragment that provides inline_js', () => {

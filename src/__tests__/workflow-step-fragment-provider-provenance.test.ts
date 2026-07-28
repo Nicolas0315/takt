@@ -1,43 +1,38 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { WorkflowEngine } from '../core/workflow/index.js';
 import type { WorkflowConfig } from '../core/models/index.js';
 import type { ProviderResolutionSource } from '../core/workflow/provider-options-trace.js';
-import { withProviderValidationErrorSource } from '../core/workflow/provider-validation-error.js';
+import {
+  getProviderValidationErrorSource,
+  withProviderValidationErrorSource,
+} from '../core/workflow/provider-validation-error.js';
 import { withWorkflowConfigErrorPath } from '../core/workflow/workflow-config-error.js';
 import { loadWorkflowFromFile } from '../infra/config/loaders/workflowFileLoader.js';
 import {
   registerWorkflowStepFragmentErrorContext,
   translateWorkflowStepFragmentError,
 } from '../infra/config/loaders/workflowStepFragmentErrorTranslator.js';
-
-function write(root: string, relativePath: string, content: string): string {
-  const path = join(root, relativePath);
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, content, 'utf-8');
-  return path;
-}
-
-function engineError(action: () => unknown): string {
-  try {
-    action();
-  } catch (error) {
-    return error instanceof Error ? error.message : String(error);
-  }
-  throw new Error('Expected workflow validation to fail');
-}
+import {
+  captureConfigErrorMessage as engineError,
+  isolateStepFragmentTestConfig,
+  writeStepFragmentTestFile as write,
+} from './helpers/step-fragment-test-helpers.js';
 
 describe('workflow step fragment provider provenance', () => {
   let projectDir: string;
+  let restoreConfig: () => void;
 
   beforeEach(() => {
+    restoreConfig = isolateStepFragmentTestConfig('takt-step-provider-provenance-config-');
     projectDir = mkdtempSync(join(tmpdir(), 'takt-step-provider-provenance-'));
   });
 
   afterEach(() => {
     rmSync(projectDir, { recursive: true, force: true });
+    restoreConfig();
   });
 
   it.each([
@@ -92,6 +87,20 @@ describe('workflow step fragment provider provenance', () => {
 
     expect(translated).not.toBe(configurationError);
     expect(translated.message).toContain('from step fragment "review" at /fragments/review.yaml');
+  });
+
+  it('associates a missing provider with the provider field even when a model is present', () => {
+    const error = withProviderValidationErrorSource(new Error('provider is required'), {
+      provider: undefined,
+      model: 'model-without-provider',
+      providerSource: undefined,
+      modelSource: 'step',
+    });
+
+    expect(getProviderValidationErrorSource(error)).toMatchObject({
+      field: 'provider',
+      source: undefined,
+    });
   });
 
   it('does not associate a fragment when engine provider metadata has no source', () => {

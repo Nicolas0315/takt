@@ -12,6 +12,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { existsSync, readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
+import { invalidateAllResolvedConfigCache, invalidateGlobalConfigCache } from '../infra/config/index.js';
 
 // vi.hoisted runs before vi.mock hoisting — safe for shared state
 const mocks = vi.hoisted(() => {
@@ -67,6 +68,8 @@ vi.mock('../infra/config/index.js', () => ({
   getBuiltinLanguageStepsDir: () => mocks.builtinLanguageStepsDir,
   getProjectStepsDir: () => mocks.projectStepsDir,
   getGlobalStepsDir: () => mocks.globalStepsDir,
+  invalidateGlobalConfigCache: vi.fn(),
+  invalidateAllResolvedConfigCache: vi.fn(),
   isPathSafe: (basePath: string, targetPath: string) => {
     const rel = relative(resolve(basePath), resolve(targetPath));
     return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
@@ -86,6 +89,7 @@ vi.mock('../infra/config/paths.js', async (importOriginal) => {
 vi.mock('../shared/ui/index.js', () => mocks.ui);
 
 import { ejectBuiltin, ejectFacet } from '../features/config/ejectBuiltin.js';
+import { loadWorkflowFromFile } from '../infra/config/loaders/workflowFileLoader.js';
 
 function createTestDirs() {
   const baseDir = mkdtempSync(join(tmpdir(), 'takt-eject-facet-test-'));
@@ -326,7 +330,9 @@ steps:
     await ejectBuiltin('default', { projectDir: dirs.projectDir });
 
     expect(existsSync(join(mocks.projectStepsDir, 'parent.yaml'))).toBe(false);
-    expect(existsSync(join(mocks.projectWorkflowsDir, 'default.yaml'))).toBe(true);
+    const workflowPath = join(mocks.projectWorkflowsDir, 'default.yaml');
+    expect(existsSync(workflowPath)).toBe(true);
+    expect(loadWorkflowFromFile(workflowPath, dirs.projectDir).steps[0]?.instruction).toBe('global child');
   });
 
   it.each([
@@ -353,6 +359,30 @@ steps:
     expect(existsSync(join(global ? mocks.globalWorkflowsDir : mocks.projectWorkflowsDir, 'default.yaml'))).toBe(false);
   });
 
+  it.each([
+    ['project', false],
+    ['global', true],
+  ])('should warn when retaining an existing %s step fragment', async (_target, global) => {
+    writeFileSync(join(mocks.builtinDir, 'default.yaml'), `name: default
+initial_step: review
+max_steps: 1
+steps:
+  - uses: review
+`);
+    mkdirSync(mocks.builtinStepsDir, { recursive: true });
+    writeFileSync(join(mocks.builtinStepsDir, 'review.yaml'), 'instruction: builtin review\n');
+
+    const targetStepsDir = global ? mocks.globalStepsDir : mocks.projectStepsDir;
+    mkdirSync(targetStepsDir, { recursive: true });
+    writeFileSync(join(targetStepsDir, 'review.yaml'), 'instruction: user review\n');
+
+    await ejectBuiltin('default', { global, projectDir: dirs.projectDir });
+
+    expect(readFileSync(join(targetStepsDir, 'review.yaml'), 'utf-8')).toBe('instruction: user review\n');
+    expect(mocks.ui.warn).toHaveBeenCalledWith(expect.stringContaining('User step fragment already exists'));
+    expect(mocks.ui.warn).toHaveBeenCalledWith('Skipping step fragment copy (user version takes priority).');
+  });
+
   it('should reject an invalid builtin fragment before creating eject output', async () => {
     writeFileSync(join(mocks.builtinDir, 'default.yaml'), `name: default
 initial_step: invalid
@@ -373,6 +403,8 @@ steps:
     const previousConfigDir = process.env.TAKT_CONFIG_DIR;
     const configDir = join(dirs.baseDir, 'config');
     process.env.TAKT_CONFIG_DIR = configDir;
+    invalidateGlobalConfigCache();
+    invalidateAllResolvedConfigCache();
     try {
       writeFileSync(join(mocks.builtinDir, 'default.yaml'), `name: default
 initial_step: review
@@ -390,6 +422,8 @@ steps:
     } finally {
       if (previousConfigDir === undefined) delete process.env.TAKT_CONFIG_DIR;
       else process.env.TAKT_CONFIG_DIR = previousConfigDir;
+      invalidateGlobalConfigCache();
+      invalidateAllResolvedConfigCache();
     }
   });
 });

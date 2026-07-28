@@ -108,6 +108,14 @@ describe('workflow step fragment parallel resolution', () => {
       '    next: COMPLETE',
       '',
     ].join('\n'));
+    writeFile(globalConfigDir, 'steps/reviewer.yaml', [
+      'name: global-reviewer',
+      'instruction: global review',
+      'rules:',
+      '  - condition: done',
+      '    next: COMPLETE',
+      '',
+    ].join('\n'));
     const workflowPath = writeFile(projectDir, '.takt/workflows/review.yaml', workflow('reviewers', [
       'parallel:',
       '  - uses: reviewer',
@@ -156,6 +164,15 @@ describe('workflow step fragment parallel resolution', () => {
       '        next: COMPLETE',
     ].join('\n')));
 
-    expect(() => loadWorkflowFromFile(workflowPath, projectDir)).not.toThrow();
+    const loaded = loadWorkflowFromFile(workflowPath, projectDir);
+
+    expect(loaded.steps[0]?.parallel).toHaveLength(1);
+    expect(loaded.steps[0]?.parallel?.[0]).toMatchObject({
+      name: 'inline-reviewer',
+      instruction: 'review',
+    });
+    expect(loaded.steps[0]?.parallel).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: 'missing-reviewer' })]),
+    );
   });
 });

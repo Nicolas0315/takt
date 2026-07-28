@@ -147,6 +147,7 @@ import {
   getAttachedWorkflowOpaqueRef,
   getAttachedWorkflowTrustInfo,
   getWorkflowSourcePath,
+  inheritWorkflowConfigMetadata,
 } from '../shared/workflowConfigMetadata.js';
 
 const workflowConfig: WorkflowConfig = {
@@ -279,6 +280,49 @@ describe('createWorkflowExecutionBootstrap direct resume metadata', () => {
     expect(getWorkflowSourcePath(bootstrap.effectiveWorkflowConfig)).toBe(join(projectDir, '.takt', 'workflows', 'default.yaml'));
     expect(getAttachedWorkflowTrustInfo(bootstrap.effectiveWorkflowConfig)).toEqual({ source: 'project' });
     expect(getAttachedWorkflowOpaqueRef(bootstrap.effectiveWorkflowConfig)).toBe('project:sha256:workflow');
+  });
+
+  it('keeps workflow metadata absent when the source config has no metadata', async () => {
+    const projectDir = createTempProject();
+
+    const bootstrap = await createWorkflowExecutionBootstrap(
+      { ...workflowConfig },
+      'Run workflow without metadata',
+      projectDir,
+      {
+        projectCwd: projectDir,
+        provider: 'mock',
+      },
+    );
+
+    expect(getWorkflowSourcePath(bootstrap.effectiveWorkflowConfig)).toBeUndefined();
+    expect(getAttachedWorkflowTrustInfo(bootstrap.effectiveWorkflowConfig)).toBeUndefined();
+    expect(getAttachedWorkflowOpaqueRef(bootstrap.effectiveWorkflowConfig)).toBeUndefined();
+  });
+
+  it('does not replace metadata already attached to the inheritance target', () => {
+    const source = attachWorkflowSourcePath({}, '/source/workflow.yaml');
+    const target = attachWorkflowSourcePath({}, '/target/workflow.yaml');
+
+    expect(() => inheritWorkflowConfigMetadata(source, target)).not.toThrow();
+    expect(getWorkflowSourcePath(target)).toBe('/target/workflow.yaml');
+  });
+
+  it('deeply freezes attached trust metadata and reuses its frozen instance', () => {
+    const workflow = attachWorkflowTrustInfo({}, {
+      source: 'project',
+      nested: { roots: ['/project'] },
+    });
+
+    const first = getAttachedWorkflowTrustInfo(workflow) as {
+      nested: { roots: string[] };
+    };
+    const second = getAttachedWorkflowTrustInfo(workflow);
+
+    expect(second).toBe(first);
+    expect(Object.isFrozen(first)).toBe(true);
+    expect(Object.isFrozen(first.nested)).toBe(true);
+    expect(Object.isFrozen(first.nested.roots)).toBe(true);
   });
 
   it('Given workflow auto_routing and a strategy override, When bootstrap resolves config, Then it delegates override application to the engine', async () => {

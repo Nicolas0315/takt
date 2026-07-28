@@ -19,12 +19,7 @@ import {
 import { withWorkflowConfigErrorPath as withWorkflowStepErrorPath } from '../../../core/workflow/workflow-config-error.js';
 
 type RawStep = z.output<typeof WorkflowStepRawSchema>;
-type RawOutputContract = {
-  name: string;
-  format: string | { $param: string };
-  use_judge?: boolean;
-  order?: string;
-};
+type RawOutputContract = NonNullable<NonNullable<RawStep['output_contracts']>['report']>[number];
 
 function normalizeTeamLeaderInspectTools(
   tools: string[] | undefined,

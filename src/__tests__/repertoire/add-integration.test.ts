@@ -90,6 +90,7 @@ vi.mock('../../shared/utils/index.js', async (importOriginal) => ({
 }));
 
 import { repertoireAddCommand } from '../../commands/repertoire/add.js';
+import { captureError } from '../helpers/repertoire-test-helpers.js';
 
 let workflowProviderOptionsExtends = 'edit';
 let workflowUsesExcludedFragment = false;
@@ -117,22 +118,7 @@ describe('repertoireAddCommand install summary integration', () => {
 
   it('should report provider_options tools discovered through real package collection and summary detection', async () => {
     mockPaths.root = mkdirTempRoot();
-    mockExecFileSync.mockImplementation((cmd: string, args: string[], options?: { encoding?: string }) => {
-      if (cmd === 'gh' && args[0] === '--version') {
-        return Buffer.from('gh version 2.0.0');
-      }
-      if (cmd === 'gh' && args[0] === 'api') {
-        return Buffer.from('tarball');
-      }
-      if (cmd === 'tar' && args[0] === 'tvzf') {
-        return tarListing();
-      }
-      if (cmd === 'tar' && args[0] === 'xzf') {
-        extractPackage(args);
-        return options?.encoding === 'utf-8' ? '' : Buffer.from('');
-      }
-      throw new Error(`Unexpected command: ${cmd} ${args.join(' ')}`);
-    });
+    mockExecFileSync.mockImplementation(createPackageCommandHandler);
 
     await repertoireAddCommand('github:owner/repo@main');
 
@@ -144,22 +130,7 @@ describe('repertoireAddCommand install summary integration', () => {
     mockPaths.root = mkdirTempRoot();
     workflowProviderOptionsExtends = '@owner/repo/edit';
     writeInstalledProviderOptions('claude:\n  allowed_tools: [Read]\n');
-    mockExecFileSync.mockImplementation((cmd: string, args: string[], options?: { encoding?: string }) => {
-      if (cmd === 'gh' && args[0] === '--version') {
-        return Buffer.from('gh version 2.0.0');
-      }
-      if (cmd === 'gh' && args[0] === 'api') {
-        return Buffer.from('tarball');
-      }
-      if (cmd === 'tar' && args[0] === 'tvzf') {
-        return tarListing();
-      }
-      if (cmd === 'tar' && args[0] === 'xzf') {
-        extractPackage(args);
-        return options?.encoding === 'utf-8' ? '' : Buffer.from('');
-      }
-      throw new Error(`Unexpected command: ${cmd} ${args.join(' ')}`);
-    });
+    mockExecFileSync.mockImplementation(createPackageCommandHandler);
 
     await repertoireAddCommand('github:owner/repo@main');
 
@@ -171,22 +142,7 @@ describe('repertoireAddCommand install summary integration', () => {
   it('should reject before confirmation when the real collector excludes a referenced step fragment', async () => {
     mockPaths.root = mkdirTempRoot();
     workflowUsesExcludedFragment = true;
-    mockExecFileSync.mockImplementation((cmd: string, args: string[], options?: { encoding?: string }) => {
-      if (cmd === 'gh' && args[0] === '--version') {
-        return Buffer.from('gh version 2.0.0');
-      }
-      if (cmd === 'gh' && args[0] === 'api') {
-        return Buffer.from('tarball');
-      }
-      if (cmd === 'tar' && args[0] === 'tvzf') {
-        return tarListing();
-      }
-      if (cmd === 'tar' && args[0] === 'xzf') {
-        extractPackage(args);
-        return options?.encoding === 'utf-8' ? '' : Buffer.from('');
-      }
-      throw new Error(`Unexpected command: ${cmd} ${args.join(' ')}`);
-    });
+    mockExecFileSync.mockImplementation(createPackageCommandHandler);
 
     await expect(repertoireAddCommand('github:owner/repo@main'))
       .rejects.toThrow('Step fragment "excluded" referenced by workflows/workflow.yaml is excluded from package installation');
@@ -246,18 +202,6 @@ function createPackageCommandHandler(cmd: string, args: string[], options?: { en
     return options?.encoding === 'utf-8' ? '' : Buffer.from('');
   }
   throw new Error(`Unexpected command: ${cmd} ${args.join(' ')}`);
-}
-
-async function captureError(action: () => Promise<void>): Promise<Error> {
-  try {
-    await action();
-  } catch (error) {
-    if (error instanceof Error) {
-      return error;
-    }
-    throw error;
-  }
-  throw new Error('Expected action to reject');
 }
 
 function mkdirTempRoot(): string {

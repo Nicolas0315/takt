@@ -146,8 +146,10 @@ describe('repertoireRemoveCommand reference scan integration', () => {
 
   it('should not confirm or delete when the real reference scanner cannot resolve a step fragment symlink', async () => {
     const stepPath = `${STEP_DIR}/review.yaml`;
+    mockFs.statSync.mockImplementation((path: string) => (
+      path === STEP_DIR ? directoryStats() : throwNotFound()
+    ));
     mockFs.lstatSync.mockImplementation((path: string) => {
-      if (path === STEP_DIR) return directoryStats();
       if (path === stepPath) return symlinkStats();
       return throwNotFound();
     });

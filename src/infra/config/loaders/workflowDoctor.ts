@@ -258,17 +258,17 @@ export function inspectWorkflowFile(
     validateDoctorGraph(raw, diagnostics);
 
     return {
-      diagnostics: diagnostics.map(({ path, ...diagnostic }) => diagnostic.level === 'error'
-        ? {
-          ...diagnostic,
-          message: annotateWorkflowFragmentError(
+      diagnostics: diagnostics.map(({ path, ...diagnostic }) => ({
+        ...diagnostic,
+        message: path === undefined
+          ? diagnostic.message
+          : annotateWorkflowFragmentError(
             new Error(diagnostic.message),
             raw,
             filePath,
             path,
           ).message,
-        }
-        : diagnostic),
+      })),
       filePath,
     };
   } catch (error) {

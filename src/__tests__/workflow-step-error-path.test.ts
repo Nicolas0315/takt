@@ -4,6 +4,7 @@ import {
   withWorkflowConfigErrorPath,
 } from '../core/workflow/workflow-config-error.js';
 import { findWorkflowStepLocation } from '../core/workflow/workflow-step-location.js';
+import type { WorkflowConfig, WorkflowStep } from '../core/models/types.js';
 
 describe('workflow configuration error boundaries', () => {
   it('retains an immutable normalized path and the original cause', () => {
@@ -38,10 +39,37 @@ describe('workflow configuration error boundaries', () => {
     expect(error.path).toEqual(['steps', 0, 'overrides', 'provider']);
   });
 
+  it('does not reuse an unrelated path solely because it is equally specific', () => {
+    const error = new WorkflowConfigError(
+      new Error('invalid order'),
+      ['steps', 0, 'output_contracts', 'report', 0, 'order'],
+    );
+
+    const annotated = withWorkflowConfigErrorPath(
+      error,
+      ['steps', 0, 'output_contracts', 'report', 0, 'format'],
+    );
+
+    expect(annotated).not.toBe(error);
+    expect(annotated.path).toEqual(['steps', 0, 'output_contracts', 'report', 0, 'format']);
+  });
+
   it('locates a parallel sub-step without reading raw workflow metadata', () => {
-    const subStep = { name: 'review' };
-    const config = {
-      steps: [{ name: 'reviewers', parallel: [subStep] }],
+    const subStep: WorkflowStep = {
+      name: 'review',
+      personaDisplayName: 'review',
+      instruction: 'review',
+    };
+    const config: WorkflowConfig = {
+      name: 'location-test',
+      initialStep: 'reviewers',
+      maxSteps: 1,
+      steps: [{
+        name: 'reviewers',
+        personaDisplayName: 'reviewers',
+        instruction: 'reviewers',
+        parallel: [subStep],
+      }],
     };
 
     expect(findWorkflowStepLocation(config, subStep)).toEqual(['steps', 0, 'parallel', 0]);

@@ -15,7 +15,8 @@ export function withProviderValidationErrorSource(
   providerInfo: Pick<StepProviderInfo, 'provider' | 'model' | 'providerSource' | 'modelSource'>,
 ): Error {
   const normalized = error instanceof Error ? error : new Error(String(error));
-  const field = providerInfo.provider === 'opencode' && providerInfo.model === undefined
+  const field = providerInfo.provider === undefined
+    || (providerInfo.provider === 'opencode' && providerInfo.model === undefined)
     ? 'provider'
     : 'model';
   providerValidationErrorSources.set(normalized, {

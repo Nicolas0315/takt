@@ -15,7 +15,11 @@ export class WorkflowConfigError extends Error {
 }
 
 export function withWorkflowConfigErrorPath(error: unknown, path: readonly PropertyKey[]): WorkflowConfigError {
-  if (error instanceof WorkflowConfigError && error.path.length >= path.length) {
+  if (
+    error instanceof WorkflowConfigError
+    && error.path.length >= path.length
+    && path.every((entry, index) => error.path[index] === entry)
+  ) {
     return error;
   }
   return new WorkflowConfigError(error, path);

@@ -77,12 +77,15 @@ export function collectFragmentProvenance(
   stepPath: readonly PropertyKey[],
 ): WorkflowStepFragmentProvenance[] {
   if (Array.isArray(fragment)) {
-    return fragment.flatMap((item, index) => {
-      const propertyPath = [...stepPath, index];
-      return isPlainObject(item) || Array.isArray(item)
-        ? collectFragmentProvenance(item, ref, sourcePath, propertyPath)
-        : [{ stepPath: propertyPath, ref, sourcePath }];
-    });
+    return [
+      { stepPath, ref, sourcePath },
+      ...fragment.flatMap((item, index) => {
+        const propertyPath = [...stepPath, index];
+        return isPlainObject(item) || Array.isArray(item)
+          ? collectFragmentProvenance(item, ref, sourcePath, propertyPath)
+          : [{ stepPath: propertyPath, ref, sourcePath }];
+      }),
+    ];
   }
   if (!isPlainObject(fragment)) return [];
   const provenance = [{ stepPath, ref, sourcePath }];

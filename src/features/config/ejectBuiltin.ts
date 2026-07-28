@@ -9,7 +9,7 @@
  * With --global: user global (~/.takt/)
  */
 
-import { existsSync, readdirSync, statSync, readFileSync, writeFileSync, mkdirSync, rmSync, rmdirSync } from 'node:fs';
+import { existsSync, readdirSync, statSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import type { FacetType } from '../../infra/config/paths.js';
 import {
@@ -84,8 +84,6 @@ export async function ejectBuiltin(name: string | undefined, options: EjectOptio
   } else {
     const content = readFileSync(builtinPath, 'utf-8');
     const targetStepsDir = options.global ? getGlobalStepsDir() : getProjectStepsDir(options.projectDir);
-    const workflowDir = dirname(workflowDest);
-    const workflowDirExisted = pathExistsForEject(workflowDir);
     const rollbackStepFragments = copyReferencedBuiltinStepFragments(
       content,
       lang,
@@ -97,10 +95,6 @@ export async function ejectBuiltin(name: string | undefined, options: EjectOptio
       writeNewEjectedFile(options.global ? dirname(dirname(targetWorkflowsDir)) : options.projectDir, workflowDest, content);
     } catch (error) {
       rollbackStepFragments();
-      rmSync(workflowDest, { force: true });
-      if (!workflowDirExisted && existsSync(workflowDir)) {
-        rmdirSync(workflowDir);
-      }
       throw error;
     }
     success(`Ejected workflow: ${safeWorkflowDest}`);

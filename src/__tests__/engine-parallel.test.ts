@@ -63,10 +63,10 @@ function normalizeWorkflowConfigWithCommandGateOptIn(raw: unknown, workflowDir: 
     undefined,
     undefined,
     undefined,
-    undefined,
-    undefined,
-    'runtime',
-    { customScripts: true },
+    {
+      callableArgMode: 'runtime',
+      workflowCommandGatesPolicy: { customScripts: true },
+    },
   );
 }
 

@@ -235,6 +235,15 @@ function validateFindingsRulesRequireContract(
   }
 }
 
+interface NormalizeWorkflowConfigOptions {
+  callableArgs?: Record<string, string | string[]>,
+  callableArgPolicy?: WorkflowCallArgResolutionPolicy,
+  callableArgMode?: 'runtime' | 'discovery',
+  workflowCommandGatesPolicy?: WorkflowCommandGatesConfig,
+  workflowPath?: string,
+  workflowTrustInfo?: WorkflowTrustInfo,
+}
+
 export function normalizeWorkflowConfig(
   raw: unknown,
   workflowDir: string,
@@ -244,13 +253,16 @@ export function normalizeWorkflowConfig(
   workflowRuntimePreparePolicy?: WorkflowRuntimePrepareConfig,
   workflowArpeggioPolicy?: WorkflowArpeggioConfig,
   workflowMcpServersPolicy?: WorkflowMcpServersConfig,
-  callableArgs?: Record<string, string | string[]>,
-  callableArgPolicy?: WorkflowCallArgResolutionPolicy,
-  callableArgMode: 'runtime' | 'discovery' = 'runtime',
-  workflowCommandGatesPolicy?: WorkflowCommandGatesConfig,
-  workflowPath?: string,
-  workflowTrustInfo?: WorkflowTrustInfo,
+  options: NormalizeWorkflowConfigOptions = {},
 ): WorkflowConfig {
+  const {
+    callableArgs,
+    callableArgPolicy,
+    callableArgMode = 'runtime',
+    workflowCommandGatesPolicy,
+    workflowPath,
+    workflowTrustInfo,
+  } = options;
   const parsedRaw = parseWorkflowRaw(raw, {
     context,
     workflowPath: workflowPath ?? workflowDir,

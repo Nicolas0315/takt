@@ -1,42 +1,35 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { WorkflowEngine } from '../core/workflow/index.js';
 import { loadWorkflowFromFile } from '../infra/config/loaders/workflowFileLoader.js';
-
-function write(root: string, relativePath: string, content: string): string {
-  const path = join(root, relativePath);
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, content, 'utf-8');
-  return path;
-}
+import {
+  captureConfigErrorMessage,
+  isolateStepFragmentTestConfig,
+  writeStepFragmentTestFile as write,
+} from './helpers/step-fragment-test-helpers.js';
 
 function validate(path: string, projectDir: string): string {
-  try {
+  return captureConfigErrorMessage(() => {
     new WorkflowEngine(loadWorkflowFromFile(path, projectDir), projectDir, 'test task', {
       projectCwd: projectDir,
     });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    try {
-      return JSON.parse(message).map((issue: { message: string }) => issue.message).join('\n');
-    } catch {
-      return message;
-    }
-  }
-  throw new Error('Expected workflow validation to fail');
+  });
 }
 
 describe('workflow step fragment validator provenance', () => {
   let projectDir: string;
+  let restoreConfig: () => void;
 
   beforeEach(() => {
+    restoreConfig = isolateStepFragmentTestConfig('takt-step-validator-provenance-config-');
     projectDir = mkdtempSync(join(tmpdir(), 'takt-step-validator-provenance-'));
   });
 
   afterEach(() => {
     rmSync(projectDir, { recursive: true, force: true });
+    restoreConfig();
   });
 
   it('attributes an aggregate rule placement error to the fragment that provides the invalid rule', () => {

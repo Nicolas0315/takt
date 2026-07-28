@@ -70,13 +70,13 @@ function resolveStepFragmentByName(ref: string, candidateDirs: readonly string[]
 }
 
 export function getStepFragmentLookupDirs(ref: string, scope: StepFragmentLookupScope): readonly string[] {
-  const context = requireContext(ref, scope.context);
   if (!ref.startsWith('@')) {
-    return scope.candidateDirs ?? buildStepFragmentLookupDirs(context);
+    return scope.candidateDirs ?? buildStepFragmentLookupDirs(requireContext(ref, scope.context));
   }
   if (!isScopeRef(ref)) {
     throw new Error(`Configuration error: invalid scoped step fragment reference "${ref}"; expected @owner/repo/name`);
   }
+  const context = requireContext(ref, scope.context);
   if (!context.repertoireDir) {
     throw new Error(`Configuration error: step fragment requires repertoireDir to resolve scoped reference "${ref}"`);
   }
@@ -86,10 +86,6 @@ export function getStepFragmentLookupDirs(ref: string, scope: StepFragmentLookup
 }
 
 function resolveScopedStepFragment(ref: string, scope: StepFragmentLookupScope): ResolvedStepFragment | undefined {
-  const context = requireContext(ref, scope.context);
-  if (!context.repertoireDir) {
-    throw new Error(`Configuration error: step fragment requires repertoireDir to resolve scoped reference "${ref}"`);
-  }
   const scopeRef = parseScopeRef(ref);
   return resolveStepFragmentByName(scopeRef.name, getStepFragmentLookupDirs(ref, scope));
 }
@@ -99,9 +95,6 @@ export function resolveStepFragment(
   scope: StepFragmentLookupScope,
 ): ResolvedStepFragment | undefined {
   if (ref.startsWith('@')) {
-    if (!isScopeRef(ref)) {
-      throw new Error(`Configuration error: invalid scoped step fragment reference "${ref}"; expected @owner/repo/name`);
-    }
     return resolveScopedStepFragment(ref, scope);
   }
   return resolveStepFragmentByName(ref, getStepFragmentLookupDirs(ref, scope));

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { ZodError } from 'zod';
 import { invalidateAllResolvedConfigCache, invalidateGlobalConfigCache } from '../infra/config/index.js';
-import { getBuiltinStepsDir, getBuiltinWorkflowsDir } from '../infra/config/paths.js';
+import { getBuiltinLanguageStepsDir, getBuiltinStepsDir } from '../infra/config/paths.js';
 import { buildStepFragmentLookupDirs } from '../infra/config/loaders/stepFragmentLookupDirectories.js';
 import { resolveWorkflowStepFragments } from '../infra/config/loaders/workflowStepFragmentResolver.js';
 import { inspectWorkflowFile } from '../infra/config/loaders/workflowDoctor.js';
@@ -291,15 +291,30 @@ steps:
   });
 
   it.each(['en', 'ja'] as const)('should resolve the shared final-gate fragment for %s builtins', (lang) => {
-    writeFile(projectDir, '.takt/config.yaml', `language: ${lang}\n`);
-    invalidateAllResolvedConfigCache();
-
-    const workflow = loadWorkflowFromFile(join(getBuiltinWorkflowsDir(lang), 'takt-default-high.yaml'), projectDir);
-
-    expect(workflow.steps.find((step) => step.name === 'final-gate')).toMatchObject({
-      kind: 'workflow_call',
-      call: 'merge-readiness-finding-contract-final-gate',
+    const workflowPath = join(getBuiltinLanguageStepsDir(lang), 'fixture-workflow.yaml');
+    const resolution = resolveWorkflowStepFragments({
+      steps: [{ uses: 'finding-contract-final-gate' }],
+    }, {
+      workflowPath,
+      candidateDirs: [getBuiltinLanguageStepsDir(lang), getBuiltinStepsDir()],
+      context: {
+        lang,
+        projectDir,
+        workflowDir: getBuiltinLanguageStepsDir(lang),
+        repertoireDir: join(projectDir, '.takt', 'repertoire'),
+      },
+      trustInfo: {
+        source: 'builtin',
+        sourcePath: workflowPath,
+        isProjectTrustRoot: false,
+        isProjectWorkflowRoot: false,
+      },
     });
+
+    expect(resolution.dependencies).toContainEqual(expect.objectContaining({
+      ref: 'finding-contract-final-gate',
+      sourceRoot: getBuiltinStepsDir(),
+    }));
   });
 
   it('should retain the resolved source layer for nested bare fragment references', () => {
@@ -1049,13 +1064,7 @@ rules:
         workflowDir: join(projectDir, '.takt', 'workflows'),
         repertoireDir: join(projectDir, '.takt', 'repertoire'),
       },
-    }) as unknown as {
-      dependencies: ReadonlyArray<{
-        ref: string;
-        sourcePath: string;
-        sourceRoot: string;
-      }>;
-    };
+    });
 
     const outer = resolution.dependencies.find((dependency) => dependency.ref === 'outer');
     const inner = resolution.dependencies.find((dependency) => dependency.ref === 'inner');
@@ -1072,5 +1081,18 @@ rules:
     expect(Object.isFrozen(resolution.dependencies)).toBe(true);
     expect(Object.isFrozen(outer)).toBe(true);
     expect(() => (resolution.dependencies as unknown as string[]).push('mutated')).toThrow();
+  });
+
+  it('creates a distinct step object for each repeated raw step position', () => {
+    const sharedStep = { name: 'review', instruction: 'review' };
+
+    const resolution = resolveWorkflowStepFragments({
+      steps: [sharedStep, sharedStep],
+    }, {
+      workflowPath: join(projectDir, '.takt', 'workflows', 'shared-step.yaml'),
+    });
+    const steps = (resolution.raw as { steps: unknown[] }).steps;
+
+    expect(steps[0]).not.toBe(steps[1]);
   });
 });

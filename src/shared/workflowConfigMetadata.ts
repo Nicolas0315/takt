@@ -49,8 +49,7 @@ export function attachWorkflowTrustInfo<T extends object, TrustInfo extends obje
 }
 
 export function getAttachedWorkflowTrustInfo(workflow: object): object | undefined {
-  const trustInfo = (workflow as WorkflowConfigWithSourcePath)[WORKFLOW_TRUST_INFO];
-  return trustInfo === undefined ? undefined : freezeTrustInfo(trustInfo);
+  return (workflow as WorkflowConfigWithSourcePath)[WORKFLOW_TRUST_INFO];
 }
 
 export function attachWorkflowConfigErrorTranslator<T extends object>(
@@ -73,6 +72,7 @@ export function inheritWorkflowConfigMetadata(source: object, target: object): v
   for (const key of [WORKFLOW_SOURCE_PATH, WORKFLOW_TRUST_INFO, WORKFLOW_OPAQUE_REF, WORKFLOW_CONFIG_ERROR_TRANSLATOR]) {
     const descriptor = Object.getOwnPropertyDescriptor(source, key);
     if (!descriptor) continue;
+    if (Object.getOwnPropertyDescriptor(target, key)) continue;
     const value = key === WORKFLOW_CONFIG_ERROR_TRANSLATOR
       ? bindWorkflowConfigErrorTranslator(source, descriptor.value as WorkflowConfigErrorTranslator)
       : key === WORKFLOW_TRUST_INFO && descriptor.value !== undefined
@@ -90,5 +90,21 @@ function bindWorkflowConfigErrorTranslator(
 }
 
 function freezeTrustInfo<T extends object>(trustInfo: T): T {
-  return Object.freeze({ ...trustInfo }) as T;
+  return freezeTrustValue(trustInfo, new WeakMap<object, object>());
+}
+
+function freezeTrustValue<T>(value: T, copies: WeakMap<object, object>): T {
+  if (typeof value !== 'object' || value === null) {
+    return value;
+  }
+  const existing = copies.get(value);
+  if (existing !== undefined) {
+    return existing as T;
+  }
+  const copy: unknown[] | Record<string, unknown> = Array.isArray(value) ? [] : {};
+  copies.set(value, copy);
+  for (const [key, entry] of Object.entries(value)) {
+    copy[key as keyof typeof copy] = freezeTrustValue(entry, copies);
+  }
+  return Object.freeze(copy) as T;
 }

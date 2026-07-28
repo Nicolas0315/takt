@@ -536,7 +536,7 @@ function validatePromotionProviderModels(
   }
 }
 
-function validateParallelSubStepNamesUnique(config: WorkflowConfig): void {
+function validateWorkflowStepNamesUnique(config: WorkflowConfig): void {
   const duplicate = findDuplicateWorkflowStepName(config.steps);
   if (!duplicate) {
     return;
@@ -585,7 +585,7 @@ export function validateWorkflowConfig(config: WorkflowConfig, options: Workflow
   validateFindingContractStructuredOutput(config, findingContractEnabled);
   validateFindingContractManagerProviderModel(config, options);
   validateFindingConflictAdjudicationReservedName(config);
-  validateParallelSubStepNamesUnique(config);
+  validateWorkflowStepNamesUnique(config);
   validateRequiredInheritedFindingContract(config, options);
   validateFindingContractInheritanceConflict(config, options);
   validateFindingContractOutputFormatRequiresContract(config, findingContractEnabled);
@@ -617,98 +617,99 @@ export function validateWorkflowConfig(config: WorkflowConfig, options: Workflow
 
   for (const [stepIndex, step] of config.steps.entries()) {
     try {
-    const stepPath = findWorkflowStepLocation(config, step) ?? ['steps', stepIndex];
-    try {
-      validateSessionEntrypoint(step, `Configuration error: step "${step.name}"`);
-    } catch (error) {
-      throw withWorkflowStepErrorPath(error, [...stepPath, 'session']);
-    }
-    try {
-      validateAgentStepProviderModel(step, options, `Configuration error: step "${step.name}"`, stepPath);
-    } catch (error) {
-      throw withWorkflowStepErrorPath(error, [...stepPath, 'provider']);
-    }
-    validateAggregateRulePlacement(
-      step.rules ?? [],
-      (step.parallel?.length ?? 0) > 0,
-      `Invalid rule in step "${step.name}"`,
-      [...stepPath, 'rules'],
-    );
-    validateSemanticAppendices(step.rules ?? [], `Invalid rule in step "${step.name}"`, [...stepPath, 'rules']);
-    for (const [ruleIndex, rule] of (step.rules ?? []).entries()) {
-      if (rule.next && !stepNames.has(rule.next)) {
-        throw withWorkflowStepErrorPath(
-          new Error(`Invalid rule in step "${step.name}": target step "${rule.next}" does not exist`),
-          [...stepPath, 'rules', ruleIndex],
-        );
-      }
+      const stepPath = findWorkflowStepLocation(config, step) ?? ['steps', stepIndex];
       try {
-        validateFindingsRuleContract(
-          findingContractEnabled,
-          rule,
-          `Invalid rule in step "${step.name}"`,
-        );
-        validateFindingConflictAdjudicationRuleContract(
-          findingContractEnabled,
-          rule,
-          `Invalid rule in step "${step.name}"`,
-        );
+        validateSessionEntrypoint(step, `Configuration error: step "${step.name}"`);
       } catch (error) {
-        throw withWorkflowStepErrorPath(error, [...stepPath, 'rules', ruleIndex]);
+        throw withWorkflowStepErrorPath(error, [...stepPath, 'session']);
       }
-    }
-    for (const [subStepIndex, subStep] of (step.parallel ?? []).entries()) {
       try {
-      const subStepPath = findWorkflowStepLocation(config, subStep) ?? ['steps', stepIndex, 'parallel', subStepIndex];
+        validateAgentStepProviderModel(step, options, `Configuration error: step "${step.name}"`, stepPath);
+      } catch (error) {
+        throw withWorkflowStepErrorPath(error, stepPath);
+      }
       validateAggregateRulePlacement(
-        subStep.rules ?? [],
-        false,
-        `Invalid rule in parallel sub-step "${subStep.name}" of step "${step.name}"`,
-        [...subStepPath, 'rules'],
+        step.rules ?? [],
+        (step.parallel?.length ?? 0) > 0,
+        `Invalid rule in step "${step.name}"`,
+        [...stepPath, 'rules'],
       );
-      validateSemanticAppendices(
-        subStep.rules ?? [],
-        `Invalid rule in parallel sub-step "${subStep.name}" of step "${step.name}"`,
-        [...subStepPath, 'rules'],
-      );
-      try {
-        validateSessionEntrypoint(
-          subStep,
-          `Configuration error: parallel sub-step "${subStep.name}" of step "${step.name}"`,
-        );
-      } catch (error) {
-        throw withWorkflowStepErrorPath(error, [...subStepPath, 'session']);
-      }
-      try {
-        validateAgentStepProviderModel(
-          subStep,
-          options,
-          `Configuration error: parallel sub-step "${subStep.name}" of step "${step.name}"`,
-          subStepPath,
-        );
-      } catch (error) {
-        throw withWorkflowStepErrorPath(error, [...subStepPath, 'provider']);
-      }
-      for (const [ruleIndex, rule] of (subStep.rules ?? []).entries()) {
+      validateSemanticAppendices(step.rules ?? [], `Invalid rule in step "${step.name}"`, [...stepPath, 'rules']);
+      for (const [ruleIndex, rule] of (step.rules ?? []).entries()) {
+        if (rule.next && !stepNames.has(rule.next)) {
+          throw withWorkflowStepErrorPath(
+            new Error(`Invalid rule in step "${step.name}": target step "${rule.next}" does not exist`),
+            [...stepPath, 'rules', ruleIndex],
+          );
+        }
         try {
           validateFindingsRuleContract(
             findingContractEnabled,
             rule,
-            `Invalid rule in parallel sub-step "${subStep.name}" of step "${step.name}"`,
+            `Invalid rule in step "${step.name}"`,
           );
           validateFindingConflictAdjudicationRuleContract(
             findingContractEnabled,
             rule,
-            `Invalid rule in parallel sub-step "${subStep.name}" of step "${step.name}"`,
+            `Invalid rule in step "${step.name}"`,
           );
         } catch (error) {
-          throw withWorkflowStepErrorPath(error, [...subStepPath, 'rules', ruleIndex]);
+          throw withWorkflowStepErrorPath(error, [...stepPath, 'rules', ruleIndex]);
         }
       }
-      } catch (error) {
-        throw withWorkflowStepErrorPath(error, ['steps', stepIndex, 'parallel', subStepIndex]);
+      for (const [subStepIndex, subStep] of (step.parallel ?? []).entries()) {
+        try {
+          const subStepPath = findWorkflowStepLocation(config, subStep)
+            ?? ['steps', stepIndex, 'parallel', subStepIndex];
+          validateAggregateRulePlacement(
+            subStep.rules ?? [],
+            false,
+            `Invalid rule in parallel sub-step "${subStep.name}" of step "${step.name}"`,
+            [...subStepPath, 'rules'],
+          );
+          validateSemanticAppendices(
+            subStep.rules ?? [],
+            `Invalid rule in parallel sub-step "${subStep.name}" of step "${step.name}"`,
+            [...subStepPath, 'rules'],
+          );
+          try {
+            validateSessionEntrypoint(
+              subStep,
+              `Configuration error: parallel sub-step "${subStep.name}" of step "${step.name}"`,
+            );
+          } catch (error) {
+            throw withWorkflowStepErrorPath(error, [...subStepPath, 'session']);
+          }
+          try {
+            validateAgentStepProviderModel(
+              subStep,
+              options,
+              `Configuration error: parallel sub-step "${subStep.name}" of step "${step.name}"`,
+              subStepPath,
+            );
+          } catch (error) {
+            throw withWorkflowStepErrorPath(error, subStepPath);
+          }
+          for (const [ruleIndex, rule] of (subStep.rules ?? []).entries()) {
+            try {
+              validateFindingsRuleContract(
+                findingContractEnabled,
+                rule,
+                `Invalid rule in parallel sub-step "${subStep.name}" of step "${step.name}"`,
+              );
+              validateFindingConflictAdjudicationRuleContract(
+                findingContractEnabled,
+                rule,
+                `Invalid rule in parallel sub-step "${subStep.name}" of step "${step.name}"`,
+              );
+            } catch (error) {
+              throw withWorkflowStepErrorPath(error, [...subStepPath, 'rules', ruleIndex]);
+            }
+          }
+        } catch (error) {
+          throw withWorkflowStepErrorPath(error, ['steps', stepIndex, 'parallel', subStepIndex]);
+        }
       }
-    }
     } catch (error) {
       throw withWorkflowStepErrorPath(error, ['steps', stepIndex]);
     }

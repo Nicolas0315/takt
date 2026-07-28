@@ -16,9 +16,12 @@ import {
   translateWorkflowStepFragmentError,
 } from './workflowStepFragmentErrorTranslator.js';
 import { attachWorkflowConfigErrorTranslator } from '../../../shared/workflowConfigMetadata.js';
+import {
+  hasVisitedWorkflowErrorContext,
+  markVisitedWorkflowErrorContext,
+} from './workflowFragmentErrorVisitTracker.js';
 
 const provenanceByRawWorkflow = new WeakMap<object, readonly WorkflowStepFragmentProvenance[]>();
-const annotatedFragmentErrorContexts = new WeakMap<Error, Set<string>>();
 
 export interface WorkflowRawParserOptions {
   context?: FacetResolutionContext;
@@ -37,7 +40,7 @@ export function parseWorkflowRaw(raw: unknown, options: WorkflowRawParserOptions
       throw error;
     }
     throw new ZodError(error.issues.map((issue) => {
-      const provenance = findFragmentErrorProvenance(issue.path, resolved.provenance);
+      const provenance = findFragmentErrorProvenance(issue, resolved.provenance);
       if (!provenance) {
         return issue;
       }
@@ -56,11 +59,8 @@ export function annotateWorkflowFragmentError(
   sourcePath?: readonly PropertyKey[],
 ): Error {
   const message = error instanceof Error ? error.message : String(error);
-  if (error instanceof Error) {
-    const contexts = annotatedFragmentErrorContexts.get(error);
-    if (contexts?.has(workflowPath)) {
-      return error;
-    }
+  if (error instanceof Error && hasVisitedWorkflowErrorContext(error, 'raw', workflowPath)) {
+    return error;
   }
   const provenance = provenanceByRawWorkflow.get(raw) ?? [];
   const errorPath = sourcePath ?? getWorkflowConfigErrorPath(error);
@@ -74,9 +74,7 @@ export function annotateWorkflowFragmentError(
   }
   const details = formatWorkflowStepFragmentErrorContext(workflowPath, source, exactSource === undefined);
   const annotated = new Error(`${message} (${details})`, { cause: error instanceof Error ? error : undefined });
-  const contexts = new Set(error instanceof Error ? annotatedFragmentErrorContexts.get(error) : undefined);
-  contexts.add(workflowPath);
-  annotatedFragmentErrorContexts.set(annotated, contexts);
+  markVisitedWorkflowErrorContext(error instanceof Error ? error : undefined, annotated, 'raw', workflowPath);
   return annotated;
 }
 
@@ -102,13 +100,37 @@ export function annotateWorkflowConfigFragmentError(error: unknown, workflow: ob
 }
 
 function findFragmentErrorProvenance(
-  issuePath: readonly PropertyKey[],
+  issue: ZodError['issues'][number],
   provenance: readonly WorkflowStepFragmentProvenance[],
 ) : { source: WorkflowStepFragmentProvenance; workflowDefined: boolean } | undefined {
+  const unionPath = findCommonUnionIssuePath(issue);
+  if (unionPath !== undefined) {
+    const exactSource = findFragmentProvenanceAtExactPath(provenance, unionPath);
+    const source = exactSource ?? findFragmentProvenanceForStep(provenance, unionPath);
+    return source === undefined
+      ? undefined
+      : { source, workflowDefined: exactSource === undefined };
+  }
+  const issuePath = issue.path;
   const exactSource = findFragmentProvenanceAtExactPath(provenance, issuePath);
   const source = exactSource ?? findFragmentProvenanceForStep(provenance, issuePath);
   if (!source) {
     return undefined;
   }
   return { source, workflowDefined: exactSource === undefined };
+}
+
+function findCommonUnionIssuePath(
+  issue: ZodError['issues'][number],
+): readonly PropertyKey[] | undefined {
+  if (issue.code !== 'invalid_union' || issue.errors.length === 0) {
+    return undefined;
+  }
+  const pathsByBranch = issue.errors.map((branch) => branch.map((nested) => nested.path));
+  const commonPath = pathsByBranch[0]?.find((candidate) =>
+    pathsByBranch.slice(1).every((branch) =>
+      branch.some((path) =>
+        path.length === candidate.length
+        && path.every((part, index) => part === candidate[index]))));
+  return commonPath === undefined ? undefined : [...issue.path, ...commonPath];
 }

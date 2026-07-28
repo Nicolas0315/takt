@@ -1,10 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import { invalidateAllResolvedConfigCache, invalidateGlobalConfigCache } from '../infra/config/index.js';
-import { getBuiltinStepsDir, getBuiltinWorkflowsDir } from '../infra/config/paths.js';
+import {
+  getBuiltinLanguageStepsDir,
+  getBuiltinStepsDir,
+  getBuiltinWorkflowsDir,
+} from '../infra/config/paths.js';
 import { buildStepFragmentLookupDirs } from '../infra/config/loaders/stepFragmentLookupDirectories.js';
 import { loadWorkflowFromFile } from '../infra/config/loaders/workflowFileLoader.js';
 
@@ -58,7 +62,7 @@ describe('builtin workflow step fragment migration', () => {
 
   it.each(LANGUAGES)('looks up %s language fragments before the shared builtin directory', (lang) => {
     const dirs = buildStepFragmentLookupDirs({ lang });
-    const languageStepsDir = join(getBuiltinWorkflowsDir(lang), '..', 'steps');
+    const languageStepsDir = getBuiltinLanguageStepsDir(lang);
 
     expect(dirs).toContain(languageStepsDir);
     expect(dirs.indexOf(languageStepsDir)).toBeLessThan(dirs.indexOf(getBuiltinStepsDir()));
@@ -69,6 +73,7 @@ describe('builtin workflow step fragment migration', () => {
       expectFragmentReference(getStep(readBuiltinWorkflow(lang, workflow), 'reviewers'), 'reviewers'));
 
     expect(new Set(refs).size).toBe(1);
+    expect(existsSync(join(getBuiltinLanguageStepsDir(lang), `${refs[0]}.yaml`))).toBe(true);
   });
 
   it.each(LANGUAGES)('moves the %s gather steps to one language-specific fragment', (lang) => {
@@ -76,6 +81,7 @@ describe('builtin workflow step fragment migration', () => {
       expectFragmentReference(getStep(readBuiltinWorkflow(lang, workflow), 'gather'), 'gather'));
 
     expect(new Set(refs).size).toBe(1);
+    expect(existsSync(join(getBuiltinLanguageStepsDir(lang), `${refs[0]}.yaml`))).toBe(true);
   });
 
   it.each(LANGUAGES)('moves the %s fix steps to one language-specific fragment', (lang) => {
@@ -83,6 +89,7 @@ describe('builtin workflow step fragment migration', () => {
       expectFragmentReference(getStep(readBuiltinWorkflow(lang, workflow), 'fix'), 'fix'));
 
     expect(new Set(refs).size).toBe(1);
+    expect(existsSync(join(getBuiltinLanguageStepsDir(lang), `${refs[0]}.yaml`))).toBe(true);
   });
 
   it('moves both supervise steps to the same shared fragment', () => {
@@ -90,6 +97,7 @@ describe('builtin workflow step fragment migration', () => {
       expectFragmentReference(getStep(readBuiltinWorkflow(lang, 'merge-readiness-finding-contract-final-gate'), 'supervise'), 'supervise'));
 
     expect(new Set(refs).size).toBe(1);
+    expect(existsSync(join(getBuiltinStepsDir(), `${refs[0]}.yaml`))).toBe(true);
   });
 
   it.each(LANGUAGES)('loads migrated %s builtin workflows through the fragment resolver', (lang) => {

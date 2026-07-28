@@ -18,10 +18,11 @@ const workflowPath = '/project/.takt/workflows/review.yaml';
 const fragmentPath = '/project/.takt/steps/review.yaml';
 
 function setupReadableFragment(): void {
+  const content = 'instruction: review';
   fs.openSync.mockReturnValue(7);
-  fs.fstatSync.mockReturnValue({ isFile: () => true, size: 18 });
+  fs.fstatSync.mockReturnValue({ isFile: () => true, size: content.length });
   fs.readSync
-    .mockImplementationOnce((_fd: number, buffer: Buffer, offset: number) => buffer.write('instruction: review', offset))
+    .mockImplementationOnce((_fd: number, buffer: Buffer, offset: number) => buffer.write(content, offset))
     .mockReturnValue(0);
 }
 
@@ -50,11 +51,11 @@ describe('workflow step fragment reader', () => {
     const failure = new Error('close failed');
     fs.closeSync.mockImplementation(() => { throw failure; });
 
-    expect(() => readStepFragment(fragmentPath, workflowPath, 'review'))
-      .toThrow('failed to parse step fragment "review"');
     try {
       readStepFragment(fragmentPath, workflowPath, 'review');
+      throw new Error('Expected readStepFragment to throw');
     } catch (error) {
+      expect(error).toHaveProperty('message', expect.stringContaining('failed to parse step fragment "review"'));
       expect(error).toMatchObject({ cause: failure });
     }
   });
@@ -89,5 +90,16 @@ describe('workflow step fragment reader', () => {
       instruction: 'review',
       rules: [{ condition: 'done', next: 'COMPLETE' }],
     });
+  });
+
+  it('should reject a fragment that grows after its descriptor is inspected', () => {
+    fs.openSync.mockReturnValue(7);
+    fs.fstatSync.mockReturnValue({ isFile: () => true, size: 3 });
+    fs.readSync.mockImplementationOnce((_fd: number, buffer: Buffer, offset: number) => (
+      buffer.write('four', offset)
+    ));
+
+    expect(() => readStepFragment(fragmentPath, workflowPath, 'review'))
+      .toThrow('changed size while being read');
   });
 });

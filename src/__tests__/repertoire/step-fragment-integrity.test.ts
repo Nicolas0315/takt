@@ -3,6 +3,10 @@ import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { assertCopiedStepFragmentReferences } from '../../features/repertoire/step-fragment-integrity.js';
+import {
+  captureConfigError,
+  extractConfigErrorMessages,
+} from '../helpers/step-fragment-test-helpers.js';
 
 describe('step fragment package integrity', () => {
   let packageRoot: string;
@@ -74,7 +78,7 @@ describe('step fragment package integrity', () => {
   });
 
   it.each(['workflows/default.yaml', 'steps/review.yaml'])('includes the malformed YAML source and cause for %s', (path) => {
-    try {
+    const error = captureConfigError(() => {
       assertCopiedStepFragmentReferences({
         sources: [{ path, content: 'uses: [' }],
         packageRoot,
@@ -82,18 +86,17 @@ describe('step fragment package integrity', () => {
         owner: 'owner',
         repo: 'repo',
       });
-      throw new Error('Expected malformed YAML to throw');
-    } catch (error) {
-      expect(error).toMatchObject({ cause: expect.any(Error) });
-      expect(error).toHaveProperty('message', expect.stringContaining(path));
-    }
+    });
+
+    expect(error.cause).toBeInstanceOf(Error);
+    expect(extractConfigErrorMessages(error)).toContain(path);
   });
 
   it.each(['workflows/default.yaml', 'steps/review.yaml'])('includes the circular YAML source and cause for %s', (path) => {
     const content = path.startsWith('workflows/')
       ? 'steps:\n  - &step\n    parallel:\n      - *step\n'
       : '&step\nparallel:\n  - *step\n';
-    try {
+    const error = captureConfigError(() => {
       assertCopiedStepFragmentReferences({
         sources: [{ path, content }],
         packageRoot,
@@ -101,10 +104,9 @@ describe('step fragment package integrity', () => {
         owner: 'owner',
         repo: 'repo',
       });
-      throw new Error('Expected circular YAML to throw');
-    } catch (error) {
-      expect(error).toMatchObject({ cause: expect.any(Error) });
-      expect(error).toHaveProperty('message', expect.stringContaining(path));
-    }
+    });
+
+    expect(error.cause).toBeInstanceOf(Error);
+    expect(extractConfigErrorMessages(error)).toContain(path);
   });
 });

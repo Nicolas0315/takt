@@ -2,6 +2,8 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import { collectStepFragmentUses, isRecord } from '../../infra/config/loaders/workflowStepFragmentReader.js';
+import { sanitizeTerminalText } from '../../shared/utils/text.js';
+import { STEP_FRAGMENT_EXTENSIONS } from './file-filter.js';
 
 interface FragmentSource {
   content: string;
@@ -31,15 +33,17 @@ function assertSourceReferencesAreCopied(source: FragmentSource, options: StepFr
       collectStepFragmentUses(parsed, refs);
     }
   } catch (error) {
-    throw new Error(`Configuration error in repertoire source ${source.path}: failed to inspect step fragment references`, { cause: error });
+    throw new Error(`Configuration error in repertoire source ${sanitizeTerminalText(source.path)}: failed to inspect step fragment references`, { cause: error });
   }
   for (const ref of refs) {
     const selfScopedPrefix = `@${options.owner}/${options.repo}/`;
     const localName = ref.startsWith(selfScopedPrefix) ? ref.slice(selfScopedPrefix.length) : ref;
     if (localName.includes('/') || localName.includes('\\')) continue;
-    const paths = [join(options.packageRoot, 'steps', `${localName}.yaml`), join(options.packageRoot, 'steps', `${localName}.yml`)];
+    const paths = STEP_FRAGMENT_EXTENSIONS.map((extension) => (
+      join(options.packageRoot, 'steps', `${localName}${extension}`)
+    ));
     if (paths.some((path) => existsSync(path)) && !options.copiedStepNames.has(localName)) {
-      throw new Error(`Step fragment "${localName}" referenced by ${source.path} is excluded from package installation`);
+      throw new Error(`Step fragment "${sanitizeTerminalText(localName)}" referenced by ${sanitizeTerminalText(source.path)} is excluded from package installation`);
     }
   }
 }

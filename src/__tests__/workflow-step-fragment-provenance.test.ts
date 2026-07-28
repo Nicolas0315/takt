@@ -307,8 +307,36 @@ describe('workflow step fragment provenance', () => {
     const message = errorMessage(() => loadWorkflowFromFile(workflowPath, projectDir));
 
     expect(message).toContain('Invalid input');
+    // Zod issues are serialized as JSON here, so embedded quotes are escaped.
     expect(message).toContain('step fragment \\"reviewer\\"');
     expect(message).toContain(fragmentPath);
+  });
+
+  it('attributes an array-root schema error to the fragment that provides the array', () => {
+    const fragmentPath = writeFile(projectDir, '.takt/steps/review.yaml', [
+      'instruction: review',
+      'policy:',
+      '  - 42',
+      'rules:',
+      '  - condition: done',
+      '    next: COMPLETE',
+      '',
+    ].join('\n'));
+    const workflowPath = writeFile(projectDir, '.takt/workflows/array-root.yaml', [
+      'name: array-root',
+      'initial_step: review',
+      'max_steps: 1',
+      'steps:',
+      '  - uses: review',
+      '    name: review',
+      '',
+    ].join('\n'));
+
+    const message = errorMessage(() => loadWorkflowFromFile(workflowPath, projectDir));
+
+    expect(message).toContain('step fragment \\"review\\"');
+    expect(message).toContain(fragmentPath);
+    expect(message).not.toContain('invalid field is defined by the workflow');
   });
 
   it('does not attribute a caller parallel structured output override to a fragment', () => {
@@ -349,6 +377,7 @@ describe('workflow step fragment provenance', () => {
 
     expect(message).toContain('Invalid input');
     expect(message).not.toContain('step fragment "reviewer"');
+    expect(message).not.toContain('step fragment \\"reviewer\\"');
   });
 
   it('should attribute a delegated Finding Contract intake error to its fragment delegation field', () => {
@@ -568,7 +597,7 @@ describe('workflow step fragment provenance', () => {
   it.each([
     ['normal step', 'review', '  - uses: review\n    name: review'],
     ['parallel sub-step', 'reviewers', '  - name: reviewers\n    parallel:\n      - uses: review\n        name: review'],
-  ])('attributes a model-less OpenCode provider from a fragment in a $placement to its provider field', (_placement, initialStep, steps) => {
+  ])('attributes a model-less OpenCode provider from a fragment in a %s to its provider field', (_placement, initialStep, steps) => {
     const fragmentPath = writeFile(projectDir, '.takt/steps/review.yaml', [
       'instruction: review',
       'provider: opencode',

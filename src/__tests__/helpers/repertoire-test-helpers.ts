@@ -15,3 +15,15 @@ export function makeScanConfig(tempDir: string): ScanConfig {
     categoriesFiles: [join(tempDir, 'preferences', 'workflow-categories.yaml')],
   };
 }
+
+export async function captureError(action: () => Promise<unknown>): Promise<Error> {
+  try {
+    await action();
+  } catch (error) {
+    if (error instanceof Error) {
+      return error;
+    }
+    throw error;
+  }
+  throw new Error('Expected action to reject');
+}

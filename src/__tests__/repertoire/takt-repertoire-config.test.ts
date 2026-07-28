@@ -295,6 +295,12 @@ describe('checkPackageHasContent', () => {
     expect(() => checkPackageHasContent(tempDir)).toThrow(/empty package rejected/);
   });
 
+  it('should reject an empty steps-only package', () => {
+    mkdirSync(join(tempDir, 'steps'), { recursive: true });
+
+    expect(() => checkPackageHasContent(tempDir)).toThrow(/empty package rejected/);
+  });
+
   it('should reject supported content paths that are regular files', () => {
     for (const dir of ['facets', 'workflows', 'provider-options', 'steps']) {
       const packageRoot = join(tempDir, `file-${dir}`);
