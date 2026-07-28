@@ -816,6 +816,45 @@ describe('workflow step fragment provenance', () => {
     expect(abortReasons[0]).toContain(fragmentPath);
   });
 
+  it('should attribute an unknown workflow_call target to its fragment call field', async () => {
+    const fragmentPath = writeFile(projectDir, '.takt/steps/delegate.yaml', [
+      'kind: workflow_call',
+      'call: missing-child',
+      'rules:',
+      '  - condition: COMPLETE',
+      '    next: COMPLETE',
+      '  - condition: ABORT',
+      '    next: ABORT',
+      '',
+    ].join('\n'));
+    const workflowPath = writeFile(projectDir, '.takt/workflows/parent-missing-child.yaml', [
+      'name: parent-missing-child',
+      'initial_step: delegate',
+      'max_steps: 1',
+      'steps:',
+      '  - uses: delegate',
+      '',
+    ].join('\n'));
+    const workflow = loadWorkflowFromFile(workflowPath, projectDir);
+    const engine = new WorkflowEngine(workflow, projectDir, 'test task', {
+      projectCwd: projectDir,
+      provider: 'mock',
+      model: 'mock-model',
+      workflowCallResolver: () => null,
+    });
+    const abortReasons: string[] = [];
+    engine.on('workflow:abort', (_state, reason) => abortReasons.push(reason));
+
+    const state = await engine.run();
+
+    expect(state.status).toBe('aborted');
+    expect(abortReasons).toHaveLength(1);
+    expect(abortReasons[0]).toContain('references unknown workflow "missing-child"');
+    expect(abortReasons[0]).toContain(workflowPath);
+    expect(abortReasons[0]).toContain('from step fragment "delegate"');
+    expect(abortReasons[0]).toContain(fragmentPath);
+  });
+
   it('does not attribute an inline child provider error to a valid workflow_call fragment override', async () => {
     const fragmentPath = writeFile(projectDir, '.takt/steps/delegate.yaml', [
       'kind: workflow_call',

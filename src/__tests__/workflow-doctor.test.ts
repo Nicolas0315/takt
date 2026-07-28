@@ -222,6 +222,30 @@ steps:
     expect(mockError).toHaveBeenCalledWith(expect.stringContaining("provider 'opencode' requires model"));
   });
 
+  it('attributes runtime validation errors to the referenced step fragment', async () => {
+    const fragmentPath = writeWorkflow(projectDir, '.takt/steps/opencode-review.yaml', `provider: opencode
+instruction: review the implementation
+rules:
+  - condition: done
+    next: COMPLETE
+`);
+    const filePath = writeWorkflow(projectDir, '.takt/workflows/fragment-runtime-error.yaml', `name: fragment-runtime-error
+max_steps: 1
+initial_step: review
+steps:
+  - uses: opencode-review
+    name: review
+`);
+
+    await expect(doctorWorkflowCommand([filePath], projectDir)).rejects.toThrow('Workflow validation failed');
+
+    const output = mockError.mock.calls.flat().join('\n');
+    expect(output).toContain("provider 'opencode' requires model");
+    expect(output).toContain(filePath);
+    expect(output).toContain('from step fragment "opencode-review"');
+    expect(output).toContain(fragmentPath);
+  });
+
   it('warns when a finding_contract workflow has no provisional routing', async () => {
     // persona facet を用意する（missing-resource エラーを避ける）。
     writeWorkflow(projectDir, '.takt/facets/personas/reviewer.md', 'You are a reviewer.');
