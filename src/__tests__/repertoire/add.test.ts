@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { join } from 'node:path';
+import { extname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { captureError } from '../helpers/repertoire-test-helpers.js';
 
@@ -98,7 +98,7 @@ vi.mock('../../features/repertoire/takt-repertoire-config.js', () => ({
 
 vi.mock('../../features/repertoire/file-filter.js', () => ({
   STEP_FRAGMENT_EXTENSIONS: ['.yaml', '.yml'],
-  isStepFragmentExtension: (extension: string) => extension === '.yaml' || extension === '.yml',
+  isStepFragmentExtension: (filename: string) => ['.yaml', '.yml'].includes(extname(filename)),
   collectCopyTargets: vi.fn(() => [{
     absolutePath: `${secureTempDir}/extract/facets/personas/coder.md`,
     relativePath: 'facets/personas/coder.md',
