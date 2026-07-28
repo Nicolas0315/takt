@@ -1,0 +1,26 @@
+export class WorkflowConfigError extends Error {
+  private normalizedPath: readonly PropertyKey[];
+
+  constructor(error: unknown, path: readonly PropertyKey[]) {
+    const cause = error instanceof Error ? error : new Error(String(error));
+    super(cause.message, { cause });
+    this.name = 'WorkflowConfigError';
+    this.normalizedPath = Object.freeze([...path]);
+  }
+
+  get path(): readonly PropertyKey[] {
+    return this.normalizedPath;
+  }
+
+}
+
+export function withWorkflowConfigErrorPath(error: unknown, path: readonly PropertyKey[]): WorkflowConfigError {
+  if (error instanceof WorkflowConfigError && error.path.length >= path.length) {
+    return error;
+  }
+  return new WorkflowConfigError(error, path);
+}
+
+export function getWorkflowConfigErrorPath(error: unknown): readonly PropertyKey[] | undefined {
+  return error instanceof WorkflowConfigError ? error.path : undefined;
+}

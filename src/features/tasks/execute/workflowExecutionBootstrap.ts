@@ -54,6 +54,7 @@ import { createTraceReportWriter } from './traceReportWriter.js';
 import { sanitizeTextForStorage } from './traceReportRedaction.js';
 import type { WorkflowExecutionOptions } from './types.js';
 import { assertTaskPrefixPair, detectStepType } from './workflowExecutionUtils.js';
+import { inheritWorkflowConfigMetadata } from '../../../shared/workflowConfigMetadata.js';
 
 const log = createLogger('workflow');
 
@@ -341,6 +342,7 @@ export async function createWorkflowExecutionBootstrap(
     runtime: resolveRuntimeConfig(globalConfig.runtime, workflowConfig.runtime),
     ...(options.maxStepsOverride !== undefined ? { maxSteps: options.maxStepsOverride } : {}),
   };
+  inheritWorkflowConfigMetadata(workflowConfig, effectiveWorkflowConfig);
   const providerEventLogger = createProviderEventLogger({
     logsDir: runPaths.logsAbs,
     sessionId: workflowSessionId,

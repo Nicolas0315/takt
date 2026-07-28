@@ -10,8 +10,8 @@
  * - Realpath validation to prevent symlink-based traversal outside root
  */
 
-import { existsSync, lstatSync, realpathSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, lstatSync, readdirSync, realpathSync } from 'node:fs';
+import { extname, join } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import { isPathInside } from '../../shared/utils/index.js';
 import { TAKT_REPERTOIRE_MANIFEST_FILENAME } from './constants.js';
@@ -119,7 +119,21 @@ export function checkPackageHasContent(packageRoot: string): void {
 }
 
 function hasAllowedContentDir(packageRoot: string): boolean {
-  return ALLOWED_DIRS.some((dir) => isExistingDirectory(join(packageRoot, dir)));
+  return ALLOWED_DIRS.some((dir) => {
+    const path = join(packageRoot, dir);
+    return dir === 'steps' ? hasResolvableStepFragment(path) : isExistingDirectory(path);
+  });
+}
+
+function hasResolvableStepFragment(stepsDir: string): boolean {
+  if (!isExistingDirectory(stepsDir)) {
+    return false;
+  }
+  return readdirSync(stepsDir).some((entry) => {
+    const path = join(stepsDir, entry);
+    const stats = lstatSync(path);
+    return stats.isFile() && !stats.isSymbolicLink() && ['.yaml', '.yml'].includes(extname(entry));
+  });
 }
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {

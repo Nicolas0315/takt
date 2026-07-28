@@ -70,6 +70,8 @@ function loadWorkflowFromFileInternal(
     options?.callableArgPolicy,
     loadMode,
     resolveWorkflowCommandGatesPolicy(globalConfig.workflowCommandGates, projectConfig.workflowCommandGates),
+    filePath,
+    trustInfo,
   );
   attachWorkflowOpaqueRef(config, buildOpaqueWorkflowRef(filePath, trustInfo));
   attachWorkflowSourcePath(config, filePath);

@@ -140,6 +140,14 @@ vi.mock('../core/runtime/runtime-environment.js', () => ({
 
 import { createWorkflowExecutionBootstrap } from '../features/tasks/execute/workflowExecutionBootstrap.js';
 import { initAnalyticsWriter } from '../features/analytics/index.js';
+import {
+  attachWorkflowOpaqueRef,
+  attachWorkflowSourcePath,
+  attachWorkflowTrustInfo,
+  getAttachedWorkflowOpaqueRef,
+  getAttachedWorkflowTrustInfo,
+  getWorkflowSourcePath,
+} from '../shared/workflowConfigMetadata.js';
 
 const workflowConfig: WorkflowConfig = {
   name: 'default',
@@ -251,6 +259,26 @@ describe('createWorkflowExecutionBootstrap direct resume metadata', () => {
     for (const dir of temporaryDirs.splice(0)) {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it('preserves workflow metadata on the effective execution config', async () => {
+    const projectDir = createTempProject();
+    const config = attachWorkflowOpaqueRef(
+      attachWorkflowTrustInfo(
+        attachWorkflowSourcePath({ ...workflowConfig }, join(projectDir, '.takt', 'workflows', 'default.yaml')),
+        { source: 'project' },
+      ),
+      'project:sha256:workflow',
+    );
+
+    const bootstrap = await createWorkflowExecutionBootstrap(config, 'Run metadata workflow', projectDir, {
+      projectCwd: projectDir,
+      provider: 'mock',
+    });
+
+    expect(getWorkflowSourcePath(bootstrap.effectiveWorkflowConfig)).toBe(join(projectDir, '.takt', 'workflows', 'default.yaml'));
+    expect(getAttachedWorkflowTrustInfo(bootstrap.effectiveWorkflowConfig)).toEqual({ source: 'project' });
+    expect(getAttachedWorkflowOpaqueRef(bootstrap.effectiveWorkflowConfig)).toBe('project:sha256:workflow');
   });
 
   it('Given workflow auto_routing and a strategy override, When bootstrap resolves config, Then it delegates override application to the engine', async () => {
