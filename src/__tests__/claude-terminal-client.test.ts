@@ -161,6 +161,60 @@ describe('Claude terminal client', () => {
     });
   });
 
+  it('Given a non-abort capability failure races with signal abort, When no terminal backend is injected, Then the provider failure is preserved', async () => {
+    const controller = new AbortController();
+    const capabilityError = new Error('Claude capability probe failed');
+    assertClaudeSkillsDisableSupportedMock.mockImplementation(async () => {
+      controller.abort(new Error('late user interruption'));
+      throw capabilityError;
+    });
+
+    const result = await callClaudeTerminal('coder', 'implement task', {
+      cwd: '/tmp/worktree',
+      backend: 'tmux',
+      skillsEnabled: false,
+      abortSignal: controller.signal,
+      transcriptReader: createTranscriptReader({
+        sessionId: 'claude-session-1',
+        assistantText: 'unused',
+        events: [],
+      }),
+    });
+
+    expect(defaultTerminalBackend.start).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      persona: 'coder',
+      status: 'error',
+      failureCategory: 'provider_error',
+      error: capabilityError.message,
+    });
+  });
+
+  it('Given capability verification throws AbortError, When no terminal backend is injected, Then external_abort is returned', async () => {
+    const capabilityAbortError = new Error('Claude capability probe aborted');
+    capabilityAbortError.name = 'AbortError';
+    assertClaudeSkillsDisableSupportedMock.mockRejectedValue(capabilityAbortError);
+
+    const result = await callClaudeTerminal('coder', 'implement task', {
+      cwd: '/tmp/worktree',
+      backend: 'tmux',
+      skillsEnabled: false,
+      transcriptReader: createTranscriptReader({
+        sessionId: 'claude-session-1',
+        assistantText: 'unused',
+        events: [],
+      }),
+    });
+
+    expect(defaultTerminalBackend.start).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      persona: 'coder',
+      status: 'error',
+      failureCategory: 'external_abort',
+      error: capabilityAbortError.message,
+    });
+  });
+
   it('Given disabled Skills and a supported Claude executable, When no terminal backend is injected, Then capability verification completes before terminal start', async () => {
     const terminalSession = { id: 'tmux-session', name: 'takt-claude-terminal' };
     defaultTerminalBackend.start.mockResolvedValue(terminalSession);

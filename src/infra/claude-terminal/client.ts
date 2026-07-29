@@ -336,12 +336,16 @@ export async function callClaudeTerminal(
       onStream: options.onStream,
     });
   } catch (error) {
-    if (error instanceof ClaudeTerminalAbortError || options.abortSignal?.aborted) {
+    if (error instanceof ClaudeTerminalAbortError) {
       return createAbortResponse(
         agentName,
-        error instanceof ClaudeTerminalAbortError ? error.reason : options.abortSignal?.reason,
+        error.reason,
         responseSessionId,
       );
+    }
+    if (error instanceof Error && error.name === 'AbortError') {
+      const reason = options.abortSignal?.aborted ? options.abortSignal.reason : error;
+      return createAbortResponse(agentName, reason, responseSessionId);
     }
     return createErrorResponse(agentName, getErrorMessage(error), AGENT_FAILURE_CATEGORIES.PROVIDER_ERROR, responseSessionId);
   } finally {

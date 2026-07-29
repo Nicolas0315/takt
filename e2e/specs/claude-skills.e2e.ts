@@ -68,16 +68,20 @@ describe('E2E: Claude filesystem Skill metadata', () => {
   let repo: LocalRepo;
   let skillName: string;
   let workflowPath: string;
+  let cleanups: Array<() => void> = [];
 
   beforeEach(() => {
+    cleanups = [];
     isolatedEnv = createIsolatedEnv();
+    cleanups.unshift(isolatedEnv.cleanup);
     repo = createLocalRepo();
+    cleanups.unshift(repo.cleanup);
     skillName = createSentinelSkill(repo.path);
     workflowPath = writeSkillVisibilityWorkflow(repo.path);
   });
 
   afterEach(() => {
-    cleanupResources(repo.cleanup, isolatedEnv.cleanup);
+    cleanupResources(...cleanups);
   });
 
   function runSkillVisibilityCheck(enabled: boolean) {

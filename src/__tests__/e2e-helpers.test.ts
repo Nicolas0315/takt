@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { spawn } from 'node:child_process';
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import { cleanupResources } from '../../e2e/helpers/cleanup.js';
 import { injectProviderArgs } from '../../e2e/helpers/takt-runner.js';
@@ -14,6 +14,24 @@ import {
 import { createOfflineTestRepo } from '../../e2e/helpers/test-repo.js';
 
 describe('cleanupResources', () => {
+  it('runs callbacks registered before a later setup failure', () => {
+    const cleanups: Array<() => void> = [];
+    const isolated = createIsolatedEnv();
+    const isolatedBaseDir = dirname(isolated.taktDir);
+    const setupError = new Error('repository setup failed');
+
+    cleanups.unshift(isolated.cleanup);
+
+    expect(() => {
+      try {
+        throw setupError;
+      } finally {
+        cleanupResources(...cleanups);
+      }
+    }).toThrow(setupError);
+    expect(existsSync(isolatedBaseDir)).toBe(false);
+  });
+
   it('attempts every cleanup and aggregates all failures', () => {
     const firstError = new Error('first cleanup failed');
     const secondError = new Error('second cleanup failed');
