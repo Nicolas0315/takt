@@ -8,8 +8,8 @@ import {
 } from '../../shared/types/agent-failure.js';
 import { createLogger, getErrorMessage } from '../../shared/utils/index.js';
 import { prepareClaudeMcpConfig } from '../claude/mcp-config.js';
+import { assertClaudeSkillsDisableSupported } from '../claude/cli-capability.js';
 import { buildClaudeTerminalCommand } from './command.js';
-import { assertClaudeSkillsDisableSupported } from './cli-capability.js';
 import { normalizeClaudeTerminalResponse } from './response-normalizer.js';
 import { ProjectClaudeTranscriptReader } from './transcript-reader.js';
 import { TmuxTerminalBackend } from './tmux-backend.js';
@@ -243,7 +243,10 @@ export async function callClaudeTerminal(
 
   try {
     if (options.skillsEnabled === false && options.terminalBackend === undefined) {
-      await assertClaudeSkillsDisableSupported(options.pathToClaudeCodeExecutable ?? 'claude');
+      await assertClaudeSkillsDisableSupported(
+        options.pathToClaudeCodeExecutable ?? 'claude',
+        options.abortSignal,
+      );
     }
     const prepared = await prepareClaudeMcpConfig(options.mcpServers);
     cleanup = prepared.cleanup;
@@ -333,8 +336,12 @@ export async function callClaudeTerminal(
       onStream: options.onStream,
     });
   } catch (error) {
-    if (error instanceof ClaudeTerminalAbortError) {
-      return createAbortResponse(agentName, error.reason, responseSessionId);
+    if (error instanceof ClaudeTerminalAbortError || options.abortSignal?.aborted) {
+      return createAbortResponse(
+        agentName,
+        error instanceof ClaudeTerminalAbortError ? error.reason : options.abortSignal?.reason,
+        responseSessionId,
+      );
     }
     return createErrorResponse(agentName, getErrorMessage(error), AGENT_FAILURE_CATEGORIES.PROVIDER_ERROR, responseSessionId);
   } finally {

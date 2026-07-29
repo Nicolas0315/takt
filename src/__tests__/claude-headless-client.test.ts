@@ -10,6 +10,14 @@ const { mkdtempMock, chmodMock, writeFileMock, rmMock } = vi.hoisted(() => ({
   rmMock: vi.fn(),
 }));
 
+const { assertClaudeSkillsDisableSupportedMock } = vi.hoisted(() => ({
+  assertClaudeSkillsDisableSupportedMock: vi.fn(),
+}));
+
+vi.mock('../infra/claude/cli-capability.js', () => ({
+  assertClaudeSkillsDisableSupported: assertClaudeSkillsDisableSupportedMock,
+}));
+
 vi.mock('node:crypto', () => ({
   randomUUID: vi.fn(),
 }));
@@ -49,6 +57,8 @@ describe('callClaudeHeadless', () => {
     chmodMock.mockReset();
     writeFileMock.mockReset();
     rmMock.mockReset();
+    assertClaudeSkillsDisableSupportedMock.mockReset();
+    assertClaudeSkillsDisableSupportedMock.mockResolvedValue(undefined);
     mkdtempMock.mockImplementation(async (...args) => {
       const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
       return actual.mkdtemp(...args);
@@ -130,8 +140,9 @@ describe('callClaudeHeadless', () => {
     await callClaudeHeadless('agent', 'hi', {
       cwd: '/tmp',
       skillsEnabled: false,
-    } as Parameters<typeof callClaudeHeadless>[2] & { skillsEnabled: boolean });
+    });
 
+    expect(assertClaudeSkillsDisableSupportedMock).toHaveBeenCalledWith('claude', undefined);
     expect(lastArgv).toContain('--disable-slash-commands');
     expect(lastArgv).toContain('--session-id');
   });
@@ -145,8 +156,9 @@ describe('callClaudeHeadless', () => {
       cwd: '/tmp',
       sessionId: 'existing-session',
       skillsEnabled: false,
-    } as Parameters<typeof callClaudeHeadless>[2] & { skillsEnabled: boolean });
+    });
 
+    expect(assertClaudeSkillsDisableSupportedMock).toHaveBeenCalledWith('claude', undefined);
     expect(lastArgv).toEqual(expect.arrayContaining(['--disable-slash-commands', '--resume', 'existing-session']));
   });
 
@@ -158,9 +170,32 @@ describe('callClaudeHeadless', () => {
     await callClaudeHeadless('agent', 'hi', {
       cwd: '/tmp',
       skillsEnabled: true,
-    } as Parameters<typeof callClaudeHeadless>[2] & { skillsEnabled: boolean });
+    });
 
+    expect(assertClaudeSkillsDisableSupportedMock).not.toHaveBeenCalled();
     expect(lastArgv).not.toContain('--disable-slash-commands');
+  });
+
+  it('returns a provider error before spawning when Skills disable capability is unsupported', async () => {
+    assertClaudeSkillsDisableSupportedMock.mockRejectedValue(
+      new Error('Claude Code must support --disable-slash-commands.'),
+    );
+
+    const result = await callClaudeHeadless('agent', 'hi', {
+      cwd: '/tmp',
+      skillsEnabled: false,
+      claudeCliPath: 'claude-unsupported',
+    });
+
+    expect(assertClaudeSkillsDisableSupportedMock).toHaveBeenCalledWith(
+      'claude-unsupported',
+      undefined,
+    );
+    expect(spawn).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      status: 'error',
+      error: 'Claude Code must support --disable-slash-commands.',
+    });
   });
 
   it('returns done when stream-json yields text and process exits 0', async () => {

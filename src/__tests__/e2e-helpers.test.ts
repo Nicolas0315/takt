@@ -4,6 +4,7 @@ import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parse as parseYaml } from 'yaml';
+import { cleanupResources } from '../../e2e/helpers/cleanup.js';
 import { injectProviderArgs } from '../../e2e/helpers/takt-runner.js';
 import { cleanupChildProcess, cleanupTestResource, waitForClose } from '../../e2e/helpers/wait.js';
 import {
@@ -11,6 +12,32 @@ import {
   updateIsolatedConfig,
 } from '../../e2e/helpers/isolated-env.js';
 import { createOfflineTestRepo } from '../../e2e/helpers/test-repo.js';
+
+describe('cleanupResources', () => {
+  it('attempts every cleanup and aggregates all failures', () => {
+    const firstError = new Error('first cleanup failed');
+    const secondError = new Error('second cleanup failed');
+    const successfulCleanup = vi.fn();
+    const firstFailingCleanup = vi.fn(() => {
+      throw firstError;
+    });
+    const secondFailingCleanup = vi.fn(() => {
+      throw secondError;
+    });
+
+    expect(() => cleanupResources(
+      firstFailingCleanup,
+      successfulCleanup,
+      secondFailingCleanup,
+    )).toThrow(expect.objectContaining({
+      name: 'AggregateError',
+      errors: [firstError, secondError],
+    }));
+    expect(firstFailingCleanup).toHaveBeenCalledOnce();
+    expect(successfulCleanup).toHaveBeenCalledOnce();
+    expect(secondFailingCleanup).toHaveBeenCalledOnce();
+  });
+});
 
 describe('injectProviderArgs', () => {
   it('should prepend --provider when provider is specified', () => {
@@ -97,6 +124,30 @@ describe('createIsolatedEnv', () => {
         claude: { allowed_tools: ['Read'] },
         codex: { network_access: true },
       });
+    },
+  );
+
+  it.each([
+    ['string', 'false'],
+    ['null', null],
+    ['object', { nested: false }],
+    ['array', []],
+  ])(
+    'should preserve invalid Claude Skills enabled %s in generic provider options',
+    (_caseName, enabled) => {
+      const providerOptions = {
+        claude: {
+          skills: { enabled },
+        },
+      };
+      process.env = {
+        ...originalEnv,
+        TAKT_PROVIDER_OPTIONS: JSON.stringify(providerOptions),
+      };
+      const isolated = createIsolatedEnv();
+      cleanups.push(isolated.cleanup);
+
+      expect(JSON.parse(isolated.env.TAKT_PROVIDER_OPTIONS ?? '{}')).toEqual(providerOptions);
     },
   );
 

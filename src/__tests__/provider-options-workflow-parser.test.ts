@@ -291,6 +291,26 @@ describe('normalizeWorkflowConfig provider_options', () => {
     });
   });
 
+  it('Claude Skills の未知キーを workflow 設定境界で拒否する', () => {
+    const raw = {
+      name: 'invalid-claude-skills',
+      workflow_config: {
+        provider_options: {
+          claude: { skills: { enabeld: true } },
+        },
+      },
+      steps: [
+        {
+          name: 'implement',
+          instruction: '{task}',
+        },
+      ],
+    };
+
+    expect(() => normalizeWorkflowConfig(raw, process.cwd()))
+      .toThrow(/skills|enabeld|unrecognized/i);
+  });
+
   it('base_url provider_options を workflow-level で設定し step で上書きできる', () => {
     const raw = {
       name: 'provider-option-base-url',

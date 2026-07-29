@@ -74,7 +74,7 @@ describe('Claude terminal command builder', () => {
       pathToClaudeCodeExecutable: 'claude',
       newSessionId: 'generated-session-1',
       skillsEnabled: false,
-    } as Parameters<typeof buildClaudeTerminalCommand>[0] & { skillsEnabled: boolean });
+    });
 
     expect(command.args).toContain('--disable-slash-commands');
     expect(command.args).toContain('--session-id');
@@ -85,7 +85,7 @@ describe('Claude terminal command builder', () => {
       pathToClaudeCodeExecutable: 'claude',
       sessionId: 'existing-session',
       skillsEnabled: false,
-    } as Parameters<typeof buildClaudeTerminalCommand>[0] & { skillsEnabled: boolean });
+    });
 
     expect(command.args).toContain('--disable-slash-commands');
     expect(command.args).toEqual(expect.arrayContaining(['--resume', 'existing-session']));
@@ -95,7 +95,7 @@ describe('Claude terminal command builder', () => {
     const command = buildClaudeTerminalCommand({
       pathToClaudeCodeExecutable: 'claude',
       skillsEnabled: true,
-    } as Parameters<typeof buildClaudeTerminalCommand>[0] & { skillsEnabled: boolean });
+    });
 
     expect(command.args).not.toContain('--disable-slash-commands');
   });

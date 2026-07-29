@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { cleanupResources } from '../helpers/cleanup';
 import { createIsolatedEnv, type IsolatedEnv, updateIsolatedConfig } from '../helpers/isolated-env';
 import { readSessionRecords } from '../helpers/session-log';
 import { runTakt } from '../helpers/takt-runner';
@@ -10,7 +11,7 @@ import { createLocalRepo, type LocalRepo } from '../helpers/test-repo';
 const provider = process.env.TAKT_E2E_PROVIDER;
 const providerIt = provider === 'claude' || provider === 'claude-sdk' ? it : it.skip;
 
-function writeSkillVisibilityWorkflow(repoPath: string, skillName: string): string {
+function writeSkillVisibilityWorkflow(repoPath: string): string {
   const workflowPath = join(repoPath, 'claude-skills-workflow.yaml');
   writeFileSync(
     workflowPath,
@@ -23,15 +24,13 @@ function writeSkillVisibilityWorkflow(repoPath: string, skillName: string): stri
       '  - name: check_skill',
       '    edit: false',
       '    persona: |',
-      '      You report whether an initial Claude Skill is available.',
+      '      You report the Claude Skills supplied in the initial context.',
       '    instruction: |',
       '      Do not use any tools or read any files.',
-      `      Answer exactly VISIBLE if the initial context lists the Skill named ${skillName}.`,
-      '      Otherwise answer exactly HIDDEN.',
+      '      List only the exact names of Skills supplied in the initial context, one per line.',
+      '      If no Skills are supplied, answer exactly NONE.',
       '    rules:',
-      '      - condition: VISIBLE',
-      '        next: COMPLETE',
-      '      - condition: HIDDEN',
+      '      - condition: The response lists the supplied Skill names or NONE.',
       '        next: COMPLETE',
     ].join('\n'),
     'utf-8',
@@ -67,17 +66,18 @@ function getStepContent(repoPath: string): string | undefined {
 describe('E2E: Claude filesystem Skill metadata', () => {
   let isolatedEnv: IsolatedEnv;
   let repo: LocalRepo;
+  let skillName: string;
   let workflowPath: string;
 
   beforeEach(() => {
     isolatedEnv = createIsolatedEnv();
     repo = createLocalRepo();
-    workflowPath = writeSkillVisibilityWorkflow(repo.path, createSentinelSkill(repo.path));
+    skillName = createSentinelSkill(repo.path);
+    workflowPath = writeSkillVisibilityWorkflow(repo.path);
   });
 
   afterEach(() => {
-    try { repo.cleanup(); } catch { /* best-effort */ }
-    try { isolatedEnv.cleanup(); } catch { /* best-effort */ }
+    cleanupResources(repo.cleanup, isolatedEnv.cleanup);
   });
 
   function runSkillVisibilityCheck(enabled: boolean) {
@@ -90,24 +90,30 @@ describe('E2E: Claude filesystem Skill metadata', () => {
     });
 
     return runTakt({
-      args: ['--task', 'Report the sentinel Skill visibility.', '--workflow', workflowPath],
+      args: ['--task', 'List the Skills supplied in the initial context.', '--workflow', workflowPath],
       cwd: repo.path,
       env: isolatedEnv.env,
       timeout: 240_000,
     });
   }
 
-  providerIt('does not inject project Skill metadata when disabled', () => {
+  providerIt('does not report the project Skill name when disabled', () => {
     const result = runSkillVisibilityCheck(false);
 
     expect(result.exitCode).toBe(0);
-    expect(getStepContent(repo.path)).toBe('HIDDEN');
+    const content = getStepContent(repo.path);
+    expect(content).toBeDefined();
+    const listedSkillNames = content?.split(/\r?\n/).map((line) => line.trim());
+    expect(listedSkillNames).not.toContain(skillName);
   }, 240_000);
 
-  providerIt('preserves project Skill metadata when enabled', () => {
+  providerIt('reports the project Skill name when enabled', () => {
     const result = runSkillVisibilityCheck(true);
 
     expect(result.exitCode).toBe(0);
-    expect(getStepContent(repo.path)).toBe('VISIBLE');
+    const content = getStepContent(repo.path);
+    expect(content).toBeDefined();
+    const listedSkillNames = content?.split(/\r?\n/).map((line) => line.trim());
+    expect(listedSkillNames).toContain(skillName);
   }, 240_000);
 });

@@ -112,11 +112,33 @@ describe('Claude provider split (Zod)', () => {
       expect(parsed?.claude?.skills?.enabled).toBe(false);
     });
 
+    it('Given an empty Skills object, When parsing provider_options.claude.skills, Then it is accepted', () => {
+      const parsed = StepProviderOptionsSchema.parse({
+        claude: { skills: {} },
+      });
+
+      expect(parsed?.claude?.skills).toEqual({});
+    });
+
     it('Given a non-boolean enabled value, When parsing provider_options.claude.skills, Then it rejects the configuration', () => {
       expect(() => StepProviderOptionsSchema.parse({
         claude: { skills: { enabled: 'false' } },
       })).toThrow(/enabled|boolean/i);
     });
+
+    it.each([
+      ['unknown key', { enabeld: true }],
+      ['array', []],
+      ['scalar', 'enabled'],
+      ['null', null],
+    ])(
+      'Given %s Skills shape, When parsing provider_options.claude.skills, Then it rejects the configuration',
+      (_caseName, skills) => {
+        expect(() => StepProviderOptionsSchema.parse({
+          claude: { skills },
+        })).toThrow(/skills|unrecognized|object/i);
+      },
+    );
   });
 
   describe('GlobalConfigSchema default provider', () => {

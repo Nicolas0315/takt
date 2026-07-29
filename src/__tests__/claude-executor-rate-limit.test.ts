@@ -397,7 +397,7 @@ describe('QueryExecutor rate limit cause preservation', () => {
       cwd: '/tmp/project',
       sessionId: 'resume-session-1',
       skillsEnabled: false,
-    } as Parameters<QueryExecutor['execute']>[1] & { skillsEnabled: boolean });
+    });
 
     expect(queryMock).toHaveBeenCalledTimes(2);
     expect((queryMock.mock.calls[0]?.[0] as { options?: { skills?: unknown } }).options?.skills).toEqual([]);

@@ -18,7 +18,7 @@ const {
   },
 }));
 
-vi.mock('../infra/claude-terminal/cli-capability.js', () => ({
+vi.mock('../infra/claude/cli-capability.js', () => ({
   assertClaudeSkillsDisableSupported: assertClaudeSkillsDisableSupportedMock,
 }));
 
@@ -115,7 +115,7 @@ describe('Claude terminal client', () => {
       skillsEnabled: false,
       terminalBackend: backend,
       transcriptReader,
-    } as Parameters<typeof callClaudeTerminal>[2] & { skillsEnabled: boolean });
+    });
 
     expect(backend.start).toHaveBeenCalledWith(expect.objectContaining({
       command: expect.objectContaining({
@@ -148,7 +148,10 @@ describe('Claude terminal client', () => {
       }),
     });
 
-    expect(assertClaudeSkillsDisableSupportedMock).toHaveBeenCalledWith('claude-unsupported');
+    expect(assertClaudeSkillsDisableSupportedMock).toHaveBeenCalledWith(
+      'claude-unsupported',
+      undefined,
+    );
     expect(defaultTerminalBackend.start).not.toHaveBeenCalled();
     expect(result).toMatchObject({
       persona: 'coder',
@@ -177,7 +180,10 @@ describe('Claude terminal client', () => {
       transcriptReader,
     });
 
-    expect(assertClaudeSkillsDisableSupportedMock).toHaveBeenCalledWith('claude-supported');
+    expect(assertClaudeSkillsDisableSupportedMock).toHaveBeenCalledWith(
+      'claude-supported',
+      undefined,
+    );
     expect(defaultTerminalBackend.start).toHaveBeenCalledOnce();
     expect(defaultTerminalBackend.stop).toHaveBeenCalledWith(terminalSession);
     expect(result.status).toBe('done');

@@ -40,6 +40,10 @@ function removeClaudeSkillsEnabledFromProviderOptions(
       || !Object.hasOwn(skills, 'enabled')) {
       return providerOptions;
     }
+    const enabled = (skills as Record<string, unknown>).enabled;
+    if (typeof enabled !== 'boolean') {
+      return providerOptions;
+    }
 
     const { enabled: _enabled, ...remainingSkills } = skills as Record<string, unknown>;
     const { skills: _skills, ...remainingClaude } = claude as Record<string, unknown>;

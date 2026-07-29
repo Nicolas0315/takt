@@ -109,7 +109,7 @@ describe('SdkOptionsBuilder.build() — settingSources', () => {
     const options = buildSdkOptions({
       cwd: '/test',
       skillsEnabled: false,
-    } as ClaudeSpawnOptions & { skillsEnabled: boolean });
+    });
 
     expect(options.skills).toEqual([]);
     expect(options.settingSources).toEqual(['project']);
@@ -119,7 +119,7 @@ describe('SdkOptionsBuilder.build() — settingSources', () => {
     const options = buildSdkOptions({
       cwd: '/test',
       skillsEnabled: true,
-    } as ClaudeSpawnOptions & { skillsEnabled: boolean });
+    });
 
     expect(options).not.toHaveProperty('skills');
   });

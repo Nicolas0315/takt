@@ -81,7 +81,7 @@ export const StepProviderOptionsObjectSchema = z.object({
     effort: z.enum(CLAUDE_EFFORT_VALUES).optional(),
     skills: z.object({
       enabled: z.boolean().optional(),
-    }).optional(),
+    }).strict().optional(),
     sandbox: ClaudeSandboxSchema,
   }).optional(),
   claude_terminal: z.object({
