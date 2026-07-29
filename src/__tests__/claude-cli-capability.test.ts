@@ -8,7 +8,20 @@ vi.mock('node:child_process', () => ({
   execFile: execFileMock,
 }));
 
-const { assertClaudeSkillsDisableSupported } = await import('../infra/claude/cli-capability.js');
+const {
+  assertClaudeSkillsDisableSupported,
+  ClaudeCliCapabilityAbortError,
+} = await import('../infra/claude/cli-capability.js');
+
+async function expectCapabilityAbort(
+  pending: Promise<void>,
+  expectedReason: unknown,
+): Promise<void> {
+  const error = await pending.catch((reason: unknown) => reason);
+  expect(error).toBeInstanceOf(ClaudeCliCapabilityAbortError);
+  expect((error as InstanceType<typeof ClaudeCliCapabilityAbortError>).reason)
+    .toBe(expectedReason);
+}
 
 describe('Claude Skills CLI capability', () => {
   beforeEach(() => {
@@ -82,10 +95,13 @@ describe('Claude Skills CLI capability', () => {
 
   it('does not start a probe for an already-aborted caller', async () => {
     const controller = new AbortController();
-    controller.abort();
+    const abortReason = new Error('pre-aborted caller');
+    controller.abort(abortReason);
 
-    await expect(assertClaudeSkillsDisableSupported('claude-pre-aborted', controller.signal))
-      .rejects.toMatchObject({ name: 'AbortError' });
+    await expectCapabilityAbort(
+      assertClaudeSkillsDisableSupported('claude-pre-aborted', controller.signal),
+      abortReason,
+    );
     expect(execFileMock).not.toHaveBeenCalled();
   });
 
@@ -99,10 +115,11 @@ describe('Claude Skills CLI capability', () => {
       }, { once: true });
     });
 
+    const abortReason = new Error('test abort');
     const pending = assertClaudeSkillsDisableSupported('claude-abort', controller.signal);
-    controller.abort('test abort');
+    controller.abort(abortReason);
 
-    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    await expectCapabilityAbort(pending, abortReason);
   });
 
   it('keeps a shared probe running while another caller is still waiting', async () => {
@@ -116,9 +133,10 @@ describe('Claude Skills CLI capability', () => {
 
     const first = assertClaudeSkillsDisableSupported('claude-shared-abort', firstController.signal);
     const second = assertClaudeSkillsDisableSupported('claude-shared-abort');
-    firstController.abort();
+    const abortReason = new Error('first caller aborted');
+    firstController.abort(abortReason);
 
-    await expect(first).rejects.toMatchObject({ name: 'AbortError' });
+    await expectCapabilityAbort(first, abortReason);
     expect(probeSignal?.aborted).toBe(false);
     completeProbe?.(null, '--disable-slash-commands', '');
     await expect(second).resolves.toBeUndefined();

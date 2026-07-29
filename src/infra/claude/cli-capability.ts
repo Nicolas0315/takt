@@ -14,10 +14,10 @@ interface CapabilityProbe {
 const inFlightProbes = new Map<string, CapabilityProbe>();
 const supportedExecutables = new Set<string>();
 
-function createAbortError(): Error {
-  const error = new Error('Claude CLI capability check aborted');
-  error.name = 'AbortError';
-  return error;
+export class ClaudeCliCapabilityAbortError extends Error {
+  constructor(readonly reason: unknown) {
+    super('Claude CLI capability check aborted');
+  }
 }
 
 function readClaudeHelp(executable: string, abortSignal: AbortSignal): Promise<string> {
@@ -88,7 +88,7 @@ function waitForCapabilityProbe(
 
     const onAbort = (): void => {
       finish();
-      reject(createAbortError());
+      reject(new ClaudeCliCapabilityAbortError(abortSignal?.reason));
     };
 
     if (abortSignal?.aborted) {
@@ -115,7 +115,7 @@ export async function assertClaudeSkillsDisableSupported(
   abortSignal?: AbortSignal,
 ): Promise<void> {
   if (abortSignal?.aborted) {
-    throw createAbortError();
+    throw new ClaudeCliCapabilityAbortError(abortSignal.reason);
   }
   if (supportedExecutables.has(executable)) {
     return;

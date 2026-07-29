@@ -8,9 +8,15 @@ import { initDebugLogger, resetDebugLogger } from '../shared/utils/index.js';
 
 const {
   assertClaudeSkillsDisableSupportedMock,
+  ClaudeCliCapabilityAbortErrorMock,
   defaultTerminalBackend,
 } = vi.hoisted(() => ({
   assertClaudeSkillsDisableSupportedMock: vi.fn(),
+  ClaudeCliCapabilityAbortErrorMock: class ClaudeCliCapabilityAbortError extends Error {
+    constructor(readonly reason: unknown) {
+      super('Claude CLI capability check aborted');
+    }
+  },
   defaultTerminalBackend: {
     start: vi.fn(),
     pasteText: vi.fn(),
@@ -20,6 +26,7 @@ const {
 
 vi.mock('../infra/claude/cli-capability.js', () => ({
   assertClaudeSkillsDisableSupported: assertClaudeSkillsDisableSupportedMock,
+  ClaudeCliCapabilityAbortError: ClaudeCliCapabilityAbortErrorMock,
 }));
 
 vi.mock('../infra/claude-terminal/tmux-backend.js', () => ({
@@ -161,9 +168,10 @@ describe('Claude terminal client', () => {
     });
   });
 
-  it('Given a non-abort capability failure races with signal abort, When no terminal backend is injected, Then the provider failure is preserved', async () => {
+  it('Given an unrelated AbortError races with signal abort, When no terminal backend is injected, Then the provider failure is preserved', async () => {
     const controller = new AbortController();
     const capabilityError = new Error('Claude capability probe failed');
+    capabilityError.name = 'AbortError';
     assertClaudeSkillsDisableSupportedMock.mockImplementation(async () => {
       controller.abort(new Error('late user interruption'));
       throw capabilityError;
@@ -190,10 +198,10 @@ describe('Claude terminal client', () => {
     });
   });
 
-  it('Given capability verification throws AbortError, When no terminal backend is injected, Then external_abort is returned', async () => {
-    const capabilityAbortError = new Error('Claude capability probe aborted');
-    capabilityAbortError.name = 'AbortError';
-    assertClaudeSkillsDisableSupportedMock.mockRejectedValue(capabilityAbortError);
+  it('Given an unrelated AbortError without signal abort, When no terminal backend is injected, Then the provider failure is preserved', async () => {
+    const capabilityError = new Error('unrelated abort-shaped failure');
+    capabilityError.name = 'AbortError';
+    assertClaudeSkillsDisableSupportedMock.mockRejectedValue(capabilityError);
 
     const result = await callClaudeTerminal('coder', 'implement task', {
       cwd: '/tmp/worktree',
@@ -210,7 +218,90 @@ describe('Claude terminal client', () => {
     expect(result).toMatchObject({
       persona: 'coder',
       status: 'error',
+      failureCategory: 'provider_error',
+      error: capabilityError.message,
+    });
+  });
+
+  it('Given capability verification reports a caller-signal abort, When no terminal backend is injected, Then external_abort is returned', async () => {
+    const controller = new AbortController();
+    const abortReason = new Error('caller aborted capability verification');
+    const capabilityAbortError = new ClaudeCliCapabilityAbortErrorMock(abortReason);
+    assertClaudeSkillsDisableSupportedMock.mockImplementation(async () => {
+      controller.abort(abortReason);
+      throw capabilityAbortError;
+    });
+
+    const result = await callClaudeTerminal('coder', 'implement task', {
+      cwd: '/tmp/worktree',
+      backend: 'tmux',
+      skillsEnabled: false,
+      abortSignal: controller.signal,
+      transcriptReader: createTranscriptReader({
+        sessionId: 'claude-session-1',
+        assistantText: 'unused',
+        events: [],
+      }),
+    });
+
+    expect(defaultTerminalBackend.start).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      persona: 'coder',
+      status: 'error',
       failureCategory: 'external_abort',
+      error: abortReason.message,
+    });
+  });
+
+  it('Given a branded capability abort without an aborted signal, When no terminal backend is injected, Then provider_error is returned', async () => {
+    const capabilityAbortError = new ClaudeCliCapabilityAbortErrorMock(
+      new Error('unattributed capability abort'),
+    );
+    assertClaudeSkillsDisableSupportedMock.mockRejectedValue(capabilityAbortError);
+
+    const result = await callClaudeTerminal('coder', 'implement task', {
+      cwd: '/tmp/worktree',
+      backend: 'tmux',
+      skillsEnabled: false,
+      transcriptReader: createTranscriptReader({
+        sessionId: 'claude-session-1',
+        assistantText: 'unused',
+        events: [],
+      }),
+    });
+
+    expect(result).toMatchObject({
+      status: 'error',
+      failureCategory: 'provider_error',
+      error: capabilityAbortError.message,
+    });
+  });
+
+  it('Given a branded capability abort with a different signal reason, When no terminal backend is injected, Then provider_error is returned', async () => {
+    const controller = new AbortController();
+    const capabilityAbortError = new ClaudeCliCapabilityAbortErrorMock(
+      new Error('different capability abort'),
+    );
+    assertClaudeSkillsDisableSupportedMock.mockImplementation(async () => {
+      controller.abort(new Error('actual caller abort'));
+      throw capabilityAbortError;
+    });
+
+    const result = await callClaudeTerminal('coder', 'implement task', {
+      cwd: '/tmp/worktree',
+      backend: 'tmux',
+      skillsEnabled: false,
+      abortSignal: controller.signal,
+      transcriptReader: createTranscriptReader({
+        sessionId: 'claude-session-1',
+        assistantText: 'unused',
+        events: [],
+      }),
+    });
+
+    expect(result).toMatchObject({
+      status: 'error',
+      failureCategory: 'provider_error',
       error: capabilityAbortError.message,
     });
   });
