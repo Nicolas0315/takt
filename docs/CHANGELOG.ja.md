@@ -6,6 +6,12 @@
 
 フォーマットは [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) に基づいています。
 
+## [0.54.1] - 2026-07-29
+
+### Fixed
+
+- strict structured outputスキーマの不整合により、Codexのauto-routingが全ルーティング対象ステップでfallbackしていた問題を修正 (#1123)。ルーター出力スキーマをestimator生成時に検証し、決定的なスキーマ非互換はFail Fastとする一方、実行時の推定失敗では設定されたpool fallbackを引き続き使用します。CodexとClaudeの共通スキーマ経路をClaude Agent SDKのquery境界まで統合テストで検証します。
+
 ## [0.54.0] - 2026-07-28
 
 ### Added
