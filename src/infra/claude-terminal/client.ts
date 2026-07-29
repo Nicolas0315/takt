@@ -9,6 +9,7 @@ import {
 import { createLogger, getErrorMessage } from '../../shared/utils/index.js';
 import { prepareClaudeMcpConfig } from '../claude/mcp-config.js';
 import { buildClaudeTerminalCommand } from './command.js';
+import { assertClaudeSkillsDisableSupported } from './cli-capability.js';
 import { normalizeClaudeTerminalResponse } from './response-normalizer.js';
 import { ProjectClaudeTranscriptReader } from './transcript-reader.js';
 import { TmuxTerminalBackend } from './tmux-backend.js';
@@ -241,6 +242,9 @@ export async function callClaudeTerminal(
   }
 
   try {
+    if (options.skillsEnabled === false && options.terminalBackend === undefined) {
+      await assertClaudeSkillsDisableSupported(options.pathToClaudeCodeExecutable ?? 'claude');
+    }
     const prepared = await prepareClaudeMcpConfig(options.mcpServers);
     cleanup = prepared.cleanup;
     if (options.abortSignal?.aborted) {
@@ -250,6 +254,7 @@ export async function callClaudeTerminal(
       pathToClaudeCodeExecutable: options.pathToClaudeCodeExecutable,
       model: options.model,
       effort: options.effort,
+      skillsEnabled: options.skillsEnabled,
       allowedTools: options.allowedTools,
       mcpConfigPath: prepared.path,
       permissionMode: options.permissionMode,

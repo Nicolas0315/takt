@@ -122,6 +122,47 @@ describe('callClaudeHeadless', () => {
     });
   }
 
+  it('passes --disable-slash-commands for disabled Skills on a new headless session', async () => {
+    stubSpawn({
+      stdoutChunks: [`${JSON.stringify({ type: 'result', subtype: 'success', result: 'ok' })}\n`],
+    });
+
+    await callClaudeHeadless('agent', 'hi', {
+      cwd: '/tmp',
+      skillsEnabled: false,
+    } as Parameters<typeof callClaudeHeadless>[2] & { skillsEnabled: boolean });
+
+    expect(lastArgv).toContain('--disable-slash-commands');
+    expect(lastArgv).toContain('--session-id');
+  });
+
+  it('passes --disable-slash-commands for disabled Skills when resuming a headless session', async () => {
+    stubSpawn({
+      stdoutChunks: [`${JSON.stringify({ type: 'result', subtype: 'success', result: 'ok' })}\n`],
+    });
+
+    await callClaudeHeadless('agent', 'hi', {
+      cwd: '/tmp',
+      sessionId: 'existing-session',
+      skillsEnabled: false,
+    } as Parameters<typeof callClaudeHeadless>[2] & { skillsEnabled: boolean });
+
+    expect(lastArgv).toEqual(expect.arrayContaining(['--disable-slash-commands', '--resume', 'existing-session']));
+  });
+
+  it('does not add a Skill flag when headless Skills are enabled', async () => {
+    stubSpawn({
+      stdoutChunks: [`${JSON.stringify({ type: 'result', subtype: 'success', result: 'ok' })}\n`],
+    });
+
+    await callClaudeHeadless('agent', 'hi', {
+      cwd: '/tmp',
+      skillsEnabled: true,
+    } as Parameters<typeof callClaudeHeadless>[2] & { skillsEnabled: boolean });
+
+    expect(lastArgv).not.toContain('--disable-slash-commands');
+  });
+
   it('returns done when stream-json yields text and process exits 0', async () => {
     stubSpawn({
       stdoutChunks: [

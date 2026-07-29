@@ -66,6 +66,40 @@ describe('createIsolatedEnv', () => {
     expect(isolated.env.TAKT_OPENAI_API_KEY).toBeUndefined();
   });
 
+  it('should exclude Claude Skills env override from isolated environments', () => {
+    process.env = {
+      ...originalEnv,
+      TAKT_PROVIDER_OPTIONS_CLAUDE_SKILLS_ENABLED: 'true',
+    };
+    const isolated = createIsolatedEnv();
+    cleanups.push(isolated.cleanup);
+
+    expect(isolated.env).not.toHaveProperty('TAKT_PROVIDER_OPTIONS_CLAUDE_SKILLS_ENABLED');
+  });
+
+  it.each([true, false])(
+    'should exclude Claude Skills enabled=%s from generic provider options',
+    (enabled) => {
+      process.env = {
+        ...originalEnv,
+        TAKT_PROVIDER_OPTIONS: JSON.stringify({
+          claude: {
+            allowed_tools: ['Read'],
+            skills: { enabled },
+          },
+          codex: { network_access: true },
+        }),
+      };
+      const isolated = createIsolatedEnv();
+      cleanups.push(isolated.cleanup);
+
+      expect(JSON.parse(isolated.env.TAKT_PROVIDER_OPTIONS ?? '{}')).toEqual({
+        claude: { allowed_tools: ['Read'] },
+        codex: { network_access: true },
+      });
+    },
+  );
+
   it('should override TAKT_CONFIG_DIR with isolated directory', () => {
     const isolated = createIsolatedEnv();
     cleanups.push(isolated.cleanup);

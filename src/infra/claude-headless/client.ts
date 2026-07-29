@@ -98,6 +98,9 @@ async function buildSpawnArgs(
   if (options.effort) {
     args.push('--effort', options.effort);
   }
+  if (options.skillsEnabled === false) {
+    args.push('--disable-slash-commands');
+  }
 
   if (options.systemPrompt?.trim()) {
     args.push('--system-prompt', options.systemPrompt.trim());

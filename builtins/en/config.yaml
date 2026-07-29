@@ -110,11 +110,13 @@ language: en        # UI language: en | ja
 #     skills:
 #       repo: false
 #       user: false
-#   opencode:
-#     variant: high
 #   claude:
+#     skills:
+#       enabled: false
 #     sandbox:
 #       allow_unsandboxed_commands: true
+#   opencode:
+#     variant: high
 
 # Provider permission profiles
 # provider_profiles:

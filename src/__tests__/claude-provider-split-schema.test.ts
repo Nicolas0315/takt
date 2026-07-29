@@ -5,6 +5,7 @@ import {
   ProviderBlockSchema,
   ProviderPermissionProfilesSchema,
   ProviderReferenceSchema,
+  StepProviderOptionsSchema,
   ProviderTypeSchema,
 } from '../core/models/schema-base.js';
 
@@ -99,6 +100,22 @@ describe('Claude provider split (Zod)', () => {
 
       expect(parsed?.claude?.default_permission_mode).toBe('readonly');
       expect(parsed?.['claude-sdk']?.default_permission_mode).toBe('edit');
+    });
+  });
+
+  describe('Claude Skill provider option', () => {
+    it('Given boolean enabled, When parsing provider_options.claude.skills, Then it preserves the value', () => {
+      const parsed = StepProviderOptionsSchema.parse({
+        claude: { skills: { enabled: false } },
+      });
+
+      expect(parsed?.claude?.skills?.enabled).toBe(false);
+    });
+
+    it('Given a non-boolean enabled value, When parsing provider_options.claude.skills, Then it rejects the configuration', () => {
+      expect(() => StepProviderOptionsSchema.parse({
+        claude: { skills: { enabled: 'false' } },
+      })).toThrow(/enabled|boolean/i);
     });
   });
 
