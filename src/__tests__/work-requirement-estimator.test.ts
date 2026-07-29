@@ -61,6 +61,28 @@ describe('createWorkRequirementEstimator', () => {
     });
   });
 
+  it('Given a router without native structured output, When its JSON response omits optional confidence, Then the estimate is accepted', async () => {
+    vi.mocked(runAgent).mockResolvedValue({
+      persona: 'auto-router',
+      status: 'done',
+      content: JSON.stringify({
+        required_tier: 'medium',
+        reason_codes: ['focused-change'],
+      }),
+      timestamp: new Date('2026-01-01T00:00:00.000Z'),
+    });
+    const estimator = createWorkRequirementEstimator({
+      cwd: '/repo',
+      provider: 'cursor',
+      model: 'cursor/gpt-5',
+    });
+
+    await expect(estimator.estimate(createModelInput())).resolves.toEqual({
+      requiredTier: 'medium',
+      reasonCodes: ['focused-change'],
+    });
+  });
+
   it('Given provider-native structured output, When content is not JSON, Then the structured estimate is used', async () => {
     vi.mocked(runAgent).mockResolvedValue({
       persona: 'auto-router',
