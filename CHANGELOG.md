@@ -6,6 +6,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.54.1] - 2026-07-29
+
+### Fixed
+
+- Codex auto-routing no longer falls back for every routed step because of an invalid strict structured-output schema (#1123). Router output schemas are now validated when the estimator is created, so deterministic schema incompatibilities fail fast while runtime estimation failures continue to use the configured pool fallback. The shared Codex/Claude schema path is covered through the Claude Agent SDK query boundary.
+
 ## [0.54.0] - 2026-07-28
 
 ### Added
