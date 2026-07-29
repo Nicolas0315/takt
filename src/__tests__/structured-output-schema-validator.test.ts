@@ -111,7 +111,7 @@ describe('structured output schema validator', () => {
         required: ['nested'],
         additionalProperties: false,
       },
-      expectedMessage: '$.nested',
+      expectedMessage: '$.nested must list every property in required (missing: value)',
     },
     {
       name: 'required lists a property that is not declared',
@@ -446,7 +446,63 @@ describe('structured output schema validator', () => {
   it('rejects a non-string format value synchronously', () => {
     expect(() => assertStrictStructuredOutputSchema(
       createStrictRoot({ type: 'string', format: true }),
-    )).toThrow(StructuredOutputSchemaError);
+    )).toThrow(
+      new StructuredOutputSchemaError(
+        'Structured output schema is not strict: $.value.format must be a string',
+      ),
+    );
+  });
+
+  it.each([
+    {
+      name: 'properties is not a plain object',
+      valueSchema: {
+        type: 'object',
+        properties: [],
+        required: [],
+        additionalProperties: false,
+      },
+      expectedMessage: '$.value.properties must be a plain object',
+    },
+    {
+      name: 'required is not an array',
+      valueSchema: {
+        type: 'object',
+        properties: {},
+        required: 'value',
+        additionalProperties: false,
+      },
+      expectedMessage: '$.value.required must be an array',
+    },
+    {
+      name: 'required contains a non-string entry',
+      valueSchema: {
+        type: 'object',
+        properties: {},
+        required: [1],
+        additionalProperties: false,
+      },
+      expectedMessage: '$.value.required must contain only strings',
+    },
+  ])('rejects an object schema when $name', ({ valueSchema, expectedMessage }) => {
+    expect(() => assertStrictStructuredOutputSchema(
+      createStrictRoot(valueSchema),
+    )).toThrow(
+      new StructuredOutputSchemaError(
+        `Structured output schema is not strict: ${expectedMessage}`,
+      ),
+    );
+  });
+
+  it('accepts a strict object schema with plain properties and string required entries', () => {
+    expect(() => assertStrictStructuredOutputSchema(createStrictRoot({
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+      },
+      required: ['name'],
+      additionalProperties: false,
+    }))).not.toThrow();
   });
 
   it.each([
