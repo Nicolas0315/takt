@@ -69,6 +69,7 @@ describe('createWorkRequirementEstimator', () => {
       structuredOutput: {
         required_tier: 'high',
         reason_codes: ['critical-finding'],
+        confidence: null,
       },
       timestamp: new Date('2026-01-01T00:00:00.000Z'),
     });
@@ -88,7 +89,11 @@ describe('createWorkRequirementEstimator', () => {
     vi.mocked(runAgent).mockResolvedValue({
       persona: 'auto-router',
       status: 'done',
-      content: JSON.stringify({ required_tier: 'high', reason_codes: ['critical-finding'] }),
+      content: JSON.stringify({
+        required_tier: 'high',
+        reason_codes: ['critical-finding'],
+        confidence: null,
+      }),
       timestamp: new Date('2026-01-01T00:00:00.000Z'),
     });
     const estimator = createWorkRequirementEstimator({
@@ -117,9 +122,45 @@ describe('createWorkRequirementEstimator', () => {
         properties: {
           required_tier: { type: 'string' },
           reason_codes: { type: 'array' },
+          confidence: { type: ['number', 'null'] },
         },
-        required: ['required_tier', 'reason_codes'],
+        required: ['required_tier', 'reason_codes', 'confidence'],
       },
+    });
+  });
+
+  it('Given a Codex router, When the strict output schema is submitted, Then the estimator returns a dynamic tier instead of failing', async () => {
+    vi.mocked(runAgent).mockImplementation(async (_persona, _prompt, options) => {
+      const schema = options?.outputSchema;
+      const properties = schema?.properties;
+      const required = schema?.required;
+      if (typeof properties !== 'object' || properties === null || !Array.isArray(required)) {
+        throw new Error('Codex rejected an invalid structured output schema');
+      }
+      expect(new Set(required)).toEqual(new Set(Object.keys(properties)));
+      expect(properties).toMatchObject({
+        confidence: { type: ['number', 'null'] },
+      });
+      return {
+        persona: 'auto-router',
+        status: 'done',
+        content: JSON.stringify({
+          required_tier: 'medium',
+          reason_codes: ['focused-change'],
+          confidence: null,
+        }),
+        timestamp: new Date('2026-01-01T00:00:00.000Z'),
+      };
+    });
+    const estimator = createWorkRequirementEstimator({
+      cwd: '/repo',
+      provider: 'codex',
+      model: 'gpt-5.6-luna',
+    });
+
+    await expect(estimator.estimate(createModelInput())).resolves.toEqual({
+      requiredTier: 'medium',
+      reasonCodes: ['focused-change'],
     });
   });
 
