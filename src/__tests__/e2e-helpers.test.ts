@@ -102,6 +102,71 @@ describe('createIsolatedEnv', () => {
     cleanups.push(isolated.cleanup);
 
     expect(isolated.env).not.toHaveProperty('TAKT_PROVIDER_OPTIONS_CLAUDE_SKILLS_ENABLED');
+    expect(process.env.TAKT_PROVIDER_OPTIONS_CLAUDE_SKILLS_ENABLED).toBe('true');
+  });
+
+  it('should preserve malformed generic provider options for normal config validation', () => {
+    const providerOptions = '{"claude":';
+    process.env = {
+      ...originalEnv,
+      TAKT_PROVIDER_OPTIONS: providerOptions,
+    };
+    const isolated = createIsolatedEnv();
+    cleanups.push(isolated.cleanup);
+
+    expect(isolated.env.TAKT_PROVIDER_OPTIONS).toBe(providerOptions);
+  });
+
+  it('should preserve a top-level array in generic provider options', () => {
+    const providerOptions = JSON.stringify([
+      { claude: { skills: { enabled: true } } },
+    ]);
+    process.env = {
+      ...originalEnv,
+      TAKT_PROVIDER_OPTIONS: providerOptions,
+    };
+    const isolated = createIsolatedEnv();
+    cleanups.push(isolated.cleanup);
+
+    expect(isolated.env.TAKT_PROVIDER_OPTIONS).toBe(providerOptions);
+  });
+
+  it.each([
+    ['null Claude options', { claude: null }],
+    ['array Claude options', { claude: [] }],
+    ['scalar Claude options', { claude: 'invalid' }],
+    ['null Skills options', { claude: { skills: null } }],
+    ['array Skills options', { claude: { skills: [] } }],
+    ['scalar Skills options', { claude: { skills: 'invalid' } }],
+  ])(
+    'should preserve generic provider options with %s',
+    (_caseName, value) => {
+      const providerOptions = JSON.stringify(value);
+      process.env = {
+        ...originalEnv,
+        TAKT_PROVIDER_OPTIONS: providerOptions,
+      };
+      const isolated = createIsolatedEnv();
+      cleanups.push(isolated.cleanup);
+
+      expect(isolated.env.TAKT_PROVIDER_OPTIONS).toBe(providerOptions);
+    },
+  );
+
+  it('should preserve generic provider options when Claude Skills enabled is missing', () => {
+    const providerOptions = JSON.stringify({
+      claude: {
+        skills: { source: 'project' },
+      },
+    });
+    process.env = {
+      ...originalEnv,
+      TAKT_PROVIDER_OPTIONS: providerOptions,
+    };
+    const isolated = createIsolatedEnv();
+    cleanups.push(isolated.cleanup);
+
+    expect(isolated.env.TAKT_PROVIDER_OPTIONS).toBe(providerOptions);
   });
 
   it.each([true, false])(
@@ -124,6 +189,35 @@ describe('createIsolatedEnv', () => {
         claude: { allowed_tools: ['Read'] },
         codex: { network_access: true },
       });
+    },
+  );
+
+  it.each([true, false])(
+    'should remove only Claude Skills enabled=%s and preserve sibling keys',
+    (enabled) => {
+      const providerOptions = JSON.stringify({
+        claude: {
+          skills: {
+            enabled,
+            source: 'project',
+          },
+        },
+      });
+      process.env = {
+        ...originalEnv,
+        TAKT_PROVIDER_OPTIONS: providerOptions,
+      };
+      const isolated = createIsolatedEnv();
+      cleanups.push(isolated.cleanup);
+
+      expect(JSON.parse(isolated.env.TAKT_PROVIDER_OPTIONS ?? '{}')).toEqual({
+        claude: {
+          skills: {
+            source: 'project',
+          },
+        },
+      });
+      expect(process.env.TAKT_PROVIDER_OPTIONS).toBe(providerOptions);
     },
   );
 
