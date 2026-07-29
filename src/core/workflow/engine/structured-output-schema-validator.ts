@@ -220,12 +220,13 @@ function assertSupportedStrictSchemaKeywords(
     }
   }
 
-  if (
-    schemaTypes?.includes('string')
-    && typeof schema.format === 'string'
-    && !SUPPORTED_RAW_STRING_FORMATS.has(schema.format)
-  ) {
-    throw strictSchemaError(`${path} uses unsupported format ${schema.format}`);
+  if (schemaTypes?.includes('string') && Object.hasOwn(schema, 'format')) {
+    if (typeof schema.format !== 'string') {
+      throw strictSchemaError(`${path}.format must be a string`);
+    }
+    if (!SUPPORTED_RAW_STRING_FORMATS.has(schema.format)) {
+      throw strictSchemaError(`${path} uses unsupported format ${schema.format}`);
+    }
   }
 }
 
@@ -348,16 +349,25 @@ function assertStrictObjectSchema(
   schema: Record<string, unknown>,
   path: string,
 ): void {
+  const properties = schema.properties;
+  if (!isPlainObject(properties)) {
+    throw strictSchemaError(`${path}.properties must be a plain object`);
+  }
+
+  const requiredProperties = schema.required;
+  if (!Array.isArray(requiredProperties)) {
+    throw strictSchemaError(`${path}.required must be an array`);
+  }
+  if (!requiredProperties.every((property): property is string => typeof property === 'string')) {
+    throw strictSchemaError(`${path}.required must contain only strings`);
+  }
+
   if (schema.additionalProperties !== false) {
     throw strictSchemaError(
       `${path} must set additionalProperties to false`,
     );
   }
 
-  const properties = isPlainObject(schema.properties) ? schema.properties : {};
-  const requiredProperties = Array.isArray(schema.required)
-    ? schema.required
-    : [];
   const required = new Set(requiredProperties);
   const missingProperties = Object.keys(properties).filter((property) => !required.has(property));
   if (missingProperties.length > 0) {
@@ -366,10 +376,7 @@ function assertStrictObjectSchema(
     );
   }
   const unknownProperties = requiredProperties.filter(
-    (property): property is string => (
-      typeof property === 'string'
-      && !Object.hasOwn(properties, property)
-    ),
+    (property) => !Object.hasOwn(properties, property),
   );
   if (unknownProperties.length > 0) {
     throw strictSchemaError(
