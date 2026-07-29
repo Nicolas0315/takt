@@ -1,13 +1,12 @@
 import type { AutoRoutingConfig } from '../core/models/config-types.js';
 import {
-  MAX_ROUTING_REASON_CODE_LENGTH,
-  MAX_ROUTING_REASON_CODES,
   ROUTING_REASON_CODE_VALUES,
   validateRoutingReasonCodes,
   type WorkRequirementEstimator,
   type WorkRequirementEstimate,
   type RoutingModelInput,
 } from '../core/workflow/auto-routing/contracts.js';
+import { assertStrictStructuredOutputSchema } from '../core/workflow/engine/structured-output-schema-validator.js';
 import { runAgent, type RunAgentOptions } from './runner.js';
 import { buildMaxTurnsOption } from './provider-call-options.js';
 
@@ -21,9 +20,7 @@ const OUTPUT_SCHEMA = {
       items: {
         type: 'string',
         enum: ROUTING_REASON_CODE_VALUES,
-        maxLength: MAX_ROUTING_REASON_CODE_LENGTH,
       },
-      maxItems: MAX_ROUTING_REASON_CODES,
     },
     confidence: { type: ['number', 'null'] },
   },
@@ -127,6 +124,8 @@ function buildPrompt(input: RoutingModelInput): string {
 }
 
 export function createWorkRequirementEstimator(options: WorkRequirementEstimatorOptions): WorkRequirementEstimator {
+  assertStrictStructuredOutputSchema(OUTPUT_SCHEMA);
+
   return {
     async estimate(
       input: RoutingModelInput,
