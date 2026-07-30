@@ -1,5 +1,5 @@
 name: supervise
-tags: [ review, final-gate, supervise ]
+tags: [review, final-gate, supervise]
 edit: false
 session: compact
 persona: supervisor

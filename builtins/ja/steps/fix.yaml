@@ -1,10 +1,10 @@
 name: fix
-tags: [ coding ]
+tags: [coding]
 edit: true
 session: compact
 persona: coder
-policy: [ coding, testing ]
-knowledge: [ takt, architecture, implementation-semantics ]
+policy: [coding, testing]
+knowledge: [takt, architecture, implementation-semantics]
 required_permission_mode: edit
 instruction: fix
 output_contracts:

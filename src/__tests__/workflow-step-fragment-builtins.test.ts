@@ -132,6 +132,26 @@ describe('builtin workflow step fragment migration', () => {
     }
   });
 
+  it.each(LANGUAGES)('keeps %s migrated reviewers on the read-only provider preset', (lang) => {
+    mkdirSync(join(projectDir, '.takt'), { recursive: true });
+    writeFileSync(join(projectDir, '.takt', 'config.yaml'), 'language: ' + lang + '\n', 'utf-8');
+    invalidateAllResolvedConfigCache();
+
+    const workflow = loadWorkflowFromFile(
+      join(getBuiltinWorkflowsDir(lang), 'takt-default-high.yaml'),
+      projectDir,
+    );
+    const reviewers = workflow.steps.find((step) => step.name === 'reviewers');
+
+    expect(reviewers?.parallel).toHaveLength(6);
+    for (const reviewer of reviewers?.parallel ?? []) {
+      expect(reviewer.providerOptions).toMatchObject({
+        claude: { allowedTools: ['Read', 'Glob', 'Grep', 'Bash', 'WebSearch', 'WebFetch'] },
+        opencode: { allowedTools: ['read', 'glob', 'grep', 'bash', 'websearch', 'webfetch'] },
+      });
+    }
+  });
+
   it('keeps every shipped fragment free of rules, including parallel descendants', () => {
     const stepDirs = [
       getBuiltinStepsDir(),

@@ -9,6 +9,7 @@ import {
 } from './stepFragmentLookupDirectories.js';
 import {
   assertSafeStepFragmentObject,
+  formatPropertyPath,
   getOwnValue,
   isPlainObject,
   isRecord,
@@ -78,6 +79,8 @@ interface FragmentStackEntry {
   realPath: string;
 }
 
+type ConcreteCallerLocation = 'top-level' | 'parallel-child';
+
 const MAX_STEP_FRAGMENT_DEPTH = 64;
 const MAX_STEP_FRAGMENT_REFERENCES = 512;
 
@@ -109,14 +112,6 @@ function containingFragmentOrigin(stack: readonly FragmentStackEntry[]): string 
   return containingFragment
     ? ` from step fragment "${containingFragment.ref}" at ${containingFragment.sourcePath}`
     : '';
-}
-
-function formatPropertyPath(path: readonly PropertyKey[]): string {
-  return path.map((segment, index) => (
-    typeof segment === 'number'
-      ? `[${segment}]`
-      : `${index === 0 ? '' : '.'}${String(segment)}`
-  )).join('');
 }
 
 function isNonEmptyRulesArray(value: unknown): value is unknown[] {
@@ -189,12 +184,17 @@ function assertConcreteFragmentCallersDefineRules(
   value: unknown,
   workflowPath: string,
   stepPath: readonly PropertyKey[],
+  callerLocation: ConcreteCallerLocation,
 ): void {
   if (!isRecord(value)) return;
   const uses = getOwnValue(value, 'uses');
   if (typeof uses === 'string' && uses.trim().length > 0) {
     const rules = getOwnValue(value, 'rules');
-    assertRawRuleSpec(rules, workflowPath, [...stepPath, 'rules']);
+    if (callerLocation === 'parallel-child') {
+      assertNonEmptyRulesArray(rules, workflowPath, [...stepPath, 'rules']);
+    } else {
+      assertRawRuleSpec(rules, workflowPath, [...stepPath, 'rules']);
+    }
   }
   const parallel = getOwnValue(value, 'parallel');
   if (!Array.isArray(parallel)) return;
@@ -203,6 +203,7 @@ function assertConcreteFragmentCallersDefineRules(
       subStep,
       workflowPath,
       [...stepPath, 'parallel', index],
+      'parallel-child',
     );
   }
 }
@@ -215,14 +216,14 @@ function normalizeConcreteFragmentCallerRules(
   callerRulesPath: readonly PropertyKey[],
   ref: string,
   rulePathMappings: WorkflowStepFragmentRulePathMapping[],
+  callerLocation: ConcreteCallerLocation,
 ): RawRecord {
   const normalizedRulesPath = [...stepPath, 'rules'];
-  const parallel = getOwnValue(value, 'parallel');
-  if (!Array.isArray(parallel)) {
+  const normalizeRulesArray = (): RawRecord => {
     if (!isNonEmptyRulesArray(ruleSpec)) {
       throw workflowError(
         workflowPath,
-        `step using fragment "${ref}" resolves to a non-parallel step, so ${formatPropertyPath(callerRulesPath)} must be a non-empty rules array`,
+        `step using fragment "${ref}" must define a non-empty rules array at ${formatPropertyPath(callerRulesPath)}`,
       );
     }
     for (const index of ruleSpec.keys()) {
@@ -232,7 +233,10 @@ function normalizeConcreteFragmentCallerRules(
       });
     }
     return { ...value, rules: ruleSpec };
-  }
+  };
+  if (callerLocation === 'parallel-child') return normalizeRulesArray();
+  const parallel = getOwnValue(value, 'parallel');
+  if (!Array.isArray(parallel)) return normalizeRulesArray();
   if (!isPlainObject(ruleSpec)) {
     throw workflowError(
       workflowPath,
@@ -329,7 +333,17 @@ function expandParallel(
   const dependencies: WorkflowStepFragmentDependency[] = [];
   const expanded: unknown[] = [];
   for (const [index, subStep] of parallel.entries()) {
-    const result = expandStep(subStep, scope, stack, nextReferenceCount, options, [...stepPath, 'parallel', index], true);
+    const result = expandStep(
+      subStep,
+      scope,
+      stack,
+      nextReferenceCount,
+      options,
+      [...stepPath, 'parallel', index],
+      true,
+      true,
+      'parallel-child',
+    );
     nextReferenceCount = result.referenceCount;
     provenance.push(...result.provenance);
     dependencies.push(...result.dependencies);
@@ -347,6 +361,7 @@ function expandStep(
   stepPath: readonly PropertyKey[],
   concrete: boolean,
   expandParallelChildren = true,
+  callerLocation: ConcreteCallerLocation = 'top-level',
 ): ExpandedStep {
   if (!isRecord(value)) return { value, provenance: [], dependencies: [], referenceCount };
   const uses = getOwnValue(value, 'uses');
@@ -478,6 +493,7 @@ function expandStep(
       [...stepPath, 'rules'],
       uses,
       options.rulePathMappings,
+      callerLocation,
     )
     : namedExpandedValue;
   if (concrete && getWorkflowStepKind(expandedValue) === 'system') {
@@ -529,7 +545,7 @@ export function resolveWorkflowStepFragments(raw: unknown, options: WorkflowStep
   };
   const steps: unknown[] = [];
   for (const [index, step] of rawSteps.entries()) {
-    assertConcreteFragmentCallersDefineRules(step, options.workflowPath, ['steps', index]);
+    assertConcreteFragmentCallersDefineRules(step, options.workflowPath, ['steps', index], 'top-level');
     const result = expandStep(step, scope, [], referenceCount, internalOptions, ['steps', index], true);
     referenceCount = result.referenceCount;
     provenance.push(...result.provenance);

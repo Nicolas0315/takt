@@ -26,7 +26,7 @@ max_steps: 5
 initial_step: merge-readiness-review
 steps:
   - name: merge-readiness-review
-    tags: [ review, final-gate, merge-readiness ]
+    tags: [review, final-gate, merge-readiness]
     edit: false
     session: compact
     persona: merge-readiness-reviewer

@@ -1,10 +1,12 @@
 name: reviewers
-tags: [ review ]
+tags: [review]
 parallel:
   - name: arch-review
-    tags: [ review ]
+    tags: [review]
     edit: false
     session: compact
+    provider_options:
+      extends: review-readonly
     persona: architecture-reviewer
     policy: review
     knowledge: architecture
@@ -14,31 +16,37 @@ parallel:
         - name: architect-review.md
           format: architecture-review-finding-contract
   - name: ai-antipattern-review
-    tags: [ review ]
+    tags: [review]
     edit: false
     session: compact
+    provider_options:
+      extends: review-readonly
     persona: ai-antipattern-reviewer
-    policy: [ review, ai-antipattern ]
+    policy: [review, ai-antipattern]
     instruction: ai-antipattern-review
     output_contracts:
       report:
         - name: ai-antipattern-review.md
           format: ai-antipattern-review-finding-contract
   - name: coding-review
-    tags: [ review ]
+    tags: [review]
     edit: false
     session: compact
+    provider_options:
+      extends: review-readonly
     persona: coding-reviewer
-    policy: [ review, coding ]
+    policy: [review, coding]
     instruction: review-coding
     output_contracts:
       report:
         - name: coding-review.md
           format: coding-review-finding-contract
   - name: implementation-semantics-review
-    tags: [ review ]
+    tags: [review]
     edit: false
     session: compact
+    provider_options:
+      extends: review-readonly
     persona: implementation-semantics-reviewer
     policy: review
     knowledge: implementation-semantics
@@ -48,9 +56,11 @@ parallel:
         - name: implementation-semantics-review.md
           format: implementation-semantics-review-finding-contract
   - name: contract-lifecycle-review
-    tags: [ review ]
+    tags: [review]
     edit: false
     session: compact
+    provider_options:
+      extends: review-readonly
     persona: contract-lifecycle-reviewer
     policy: review
     knowledge: contract-lifecycle
@@ -60,9 +70,11 @@ parallel:
         - name: contract-lifecycle-review.md
           format: contract-lifecycle-review-finding-contract
   - name: robustness-review
-    tags: [ review ]
+    tags: [review]
     edit: false
     session: compact
+    provider_options:
+      extends: review-readonly
     persona: robustness-reviewer
     policy: review
     knowledge: robustness

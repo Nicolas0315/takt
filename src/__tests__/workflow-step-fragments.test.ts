@@ -22,14 +22,6 @@ const COMPLETE_PARALLEL_CALLER_RULES = `
           - condition: done
             next: COMPLETE`;
 
-const NESTED_PARALLEL_CALLER_RULES = `
-        rules:
-          self:
-            - condition: done
-          parallel:
-            nested:
-              - condition: done`;
-
 function writeFile(root: string, relativePath: string, content: string): string {
   const filePath = join(root, relativePath);
   mkdirSync(dirname(filePath), { recursive: true });
@@ -210,12 +202,9 @@ call: called
     ['team_leader', 'team_leader: {}'],
   ])('should reject unsupported agent parallel sub-step field %s supplied by a fragment', (field, value) => {
     writeProjectFragment(projectDir, 'review', `${value}\ninstruction: review\n`);
-    const callerRules = field === 'parallel'
-      ? NESTED_PARALLEL_CALLER_RULES
-      : COMPLETE_PARALLEL_CALLER_RULES;
     const workflowPath = writeWorkflow(projectDir, 'parallel-agent-invalid-field', `  - name: reviewers
     parallel:
-      - uses: review${callerRules}
+      - uses: review${COMPLETE_PARALLEL_CALLER_RULES}
     rules:
       - condition: all("done")
         next: COMPLETE`, 'reviewers');
@@ -238,12 +227,9 @@ call: called
   ])('should reject unsupported workflow_call parallel sub-step field %s supplied by a fragment', (field, value) => {
     writeCallableWorkflow(projectDir);
     writeProjectFragment(projectDir, 'delegate', `kind: workflow_call\ncall: called\n${value}\n`);
-    const callerRules = field === 'parallel'
-      ? NESTED_PARALLEL_CALLER_RULES
-      : COMPLETE_PARALLEL_CALLER_RULES;
     const workflowPath = writeWorkflow(projectDir, 'parallel-call-invalid-field', `  - name: delegates
     parallel:
-      - uses: delegate${callerRules}
+      - uses: delegate${COMPLETE_PARALLEL_CALLER_RULES}
     rules:
       - condition: all("done")
         next: COMPLETE`, 'delegates');
@@ -251,6 +237,28 @@ call: called
     const message = errorMessage(() => loadWorkflowFromFile(workflowPath, projectDir));
 
     expect(message).toContain(`"${field}"`);
+  });
+
+  it.each([
+    ['agent', 'instruction: review'],
+    ['workflow_call', 'kind: workflow_call\ncall: called'],
+  ])('should reject a rule tree on a %s parallel sub-step fragment caller', (_kind, fragment) => {
+    if (fragment.includes('workflow_call')) writeCallableWorkflow(projectDir);
+    writeProjectFragment(projectDir, 'nested-rules', `${fragment}\n`);
+    const workflowPath = writeWorkflow(projectDir, 'parallel-sub-step-rule-tree', `  - name: reviewers
+    parallel:
+      - uses: nested-rules
+        rules:
+          self:
+            - condition: all("done")
+          parallel:
+            nested:
+              - condition: done
+    rules:
+      - condition: all("done")
+        next: COMPLETE`, 'reviewers');
+
+    expect(() => loadWorkflowFromFile(workflowPath, projectDir)).toThrow();
   });
 
   it('should prefer a project fragment over the global fragment with the same name', () => {

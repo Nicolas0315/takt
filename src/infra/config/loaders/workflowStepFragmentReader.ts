@@ -63,7 +63,7 @@ export function assertSafeStepFragmentObject(
   visited.delete(value);
 }
 
-function formatPropertyPath(path: readonly PropertyKey[]): string {
+export function formatPropertyPath(path: readonly PropertyKey[]): string {
   return path.map((segment, index) => (
     typeof segment === 'number'
       ? `[${segment}]`

@@ -11,7 +11,7 @@ max_steps: 50
 initial_step: gather
 
 loop_monitors:
-  - cycle: [ replan, implement ]
+  - cycle: [replan, implement]
     threshold: 2
     judge:
       persona: supervisor
@@ -21,7 +21,7 @@ loop_monitors:
           next: replan
         - condition: No feasible approach can satisfy the requirements even after considering the attempted replans
           next: ABORT
-  - cycle: [ replan, implement, reviewers ]
+  - cycle: [replan, implement, reviewers]
     threshold: 2
     judge:
       persona: supervisor
@@ -31,7 +31,7 @@ loop_monitors:
           next: replan
         - condition: No feasible approach can satisfy the requirements even after considering the attempted replans
           next: ABORT
-  - cycle: [ replan, implement, reviewers, final-gate ]
+  - cycle: [replan, implement, reviewers, final-gate]
     threshold: 2
     judge:
       persona: supervisor
@@ -41,7 +41,7 @@ loop_monitors:
           next: replan
         - condition: No feasible approach can satisfy the requirements even after considering the attempted replans
           next: ABORT
-  - cycle: [ replan, implement, reviewers, fix ]
+  - cycle: [replan, implement, reviewers, fix]
     threshold: 2
     judge:
       persona: supervisor
@@ -51,7 +51,7 @@ loop_monitors:
           next: replan
         - condition: No feasible approach can satisfy the requirements even after considering the attempted replans
           next: ABORT
-  - cycle: [ fix, reviewers ]
+  - cycle: [fix, reviewers]
     threshold: 3
     judge:
       persona: supervisor
@@ -63,7 +63,7 @@ loop_monitors:
           next: replan
         - condition: No feasible approach can satisfy the requirements even after considering the attempted replans
           next: ABORT
-  - cycle: [ fix, reviewers, final-gate ]
+  - cycle: [fix, reviewers, final-gate]
     threshold: 3
     judge:
       persona: supervisor
@@ -120,12 +120,12 @@ steps:
         interactive_only: true
 
   - name: implement
-    tags: [ coding ]
+    tags: [coding]
     edit: true
     session: compact
     persona: coder
     policy: coding
-    knowledge: [ takt, architecture, implementation-semantics ]
+    knowledge: [takt, architecture, implementation-semantics]
     required_permission_mode: edit
     instruction: implement
     rules:
@@ -156,12 +156,12 @@ steps:
         - condition: when(findings.conflicts.count == 0 && findings.open.count > 0)
           next: fix
       parallel:
-        arch-review: [ { condition: approved }, { condition: needs_fix } ]
-        ai-antipattern-review: [ { condition: No AI-specific issues }, { condition: AI-specific issues found } ]
-        coding-review: [ { condition: approved }, { condition: needs_fix } ]
-        implementation-semantics-review: [ { condition: approved }, { condition: needs_fix } ]
-        contract-lifecycle-review: [ { condition: approved }, { condition: needs_fix } ]
-        robustness-review: [ { condition: approved }, { condition: needs_fix } ]
+        arch-review: [{ condition: approved }, { condition: needs_fix }]
+        ai-antipattern-review: [{ condition: No AI-specific issues }, { condition: AI-specific issues found }]
+        coding-review: [{ condition: approved }, { condition: needs_fix }]
+        implementation-semantics-review: [{ condition: approved }, { condition: needs_fix }]
+        contract-lifecycle-review: [{ condition: approved }, { condition: needs_fix }]
+        robustness-review: [{ condition: approved }, { condition: needs_fix }]
   - name: final-gate
     uses: finding-contract-final-gate
     rules:

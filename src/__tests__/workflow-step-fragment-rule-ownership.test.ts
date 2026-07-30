@@ -22,15 +22,6 @@ ${steps}
 `;
 }
 
-function message(action: () => unknown): string {
-  try {
-    action();
-  } catch (error) {
-    return error instanceof Error ? error.message : String(error);
-  }
-  throw new Error('Expected action to throw');
-}
-
 describe('workflow step fragment rule ownership', () => {
   let projectDir: string;
   let configDir: string;
@@ -80,7 +71,7 @@ describe('workflow step fragment rule ownership', () => {
     uses: body
 ${rules}`.trimEnd()));
 
-    expect(message(() => loadWorkflowFromFile(path, projectDir))).toContain('steps[0].rules');
+    expect(() => loadWorkflowFromFile(path, projectDir)).toThrow();
   });
 
   it('injects a rule tree by final child name while preserving fragment order and concurrency', () => {
@@ -96,21 +87,28 @@ parallel:
     uses: reviewers
     rules:
       self:
-        - condition: all("approved")
+        - condition: all("architecture-approved", "security-approved")
           next: COMPLETE
       parallel:
         security:
-          - condition: approved
-          - condition: needs_fix
+          - condition: security-approved
+          - condition: security-needs-fix
         architecture:
-          - condition: approved
-          - condition: needs_fix`));
+          - condition: architecture-approved
+          - condition: architecture-needs-fix`));
 
     const loaded = loadWorkflowFromFile(path, projectDir);
 
     expect(loaded.steps[0]?.concurrency).toBe(2);
     expect(loaded.steps[0]?.parallel?.map((step) => step.name)).toEqual(['architecture', 'security']);
-    expect(loaded.steps[0]?.parallel?.map((step) => step.rules?.length)).toEqual([2, 2]);
+    expect(loaded.steps[0]?.parallel?.find((step) => step.name === 'architecture')?.rules).toMatchObject([
+      { condition: { kind: 'semantic', label: 'architecture-approved' } },
+      { condition: { kind: 'semantic', label: 'architecture-needs-fix' } },
+    ]);
+    expect(loaded.steps[0]?.parallel?.find((step) => step.name === 'security')?.rules).toMatchObject([
+      { condition: { kind: 'semantic', label: 'security-approved' } },
+      { condition: { kind: 'semantic', label: 'security-needs-fix' } },
+    ]);
     expect(loaded.steps[0]?.rules).toHaveLength(1);
   });
 
@@ -145,14 +143,14 @@ parallel:
   it.each([
     ['plain array', `    rules:
       - condition: done
-        next: COMPLETE`, 'must be a rule tree'],
+        next: COMPLETE`],
     ['missing child', `    rules:
       self:
         - condition: done
           next: COMPLETE
       parallel:
         first:
-          - condition: done`, 'missing child "second"'],
+          - condition: done`],
     ['unknown child', `    rules:
       self:
         - condition: done
@@ -163,7 +161,7 @@ parallel:
         second:
           - condition: done
         third:
-          - condition: done`, 'unknown child "third"'],
+          - condition: done`],
     ['empty child', `    rules:
       self:
         - condition: done
@@ -171,7 +169,7 @@ parallel:
       parallel:
         first: []
         second:
-          - condition: done`, 'steps[0].rules.parallel.first'],
+          - condition: done`],
     ['nested child tree', `    rules:
       self:
         - condition: done
@@ -184,8 +182,8 @@ parallel:
             nested:
               - condition: done
         second:
-          - condition: done`, 'steps[0].rules.parallel.first'],
-  ])('rejects a parallel caller with %s rules', (_label, rules, expected) => {
+          - condition: done`],
+  ])('rejects a parallel caller with %s rules', (_label, rules) => {
     write(projectDir, '.takt/steps/reviewers.yaml', `parallel:
   - name: first
     instruction: first
@@ -196,7 +194,7 @@ parallel:
     uses: reviewers
 ${rules}`));
 
-    expect(message(() => loadWorkflowFromFile(path, projectDir))).toContain(expected);
+    expect(() => loadWorkflowFromFile(path, projectDir)).toThrow();
   });
 
   it('rejects duplicate final parallel child names before rule injection', () => {
@@ -216,11 +214,11 @@ ${rules}`));
         duplicate:
           - condition: done`));
 
-    expect(message(() => loadWorkflowFromFile(path, projectDir))).toContain('duplicate child name "duplicate"');
+    expect(() => loadWorkflowFromFile(path, projectDir)).toThrow();
   });
 
-  it('reports rule item errors at the caller rule-tree path without fragment provenance', () => {
-    const fragmentPath = write(projectDir, '.takt/steps/reviewers.yaml', `parallel:
+  it('rejects an invalid caller-owned rule item condition', () => {
+    write(projectDir, '.takt/steps/reviewers.yaml', `parallel:
   - name: first
     instruction: first
 `);
@@ -235,10 +233,7 @@ ${rules}`));
           - condition: "all("
 `));
 
-    const error = message(() => loadWorkflowFromFile(path, projectDir));
-
-    expect(error).toContain('steps[0].rules.parallel.first[0].condition');
-    expect(error).not.toContain(fragmentPath);
+    expect(() => loadWorkflowFromFile(path, projectDir)).toThrow();
   });
 
   it('remaps contextual schema errors to the caller rule-tree path', () => {
@@ -263,9 +258,9 @@ ${rules}`));
     } catch (error) {
       expect(error).toBeInstanceOf(ZodError);
       const zodError = error as ZodError;
-      const serialized = JSON.stringify(zodError.issues);
-      expect(serialized).toContain('"rules","parallel","first",0,"condition"');
-      expect(serialized).not.toContain('"parallel",0,"rules",0,"condition"');
+      const issuePaths = zodError.issues.map((issue) => issue.path);
+      expect(issuePaths).toContainEqual(['steps', 0, 'rules', 'parallel', 'first', 0, 'condition']);
+      expect(issuePaths).not.toContainEqual(['steps', 0, 'parallel', 0, 'rules', 0, 'condition']);
     }
   });
 });

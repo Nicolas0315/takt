@@ -325,9 +325,9 @@ steps:
         - condition: any("needs_fix")
           next: fix
       parallel:
-        security-review: [ { condition: approved }, { condition: needs_fix } ]
-        qa-review: [ { condition: approved }, { condition: needs_fix } ]
-        coding-review: [ { condition: approved }, { condition: needs_fix } ]
+        security-review: [{ condition: approved }, { condition: needs_fix }]
+        qa-review: [{ condition: approved }, { condition: needs_fix }]
+        coding-review: [{ condition: approved }, { condition: needs_fix }]
   - name: final-gate
     kind: workflow_call
     call: merge-readiness-dual-final-gate
