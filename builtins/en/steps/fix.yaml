@@ -1,10 +1,10 @@
 name: fix
-tags: [coding]
+tags: [ coding ]
 edit: true
 session: compact
 persona: coder
-policy: [coding, testing]
-knowledge: [takt, architecture, implementation-semantics]
+policy: [ coding, testing ]
+knowledge: [ takt, architecture, implementation-semantics ]
 required_permission_mode: edit
 instruction: fix
 output_contracts:
@@ -12,8 +12,3 @@ output_contracts:
     - name: fix-report.md
       format: fix-report
       use_judge: false
-rules:
-  - condition: Fixes are complete
-    next: reviewers
-  - condition: Cannot proceed with fixes, or the implementation approach must be redefined
-    next: replan

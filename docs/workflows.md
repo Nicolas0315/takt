@@ -101,8 +101,11 @@ Put exactly one step object in a root-level `<name>.yaml` or `<name>.yml` file u
 
 ```yaml
 steps:
-  - uses: final-gate
-    name: final-gate
+  - name: final-gate
+    uses: final-gate
+    rules:
+      - condition: COMPLETE
+        next: COMPLETE
 ```
 
 For example, `.takt/steps/final-gate.yaml` can contain:
@@ -110,12 +113,30 @@ For example, `.takt/steps/final-gate.yaml` can contain:
 ```yaml
 kind: workflow_call
 call: merge-readiness-finding-contract-final-gate
-rules:
-  - condition: COMPLETE
-    next: COMPLETE
 ```
 
-The caller overrides fragment fields. Objects are deep-merged; arrays such as `rules` and `parallel` are replaced as a whole. Names resolve in this order: caller `name`, fragment `name`, then the final name in `uses`. Fragments may reference other fragments, but circular references fail. Bare names resolve project, global, language-specific builtin, then shared builtin `steps/`; package workflows check package-local `steps/` first, and `@owner/repo/name` selects a repertoire package. Each lookup uses the first matching `.yaml` before `.yml`; nested bare references continue from the layer that supplied their parent fragment, rather than restarting at higher-priority layers. A workflow may expand at most 64 nested fragments and 512 references in total; each fragment must be a readable regular file no larger than 1 MiB. Unknown references, malformed scoped references, non-object fragments, unreadable files, circular references, size-limit violations, absolute paths, traversal, nested paths, a symlinked `steps/` root, symlink targets outside a `steps/` root, and a resolved `system` step are configuration errors. A project-trusted workflow also cannot receive a `workflow_call` or `allow_git_commit: true` from a non-project fragment. A caller may explicitly override fragment-provided `allow_git_commit` with `false`.
+Every concrete workflow step that declares `uses`, including a parallel sub-step, must declare its own non-empty rule specification. A non-parallel fragment caller uses a `rules` array; a parallel fragment caller uses the rule tree described below. A fragment cannot declare `rules` at its root or on any parallel sub-step. This keeps routing owned by the workflow that knows the destination step names; fragment-to-fragment `uses` is exempt until a concrete workflow calls the chain. The loader does not copy, inherit, or synthesize fallback rules.
+
+When a fragment resolves to a parallel step, the caller supplies a strict rule tree instead of a plain array. `self` contains the parallel parent's non-empty rule array, and `parallel` maps every explicit, unique final child name to a non-empty rule array. Child rule trees are invalid because workflow parallel steps cannot be nested. The mapping must list all children exactly once and cannot contain unknown children. The loader applies the tree after fragment expansion and converts it to ordinary per-step `rules` arrays before schema validation.
+
+```yaml
+steps:
+  - name: reviewers
+    uses: reviewers
+    rules:
+      self:
+        - condition: all("approved")
+          next: COMPLETE
+      parallel:
+        architecture:
+          - condition: approved
+          - condition: needs_fix
+        security:
+          - condition: approved
+          - condition: needs_fix
+```
+
+The caller overrides fragment fields. Objects are deep-merged; arrays such as `parallel` are replaced as a whole, except that a caller rule tree is a resolver-only routing overlay and does not replace fragment-owned parallel structure. Names resolve in this order: caller `name`, fragment `name`, then the final name in `uses`. YAML key order does not change runtime behavior; examples use `name`, `uses`, other fields, then `rules` for readability. Fragments may reference other fragments, but circular references fail. Bare names resolve project, global, language-specific builtin, then shared builtin `steps/`; package workflows check package-local `steps/` first, and `@owner/repo/name` selects a repertoire package. Each lookup uses the first matching `.yaml` before `.yml`; nested bare references continue from the layer that supplied their parent fragment, rather than restarting at higher-priority layers. A workflow may expand at most 64 nested fragments and 512 references in total; each fragment must be a readable regular file no larger than 1 MiB. Unknown references, malformed scoped references, non-object fragments, unreadable files, circular references, size-limit violations, absolute paths, traversal, nested paths, a symlinked `steps/` root, symlink targets outside a `steps/` root, and a resolved `system` step are configuration errors. A project-trusted workflow also cannot receive a `workflow_call` or `allow_git_commit: true` from a non-project fragment. A caller may explicitly override fragment-provided `allow_git_commit` with `false`.
 
 `persona_name` is only a display name. `provider_routing.personas` in config matches the raw `persona` key, while `provider_routing.tags` matches the optional `tags` array in the order written on the step. Later tags override earlier tags for the same provider/model/provider_options leaf.
 

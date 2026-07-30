@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parse as parseYaml } from 'yaml';
@@ -34,7 +34,23 @@ function getStep(raw: RawWorkflow, name: string): RawStep {
 function expectFragmentReference(step: RawStep, name: string): string {
   expect(step.name).toBe(name);
   expect(typeof step.uses).toBe('string');
+  expect(step.rules).toBeDefined();
+  const keys = Object.keys(step);
+  expect(keys.indexOf('name')).toBeLessThan(keys.indexOf('uses'));
+  expect(keys.indexOf('uses')).toBeLessThan(keys.indexOf('rules'));
   return step.uses as string;
+}
+
+function collectRulesPaths(value: unknown, path = ''): string[] {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return [];
+  const record = value as RawStep;
+  const found = Object.hasOwn(record, 'rules') ? [`${path}rules`] : [];
+  const parallel = record.parallel;
+  if (!Array.isArray(parallel)) return found;
+  return parallel.reduce<string[]>(
+    (paths, child, index) => [...paths, ...collectRulesPaths(child, `${path}parallel[${index}].`)],
+    found,
+  );
 }
 
 describe('builtin workflow step fragment migration', () => {
@@ -113,6 +129,19 @@ describe('builtin workflow step fragment migration', () => {
     ]);
     for (const name of workflows) {
       expect(() => loadWorkflowFromFile(join(getBuiltinWorkflowsDir(lang), name + '.yaml'), projectDir)).not.toThrow();
+    }
+  });
+
+  it('keeps every shipped fragment free of rules, including parallel descendants', () => {
+    const stepDirs = [
+      getBuiltinStepsDir(),
+      ...LANGUAGES.map((lang) => getBuiltinLanguageStepsDir(lang)),
+    ];
+    for (const directory of stepDirs) {
+      for (const file of readdirSync(directory).filter((name) => name.endsWith('.yaml'))) {
+        const fragment = parseYaml(readFileSync(join(directory, file), 'utf-8')) as unknown;
+        expect(collectRulesPaths(fragment), `${directory}/${file}`).toEqual([]);
+      }
     }
   });
 

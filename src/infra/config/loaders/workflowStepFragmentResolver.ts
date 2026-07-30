@@ -24,6 +24,7 @@ import {
 import { assertWorkflowCallTrustBoundaries } from './workflowStepFragmentTrust.js';
 import type { WorkflowTrustInfo } from './workflowTrustSource.js';
 import { getWorkflowStepKind } from '../../../core/models/workflow-step-kind.js';
+import { WorkflowRuleSchema } from '../../../core/models/workflow-schemas.js';
 
 export type { WorkflowStepFragmentProvenance } from './workflowStepFragmentProvenance.js';
 
@@ -31,6 +32,12 @@ export interface WorkflowStepFragmentResolution {
   raw: unknown;
   provenance: readonly WorkflowStepFragmentProvenance[];
   dependencies: readonly WorkflowStepFragmentDependency[];
+  rulePathMappings: readonly WorkflowStepFragmentRulePathMapping[];
+}
+
+export interface WorkflowStepFragmentRulePathMapping {
+  readonly normalizedPath: readonly PropertyKey[];
+  readonly callerPath: readonly PropertyKey[];
 }
 
 export interface WorkflowStepFragmentDependency {
@@ -46,6 +53,10 @@ export interface WorkflowStepFragmentResolverOptions {
   workflowPath: string;
   trustInfo?: WorkflowTrustInfo;
   nestedCandidateDirs?: (fragment: ResolvedStepFragment) => readonly string[] | undefined;
+}
+
+interface InternalWorkflowStepFragmentResolverOptions extends WorkflowStepFragmentResolverOptions {
+  rulePathMappings: WorkflowStepFragmentRulePathMapping[];
 }
 
 interface ExpandedStep {
@@ -100,6 +111,199 @@ function containingFragmentOrigin(stack: readonly FragmentStackEntry[]): string 
     : '';
 }
 
+function formatPropertyPath(path: readonly PropertyKey[]): string {
+  return path.map((segment, index) => (
+    typeof segment === 'number'
+      ? `[${segment}]`
+      : `${index === 0 ? '' : '.'}${String(segment)}`
+  )).join('');
+}
+
+function isNonEmptyRulesArray(value: unknown): value is unknown[] {
+  return Array.isArray(value) && value.length > 0;
+}
+
+function assertNonEmptyRulesArray(
+  value: unknown,
+  workflowPath: string,
+  rulesPath: readonly PropertyKey[],
+): void {
+  if (!isNonEmptyRulesArray(value)) {
+    throw workflowError(
+      workflowPath,
+      `must define a non-empty rules array at ${formatPropertyPath(rulesPath)}`,
+    );
+  }
+  for (const [index, rule] of value.entries()) {
+    const parsed = WorkflowRuleSchema.safeParse(rule);
+    if (parsed.success) continue;
+    const issue = parsed.error.issues[0];
+    const issuePath = issue === undefined
+      ? [...rulesPath, index]
+      : [...rulesPath, index, ...issue.path];
+    throw workflowError(
+      workflowPath,
+      `invalid rule at ${formatPropertyPath(issuePath)}: ${issue?.message ?? 'invalid rule definition'}`,
+    );
+  }
+}
+
+function assertRawRuleSpec(
+  value: unknown,
+  workflowPath: string,
+  rulesPath: readonly PropertyKey[],
+): void {
+  if (Array.isArray(value)) {
+    assertNonEmptyRulesArray(value, workflowPath, rulesPath);
+    return;
+  }
+  if (!isPlainObject(value)) {
+    throw workflowError(
+      workflowPath,
+      `step using a fragment must define a non-empty rules array or rule tree at ${formatPropertyPath(rulesPath)}`,
+    );
+  }
+  const keys = Object.keys(value);
+  const unknownKey = keys.find((key) => key !== 'self' && key !== 'parallel');
+  if (unknownKey !== undefined) {
+    throw workflowError(
+      workflowPath,
+      `rule tree at ${formatPropertyPath(rulesPath)} contains unknown property "${unknownKey}"`,
+    );
+  }
+  const self = getOwnValue(value, 'self');
+  assertNonEmptyRulesArray(self, workflowPath, [...rulesPath, 'self']);
+  const parallel = getOwnValue(value, 'parallel');
+  if (!isPlainObject(parallel) || Object.keys(parallel).length === 0) {
+    throw workflowError(
+      workflowPath,
+      `rule tree must define at least one parallel child at ${formatPropertyPath([...rulesPath, 'parallel'])}`,
+    );
+  }
+  for (const [childName, childRules] of Object.entries(parallel)) {
+    assertNonEmptyRulesArray(childRules, workflowPath, [...rulesPath, 'parallel', childName]);
+  }
+}
+
+function assertConcreteFragmentCallersDefineRules(
+  value: unknown,
+  workflowPath: string,
+  stepPath: readonly PropertyKey[],
+): void {
+  if (!isRecord(value)) return;
+  const uses = getOwnValue(value, 'uses');
+  if (typeof uses === 'string' && uses.trim().length > 0) {
+    const rules = getOwnValue(value, 'rules');
+    assertRawRuleSpec(rules, workflowPath, [...stepPath, 'rules']);
+  }
+  const parallel = getOwnValue(value, 'parallel');
+  if (!Array.isArray(parallel)) return;
+  for (const [index, subStep] of parallel.entries()) {
+    assertConcreteFragmentCallersDefineRules(
+      subStep,
+      workflowPath,
+      [...stepPath, 'parallel', index],
+    );
+  }
+}
+
+function normalizeConcreteFragmentCallerRules(
+  value: RawRecord,
+  ruleSpec: unknown,
+  workflowPath: string,
+  stepPath: readonly PropertyKey[],
+  callerRulesPath: readonly PropertyKey[],
+  ref: string,
+  rulePathMappings: WorkflowStepFragmentRulePathMapping[],
+): RawRecord {
+  const normalizedRulesPath = [...stepPath, 'rules'];
+  const parallel = getOwnValue(value, 'parallel');
+  if (!Array.isArray(parallel)) {
+    if (!isNonEmptyRulesArray(ruleSpec)) {
+      throw workflowError(
+        workflowPath,
+        `step using fragment "${ref}" resolves to a non-parallel step, so ${formatPropertyPath(callerRulesPath)} must be a non-empty rules array`,
+      );
+    }
+    for (const index of ruleSpec.keys()) {
+      rulePathMappings.push({
+        normalizedPath: [...normalizedRulesPath, index],
+        callerPath: [...callerRulesPath, index],
+      });
+    }
+    return { ...value, rules: ruleSpec };
+  }
+  if (!isPlainObject(ruleSpec)) {
+    throw workflowError(
+      workflowPath,
+      `step using fragment "${ref}" resolves to a parallel step, so ${formatPropertyPath(callerRulesPath)} must be a rule tree`,
+    );
+  }
+  const self = getOwnValue(ruleSpec, 'self');
+  const childRuleSpecs = getOwnValue(ruleSpec, 'parallel');
+  if (!isNonEmptyRulesArray(self) || !isPlainObject(childRuleSpecs)) {
+    throw workflowError(workflowPath, `invalid rule tree at ${formatPropertyPath(callerRulesPath)}`);
+  }
+  for (const index of self.keys()) {
+    rulePathMappings.push({
+      normalizedPath: [...normalizedRulesPath, index],
+      callerPath: [...callerRulesPath, 'self', index],
+    });
+  }
+  const childNames = new Set<string>();
+  const normalizedParallel = parallel.map((child, index) => {
+    const childPath = [...stepPath, 'parallel', index];
+    if (!isRecord(child)) {
+      throw workflowError(
+        workflowPath,
+        `parallel child at ${formatPropertyPath(childPath)} must be an object`,
+      );
+    }
+    const childName = getOwnValue(child, 'name');
+    if (typeof childName !== 'string' || childName.trim().length === 0) {
+      throw workflowError(
+        workflowPath,
+        `parallel child at ${formatPropertyPath([...childPath, 'name'])} must define an explicit non-empty name for rule-tree matching`,
+      );
+    }
+    if (childNames.has(childName)) {
+      throw workflowError(
+        workflowPath,
+        `parallel step using fragment "${ref}" contains duplicate child name "${childName}" at ${formatPropertyPath(childPath)}`,
+      );
+    }
+    childNames.add(childName);
+    if (!Object.hasOwn(childRuleSpecs, childName)) {
+      throw workflowError(
+        workflowPath,
+        `rule tree at ${formatPropertyPath([...callerRulesPath, 'parallel'])} is missing child "${childName}"`,
+      );
+    }
+    const childRules = childRuleSpecs[childName];
+    if (!isNonEmptyRulesArray(childRules)) {
+      throw workflowError(
+        workflowPath,
+        `rule tree must define a non-empty rules array at ${formatPropertyPath([...callerRulesPath, 'parallel', childName])}`,
+      );
+    }
+    for (const ruleIndex of childRules.keys()) {
+      rulePathMappings.push({
+        normalizedPath: [...childPath, 'rules', ruleIndex],
+        callerPath: [...callerRulesPath, 'parallel', childName, ruleIndex],
+      });
+    }
+    return { ...child, rules: childRules };
+  });
+  const unknownChild = Object.keys(childRuleSpecs).find((childName) => !childNames.has(childName));
+  if (unknownChild !== undefined) {
+    throw workflowError(
+      workflowPath,
+      `rule tree at ${formatPropertyPath([...callerRulesPath, 'parallel'])} references unknown child "${unknownChild}"`,
+    );
+  }
+  return { ...value, parallel: normalizedParallel, rules: self };
+}
+
 function createDependency(ref: string, resolved: ResolvedStepFragment): WorkflowStepFragmentDependency {
   return Object.freeze({
     ref,
@@ -113,7 +317,7 @@ function expandParallel(
   scope: StepFragmentLookupScope,
   stack: readonly FragmentStackEntry[],
   referenceCount: number,
-  options: WorkflowStepFragmentResolverOptions,
+  options: InternalWorkflowStepFragmentResolverOptions,
   stepPath: readonly PropertyKey[],
 ): ExpandedStep {
   const parallel = getOwnValue(step, 'parallel');
@@ -139,7 +343,7 @@ function expandStep(
   scope: StepFragmentLookupScope,
   stack: readonly FragmentStackEntry[],
   referenceCount: number,
-  options: WorkflowStepFragmentResolverOptions,
+  options: InternalWorkflowStepFragmentResolverOptions,
   stepPath: readonly PropertyKey[],
   concrete: boolean,
   expandParallelChildren = true,
@@ -222,6 +426,7 @@ function expandStep(
       : withoutOverriddenProvenance(expandedBase.provenance, expandedBase.value, fragmentInline, stepPath)),
     ...collectFragmentProvenance(fragmentInline, uses, resolved.path, stepPath),
   ];
+  const callerRuleSpec = getOwnValue(value, 'rules');
   const inlineStep = removeUses(value);
   try {
     assertSafeStepFragmentObject(inlineStep, options.workflowPath, `step using fragment "${uses}"`);
@@ -232,6 +437,7 @@ function expandStep(
       `${message} (from step fragment "${uses}" at ${resolved.path})`,
     );
   }
+  delete inlineStep.rules;
   const merged = mergeStepValues(fragmentValue, inlineStep);
   const fragmentParallelContext = getOwnValue(fragmentInline, 'parallel') === undefined
     ? expandedBase.parallelContext
@@ -260,9 +466,20 @@ function expandStep(
     ...expanded.dependencies,
   ];
   const generatedName = concrete && getOwnValue(expanded.value, 'name') === undefined;
-  const expandedValue = generatedName
+  const namedExpandedValue = generatedName
     ? { ...expanded.value, name: usesName(uses) }
     : expanded.value;
+  const expandedValue = concrete && stack.length === 0
+    ? normalizeConcreteFragmentCallerRules(
+      namedExpandedValue,
+      callerRuleSpec,
+      options.workflowPath,
+      stepPath,
+      [...stepPath, 'rules'],
+      uses,
+      options.rulePathMappings,
+    )
+    : namedExpandedValue;
   if (concrete && getWorkflowStepKind(expandedValue) === 'system') {
     throw workflowError(options.workflowPath, `step fragment "${uses}" at ${resolved.path} resolves to unsupported kind "system"`);
   }
@@ -282,6 +499,7 @@ export function resolveWorkflowStepFragments(raw: unknown, options: WorkflowStep
       raw,
       provenance: Object.freeze([]),
       dependencies: Object.freeze([]),
+      rulePathMappings: Object.freeze([]),
     };
   }
   const rawSteps = getOwnValue(raw, 'steps');
@@ -290,6 +508,7 @@ export function resolveWorkflowStepFragments(raw: unknown, options: WorkflowStep
       raw,
       provenance: Object.freeze([]),
       dependencies: Object.freeze([]),
+      rulePathMappings: Object.freeze([]),
     };
   }
   const workflowOutsideSteps = { ...raw };
@@ -303,9 +522,15 @@ export function resolveWorkflowStepFragments(raw: unknown, options: WorkflowStep
   let referenceCount = 0;
   const provenance: WorkflowStepFragmentProvenance[] = [];
   const dependencies: WorkflowStepFragmentDependency[] = [];
+  const rulePathMappings: WorkflowStepFragmentRulePathMapping[] = [];
+  const internalOptions: InternalWorkflowStepFragmentResolverOptions = {
+    ...options,
+    rulePathMappings,
+  };
   const steps: unknown[] = [];
   for (const [index, step] of rawSteps.entries()) {
-    const result = expandStep(step, scope, [], referenceCount, options, ['steps', index], true);
+    assertConcreteFragmentCallersDefineRules(step, options.workflowPath, ['steps', index]);
+    const result = expandStep(step, scope, [], referenceCount, internalOptions, ['steps', index], true);
     referenceCount = result.referenceCount;
     provenance.push(...result.provenance);
     dependencies.push(...result.dependencies);
@@ -317,5 +542,6 @@ export function resolveWorkflowStepFragments(raw: unknown, options: WorkflowStep
     raw: expanded,
     provenance: Object.freeze([...provenance]),
     dependencies: Object.freeze([...dependencies]),
+    rulePathMappings: Object.freeze([...rulePathMappings]),
   };
 }

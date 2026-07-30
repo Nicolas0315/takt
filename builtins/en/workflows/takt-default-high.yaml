@@ -11,7 +11,7 @@ max_steps: 50
 initial_step: plan
 
 loop_monitors:
-  - cycle: [replan, implement]
+  - cycle: [ replan, implement ]
     threshold: 2
     judge:
       persona: supervisor
@@ -21,7 +21,7 @@ loop_monitors:
           next: replan
         - condition: No feasible approach can satisfy the requirements even after considering the attempted replans
           next: ABORT
-  - cycle: [replan, implement, reviewers]
+  - cycle: [ replan, implement, reviewers ]
     threshold: 2
     judge:
       persona: supervisor
@@ -31,7 +31,7 @@ loop_monitors:
           next: replan
         - condition: No feasible approach can satisfy the requirements even after considering the attempted replans
           next: ABORT
-  - cycle: [replan, implement, reviewers, final-gate]
+  - cycle: [ replan, implement, reviewers, final-gate ]
     threshold: 2
     judge:
       persona: supervisor
@@ -41,7 +41,7 @@ loop_monitors:
           next: replan
         - condition: No feasible approach can satisfy the requirements even after considering the attempted replans
           next: ABORT
-  - cycle: [replan, implement, reviewers, fix]
+  - cycle: [ replan, implement, reviewers, fix ]
     threshold: 2
     judge:
       persona: supervisor
@@ -51,7 +51,7 @@ loop_monitors:
           next: replan
         - condition: No feasible approach can satisfy the requirements even after considering the attempted replans
           next: ABORT
-  - cycle: [fix, reviewers]
+  - cycle: [ fix, reviewers ]
     threshold: 3
     judge:
       persona: supervisor
@@ -63,7 +63,7 @@ loop_monitors:
           next: replan
         - condition: No feasible approach can satisfy the requirements even after considering the attempted replans
           next: ABORT
-  - cycle: [fix, reviewers, final-gate]
+  - cycle: [ fix, reviewers, final-gate ]
     threshold: 3
     judge:
       persona: supervisor
@@ -77,11 +77,7 @@ loop_monitors:
           next: ABORT
 steps:
   - name: plan
-    tags: [plan]
-    edit: false
-    persona: planner
-    knowledge: architecture
-    instruction: plan
+    uses: implementation-high-plan-to-write-tests
     rules:
       - condition: Requirements are clear and implementable
         next: write_tests
@@ -89,35 +85,17 @@ steps:
         next: COMPLETE
       - condition: Requirements are unclear or insufficient
         next: ABORT
-    output_contracts:
-      report:
-        - name: plan.md
-          format: plan
 
   - name: replan
-    tags: [plan]
-    edit: false
-    persona: planner
-    knowledge: architecture
-    instruction: replan-implementation
+    uses: implementation-high-replan-to-implement
     rules:
       - condition: An actionable, untried project-scoped change or investigation and its verification steps were defined
         next: implement
       - condition: Confirmed evidence shows that project-scoped changes or investigation cannot resolve the issue, leaving only external action or mutually unsatisfiable requirements
         next: ABORT
-    output_contracts:
-      report:
-        - name: plan.md
-          format: plan
 
   - name: write_tests
-    tags: [coding, test-planning]
-    edit: true
-    persona: coder
-    policy: [coding, testing]
-    knowledge: [takt, architecture, unit-testing, e2e-testing, implementation-semantics]
-    required_permission_mode: edit
-    instruction: write-tests-first
+    uses: implementation-high-write-tests-to-implement
     rules:
       - condition: Tests written
         next: implement
@@ -129,18 +107,14 @@ steps:
         next: write_tests
         requires_user_input: true
         interactive_only: true
-    output_contracts:
-      report:
-        - name: test-report.md
-          format: test-report
 
   - name: implement
-    tags: [coding]
+    tags: [ coding ]
     edit: true
     session: compact
     persona: coder
     policy: coding
-    knowledge: [takt, architecture, implementation-semantics]
+    knowledge: [ takt, architecture, implementation-semantics ]
     required_permission_mode: edit
     instruction: implement
     rules:
@@ -148,11 +122,55 @@ steps:
         next: reviewers
       - condition: Cannot proceed with implementation
         next: replan
+  - name: reviewers
+    uses: reviewers
+    rules:
+      self:
+        - condition: when(findings.conflicts.count > 0 && findings.conflicts.unadjudicated.count > 0)
+          next: finding-conflict-adjudication
+        - condition: when(findings.conflicts.count > 0)
+          next: ABORT
+        - condition: when(findings.provisional.fixpoint == true && findings.conflicts.count == 0)
+          next: replan
+        - condition: when(findings.rounds.budgetExhausted == true && findings.provisional.count > 0 && findings.conflicts.count == 0)
+          next: replan
+        - condition: when(findings.provisional.count > 0 && findings.conflicts.count == 0)
+          next: replan
+        - condition: all("approved", "No AI-specific issues", "approved", "approved", "approved", "approved") && when(findings.open.count == 0 && findings.provisional.count == 0 && findings.conflicts.count == 0)
+          next: final-gate
+        - condition: any("approved", "needs_fix", "No AI-specific issues", "AI-specific issues found") && when(findings.open.count == 0 && findings.provisional.count == 0 && findings.conflicts.count == 0 && findings.reviewerAnomalies.count > 0)
+          next: final-gate
+        - condition: any("needs_fix", "AI-specific issues found") && when(findings.conflicts.count == 0)
+          next: fix
+        - condition: when(findings.conflicts.count == 0 && findings.open.count > 0)
+          next: fix
+      parallel:
+        arch-review: [ { condition: approved }, { condition: needs_fix } ]
+        ai-antipattern-review: [ { condition: No AI-specific issues }, { condition: AI-specific issues found } ]
+        coding-review: [ { condition: approved }, { condition: needs_fix } ]
+        implementation-semantics-review: [ { condition: approved }, { condition: needs_fix } ]
+        contract-lifecycle-review: [ { condition: approved }, { condition: needs_fix } ]
+        robustness-review: [ { condition: approved }, { condition: needs_fix } ]
+  - name: final-gate
+    uses: finding-contract-final-gate
+    rules:
+      - condition: COMPLETE
+        next: COMPLETE
+      - condition: needs_review
+        next: reviewers
+      - condition: need_replan
+        next: replan
+      - condition: needs_fix
+        next: fix
+      - condition: needs_conflict_adjudication
+        next: finding-conflict-adjudication
+      - condition: ABORT
+        next: ABORT
 
-  - uses: reviewers
-    name: reviewers
-  - uses: finding-contract-final-gate
-    name: final-gate
-
-  - uses: fix
-    name: fix
+  - name: fix
+    uses: fix
+    rules:
+      - condition: Fixes are complete
+        next: reviewers
+      - condition: Cannot proceed with fixes, or the implementation approach must be redefined
+        next: replan

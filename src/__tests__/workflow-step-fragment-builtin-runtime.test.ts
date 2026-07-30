@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { parse as parseYaml } from 'yaml';
+import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 
 vi.mock('../agents/runner.js', () => ({
   runAgent: vi.fn(),
@@ -39,8 +39,6 @@ import {
 import { initializeGitFixture } from './helpers/git-fixture.js';
 import { invalidateAllResolvedConfigCache, invalidateGlobalConfigCache } from '../infra/config/index.js';
 import {
-  getBuiltinLanguageStepsDir,
-  getBuiltinStepsDir,
   getBuiltinWorkflowsDir,
 } from '../infra/config/paths.js';
 
@@ -51,6 +49,7 @@ interface BuiltinFragmentCase {
   nextStep: string;
   persona: string;
   ruleIndex: number;
+  ruleNextStep?: string;
 }
 
 interface FinalGateReturnCase {
@@ -60,14 +59,15 @@ interface FinalGateReturnCase {
 }
 
 interface RawRule {
+  condition?: string;
   next?: string;
   return?: string;
 }
 
-function readRules(path: string, stepName?: string): RawRule[] {
+function readRuleSpec(path: string, stepName?: string): unknown {
   const raw = parseYaml(readFileSync(path, 'utf-8')) as {
-    rules?: RawRule[];
-    steps?: Array<{ name?: string; rules?: RawRule[] }>;
+    rules?: unknown;
+    steps?: Array<{ name?: string; rules?: unknown }>;
   };
   const rules = stepName === undefined
     ? raw.rules
@@ -76,6 +76,22 @@ function readRules(path: string, stepName?: string): RawRule[] {
     throw new Error(`Expected rules in builtin asset: ${path}`);
   }
   return rules;
+}
+
+function readRules(path: string, stepName?: string): RawRule[] {
+  const rules = readRuleSpec(path, stepName);
+  if (!Array.isArray(rules)) {
+    throw new Error(`Expected rule array in builtin asset: ${path}`);
+  }
+  return rules as RawRule[];
+}
+
+function yamlFieldLines(field: string, value: unknown, indentation: number): string[] {
+  const prefix = ' '.repeat(indentation);
+  return stringifyYaml({ [field]: value }, { lineWidth: 0 })
+    .trimEnd()
+    .split('\n')
+    .map((line) => prefix + line);
 }
 
 function findRuleIndex(rules: readonly RawRule[], field: 'next' | 'return', value: string): number {
@@ -87,14 +103,28 @@ function findRuleIndex(rules: readonly RawRule[], field: 'next' | 'return', valu
 }
 
 function fragmentRuleIndex(language: 'en' | 'ja', fragment: 'fix' | 'gather', nextStep: string): number {
+  const workflow = fragment === 'fix'
+    ? 'takt-default-high.yaml'
+    : 'review-fix-takt-default-high.yaml';
   return findRuleIndex(
-    readRules(join(getBuiltinLanguageStepsDir(language), `${fragment}.yaml`)),
+    readRules(join(getBuiltinWorkflowsDir(language), workflow), fragment),
     'next',
     nextStep,
   );
 }
 
-const SUPERVISE_RULES = readRules(join(getBuiltinStepsDir(), 'finding-contract-supervise.yaml'));
+const SUPERVISE_RULES = readRules(
+  join(getBuiltinWorkflowsDir('en'), 'merge-readiness-finding-contract-final-gate.yaml'),
+  'supervise',
+);
+const FINAL_GATE_CALLER_RULES = readRuleSpec(
+  join(getBuiltinWorkflowsDir('en'), 'takt-default-high.yaml'),
+  'final-gate',
+);
+const REVIEWERS_CALLER_RULES = {
+  en: readRuleSpec(join(getBuiltinWorkflowsDir('en'), 'takt-default-high.yaml'), 'reviewers'),
+  ja: readRuleSpec(join(getBuiltinWorkflowsDir('ja'), 'takt-default-high.yaml'), 'reviewers'),
+};
 const MERGE_READINESS_REVIEW_RULES = readRules(
   join(getBuiltinWorkflowsDir('en'), 'merge-readiness-finding-contract-final-gate.yaml'),
   'merge-readiness-review',
@@ -134,8 +164,13 @@ function writeBuiltinFragmentWorkflow(projectDir: string, fragmentCase: BuiltinF
     'workflow_config:',
     '  provider: claude',
     'steps:',
-    `  - uses: ${fragmentCase.fragment}`,
-    '    name: entry',
+    '  - name: entry',
+    `    uses: ${fragmentCase.fragment}`,
+    ...Array.from({ length: fragmentCase.ruleIndex + 1 }, (_unused, index) => [
+      ...(index === 0 ? ['    rules:'] : []),
+      `      - condition: result-${index}`,
+      `        next: ${index === fragmentCase.ruleIndex ? (fragmentCase.ruleNextStep ?? fragmentCase.nextStep) : 'ABORT'}`,
+    ]).flat(),
     `  - name: ${fragmentCase.nextStep}`,
     '    instruction: complete',
     '    rules:',
@@ -185,8 +220,9 @@ function writeBuiltinReturnWorkflow(projectDir: string): string {
     '    instruction: findings-manager',
     '    output_contract: findings-manager',
     'steps:',
-    '  - uses: finding-contract-final-gate',
-    '    name: final-gate',
+    '  - name: final-gate',
+    '    uses: finding-contract-final-gate',
+    ...yamlFieldLines('rules', FINAL_GATE_CALLER_RULES, 4),
     '  - name: fix',
     '    persona: coder',
     '    instruction: fix',
@@ -226,8 +262,9 @@ function writeBuiltinReviewersWorkflow(projectDir: string, language: 'en' | 'ja'
     '    instruction: findings-manager',
     '    output_contract: findings-manager',
     'steps:',
-    '  - uses: reviewers',
-    '    name: reviewers',
+    '  - name: reviewers',
+    '    uses: reviewers',
+    ...yamlFieldLines('rules', REVIEWERS_CALLER_RULES[language], 4),
     '  - name: final-gate',
     '    instruction: complete',
     '    rules:',
@@ -360,6 +397,7 @@ describe('builtin step fragment runtime contracts', () => {
         nextStep: 'plan',
         persona: 'planner',
         ruleIndex: abortRuleIndex,
+        ruleNextStep: 'ABORT',
       }),
       projectDir,
     );
@@ -414,11 +452,6 @@ describe('builtin step fragment runtime contracts', () => {
     writeFileSync(join(projectDir, '.takt', 'steps', 'delegate.yaml'), [
       'kind: workflow_call',
       'call: ./child.yaml',
-      'rules:',
-      '  - condition: COMPLETE',
-      '    next: COMPLETE',
-      '  - condition: ABORT',
-      '    next: ABORT',
       '',
     ].join('\n'), 'utf-8');
     writeFileSync(parentPath, [
@@ -426,8 +459,13 @@ describe('builtin step fragment runtime contracts', () => {
       'initial_step: delegate',
       'max_steps: 2',
       'steps:',
-      '  - uses: delegate',
-      '    name: delegate',
+      '  - name: delegate',
+      '    uses: delegate',
+      '    rules:',
+      '      - condition: COMPLETE',
+      '        next: COMPLETE',
+      '      - condition: ABORT',
+      '        next: ABORT',
       '',
     ].join('\n'), 'utf-8');
     writeFileSync(childPath, [
