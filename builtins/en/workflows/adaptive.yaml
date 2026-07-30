@@ -1,0 +1,580 @@
+name: adaptive
+description: Adaptive development workflow that classifies implementation scope after planning and reclassifies review scope against the cumulative diff after implementation and each fix.
+workflow_config:
+  provider_options:
+    codex:
+      network_access: true
+    opencode:
+      network_access: true
+max_steps: 50
+initial_step: plan
+schemas:
+  work-type-classification: work-type-classification
+
+steps:
+  - name: plan
+    tags: [plan]
+    edit: false
+    persona: planner
+    policy: [design-planning]
+    knowledge: [frontend, react, backend, cqrs-es, architecture]
+    provider_options: &review_provider_options
+      extends: review-readonly
+    instruction: plan
+    output_contracts:
+      report:
+        - name: plan.md
+          format: plan
+    rules:
+      - condition: Requirements are clear and implementation is feasible
+        next: write_tests
+      - condition: The user is asking a question rather than requesting implementation
+        next: COMPLETE
+      - condition: Requirements are unclear or information is insufficient
+        next: ABORT
+
+  - name: write_tests
+    tags: [coding, test-planning]
+    edit: true
+    persona: coder
+    policy: [coding, testing, design-fidelity, screen-api]
+    knowledge: [frontend, react, backend, cqrs-es, architecture, unit-testing, e2e-testing]
+    provider_options: &edit_provider_options
+      extends: edit
+    required_permission_mode: edit
+    instruction: write-tests-first
+    output_contracts:
+      report:
+        - name: test-report.md
+          format: test-report
+    rules:
+      - condition: Test creation completed
+        next: classify_implementation_scope
+      - condition: Test creation skipped because the target is not yet implemented
+        next: classify_implementation_scope
+      - condition: Unable to create tests
+        next: ABORT
+      - condition: User input is required to resolve a question
+        next: write_tests
+        requires_user_input: true
+        interactive_only: true
+
+  - name: classify_implementation_scope
+    tags: [scope-classifier, implementation-scope]
+    edit: false
+    persona: planner
+    knowledge: [frontend, backend, cqrs-es, architecture]
+    provider_options: *review_provider_options
+    instruction: classify-implementation-scope
+    structured_output: &scope_structured_output
+      schema_ref: work-type-classification
+    rules:
+      - condition: when(structured.classify_implementation_scope.work_type == "frontend")
+        next: implement_frontend
+      - condition: when(structured.classify_implementation_scope.work_type == "backend")
+        next: implement_backend
+      - condition: when(structured.classify_implementation_scope.work_type == "dual")
+        next: implement_dual
+      - condition: when(structured.classify_implementation_scope.work_type == "backend-cqrs")
+        next: implement_backend_cqrs
+      - condition: when(structured.classify_implementation_scope.work_type == "dual-cqrs")
+        next: implement_dual_cqrs
+
+  - name: implement_frontend
+    tags: [coding, scoped-implementation, scope-frontend]
+    edit: true
+    persona: coder
+    policy: &frontend_development_policy [coding, testing, design-fidelity]
+    knowledge: &frontend_development_knowledge [frontend, react, security, architecture]
+    provider_options: *edit_provider_options
+    required_permission_mode: edit
+    instruction: implement-after-tests
+    output_contracts: &implement_output_contracts
+      report:
+        - name: coder-scope.md
+          format: coder-scope
+          use_judge: false
+        - name: coder-decisions.md
+          format: coder-decisions
+          use_judge: false
+    rules: &implementation_rules
+      - condition: Implementation completed
+        next: classify_review_scope
+      - condition: The plan needs revision
+        next: plan
+      - condition: Unable to proceed with implementation
+        next: ABORT
+      - condition: User input is required to resolve a question
+        next: implement_frontend
+        requires_user_input: true
+        interactive_only: true
+
+  - name: implement_backend
+    tags: [coding, scoped-implementation, scope-backend]
+    edit: true
+    persona: coder
+    policy: &backend_development_policy [coding, testing]
+    knowledge: &backend_development_knowledge [backend, security, architecture]
+    provider_options: *edit_provider_options
+    required_permission_mode: edit
+    instruction: implement-after-tests
+    output_contracts: *implement_output_contracts
+    rules:
+      - condition: Implementation completed
+        next: classify_review_scope
+      - condition: The plan needs revision
+        next: plan
+      - condition: Unable to proceed with implementation
+        next: ABORT
+      - condition: User input is required to resolve a question
+        next: implement_backend
+        requires_user_input: true
+        interactive_only: true
+
+  - name: implement_dual
+    tags: [coding, scoped-implementation, scope-dual]
+    edit: true
+    persona: coder
+    policy: &dual_development_policy [coding, testing, design-fidelity, screen-api]
+    knowledge: &dual_development_knowledge [frontend, react, backend, security, architecture]
+    provider_options: *edit_provider_options
+    required_permission_mode: edit
+    instruction: implement-after-tests
+    output_contracts: *implement_output_contracts
+    rules:
+      - condition: Implementation completed
+        next: classify_review_scope
+      - condition: The plan needs revision
+        next: plan
+      - condition: Unable to proceed with implementation
+        next: ABORT
+      - condition: User input is required to resolve a question
+        next: implement_dual
+        requires_user_input: true
+        interactive_only: true
+
+  - name: implement_backend_cqrs
+    tags: [coding, scoped-implementation, scope-backend-cqrs]
+    edit: true
+    persona: coder
+    policy: &backend_cqrs_development_policy [coding, testing]
+    knowledge: &backend_cqrs_development_knowledge [backend, cqrs-es, security, architecture]
+    provider_options: *edit_provider_options
+    required_permission_mode: edit
+    instruction: implement-after-tests
+    output_contracts: *implement_output_contracts
+    rules:
+      - condition: Implementation completed
+        next: classify_review_scope
+      - condition: The plan needs revision
+        next: plan
+      - condition: Unable to proceed with implementation
+        next: ABORT
+      - condition: User input is required to resolve a question
+        next: implement_backend_cqrs
+        requires_user_input: true
+        interactive_only: true
+
+  - name: implement_dual_cqrs
+    tags: [coding, scoped-implementation, scope-dual-cqrs]
+    edit: true
+    persona: coder
+    policy: &dual_cqrs_development_policy [coding, testing, design-fidelity, screen-api]
+    knowledge: &dual_cqrs_development_knowledge [frontend, react, backend, cqrs-es, security, architecture]
+    provider_options: *edit_provider_options
+    required_permission_mode: edit
+    instruction: implement-after-tests
+    output_contracts: *implement_output_contracts
+    rules:
+      - condition: Implementation completed
+        next: classify_review_scope
+      - condition: The plan needs revision
+        next: plan
+      - condition: Unable to proceed with implementation
+        next: ABORT
+      - condition: User input is required to resolve a question
+        next: implement_dual_cqrs
+        requires_user_input: true
+        interactive_only: true
+
+  - name: classify_review_scope
+    tags: [scope-classifier, review-scope]
+    edit: false
+    persona: coding-reviewer
+    knowledge: [frontend, backend, cqrs-es, architecture]
+    provider_options: *review_provider_options
+    instruction: classify-review-scope
+    structured_output: *scope_structured_output
+    rules:
+      - condition: when(structured.classify_review_scope.work_type == "frontend")
+        next: review_frontend
+      - condition: when(structured.classify_review_scope.work_type == "backend")
+        next: review_backend
+      - condition: when(structured.classify_review_scope.work_type == "dual")
+        next: review_dual
+      - condition: when(structured.classify_review_scope.work_type == "backend-cqrs")
+        next: review_backend_cqrs
+      - condition: when(structured.classify_review_scope.work_type == "dual-cqrs")
+        next: review_dual_cqrs
+
+  - name: review_frontend
+    tags: [review, scoped-review, scope-frontend]
+    edit: false
+    persona: coding-reviewer
+    policy: &frontend_review_policy [review, coding, testing, design-fidelity]
+    knowledge: &frontend_review_knowledge [frontend, react, security, architecture, unit-testing, e2e-testing]
+    provider_options: *review_provider_options
+    pass_previous_response: false
+    instruction: review-coding
+    output_contracts: &review_output_contracts
+      report:
+        - name: coding-review.md
+          format: coding-review
+    rules: &frontend_review_rules
+      - condition: approved
+        next: supervise_frontend
+      - condition: needs_fix
+        next: fix_frontend
+
+  - name: review_backend
+    tags: [review, scoped-review, scope-backend]
+    edit: false
+    persona: coding-reviewer
+    policy: &backend_review_policy [review, coding, testing]
+    knowledge: &backend_review_knowledge [backend, security, architecture, unit-testing, e2e-testing]
+    provider_options: *review_provider_options
+    pass_previous_response: false
+    instruction: review-coding
+    output_contracts: *review_output_contracts
+    rules:
+      - condition: approved
+        next: supervise_backend
+      - condition: needs_fix
+        next: fix_backend
+
+  - name: review_dual
+    tags: [review, scoped-review, scope-dual]
+    edit: false
+    persona: coding-reviewer
+    policy: &dual_review_policy [review, coding, testing, design-fidelity, screen-api]
+    knowledge: &dual_review_knowledge [frontend, react, backend, security, architecture, unit-testing, e2e-testing]
+    provider_options: *review_provider_options
+    pass_previous_response: false
+    instruction: review-coding
+    output_contracts: *review_output_contracts
+    rules:
+      - condition: approved
+        next: supervise_dual
+      - condition: needs_fix
+        next: fix_dual
+
+  - name: review_backend_cqrs
+    tags: [review, scoped-review, scope-backend-cqrs]
+    edit: false
+    persona: coding-reviewer
+    policy: &backend_cqrs_review_policy [review, coding, testing]
+    knowledge: &backend_cqrs_review_knowledge [backend, cqrs-es, security, architecture, unit-testing, e2e-testing]
+    provider_options: *review_provider_options
+    pass_previous_response: false
+    instruction: review-coding
+    output_contracts: *review_output_contracts
+    rules:
+      - condition: approved
+        next: supervise_backend_cqrs
+      - condition: needs_fix
+        next: fix_backend_cqrs
+
+  - name: review_dual_cqrs
+    tags: [review, scoped-review, scope-dual-cqrs]
+    edit: false
+    persona: coding-reviewer
+    policy: &dual_cqrs_review_policy [review, coding, testing, design-fidelity, screen-api]
+    knowledge: &dual_cqrs_review_knowledge [frontend, react, backend, cqrs-es, security, architecture, unit-testing, e2e-testing]
+    provider_options: *review_provider_options
+    pass_previous_response: false
+    instruction: review-coding
+    output_contracts: *review_output_contracts
+    rules:
+      - condition: approved
+        next: supervise_dual_cqrs
+      - condition: needs_fix
+        next: fix_dual_cqrs
+
+  - name: fix_frontend
+    tags: [coding, scoped-fix, scope-frontend]
+    edit: true
+    persona: coder
+    policy: *frontend_development_policy
+    knowledge: *frontend_development_knowledge
+    provider_options: *edit_provider_options
+    required_permission_mode: edit
+    pass_previous_response: false
+    instruction: fix
+    output_contracts: &fix_output_contracts
+      report:
+        - name: fix-report.md
+          format: fix-report
+          use_judge: false
+    rules:
+      - condition: Fix completed
+        next: reclassify_review_scope_from_frontend
+      - condition: Replanning is required
+        next: plan
+      - condition: Unable to proceed with the fix
+        next: ABORT
+
+  - name: fix_backend
+    tags: [coding, scoped-fix, scope-backend]
+    edit: true
+    persona: coder
+    policy: *backend_development_policy
+    knowledge: *backend_development_knowledge
+    provider_options: *edit_provider_options
+    required_permission_mode: edit
+    pass_previous_response: false
+    instruction: fix
+    output_contracts: *fix_output_contracts
+    rules:
+      - condition: Fix completed
+        next: reclassify_review_scope_from_backend
+      - condition: Replanning is required
+        next: plan
+      - condition: Unable to proceed with the fix
+        next: ABORT
+
+  - name: fix_dual
+    tags: [coding, scoped-fix, scope-dual]
+    edit: true
+    persona: coder
+    policy: *dual_development_policy
+    knowledge: *dual_development_knowledge
+    provider_options: *edit_provider_options
+    required_permission_mode: edit
+    pass_previous_response: false
+    instruction: fix
+    output_contracts: *fix_output_contracts
+    rules:
+      - condition: Fix completed
+        next: reclassify_review_scope_from_dual
+      - condition: Replanning is required
+        next: plan
+      - condition: Unable to proceed with the fix
+        next: ABORT
+
+  - name: fix_backend_cqrs
+    tags: [coding, scoped-fix, scope-backend-cqrs]
+    edit: true
+    persona: coder
+    policy: *backend_cqrs_development_policy
+    knowledge: *backend_cqrs_development_knowledge
+    provider_options: *edit_provider_options
+    required_permission_mode: edit
+    pass_previous_response: false
+    instruction: fix
+    output_contracts: *fix_output_contracts
+    rules:
+      - condition: Fix completed
+        next: reclassify_review_scope_from_backend_cqrs
+      - condition: Replanning is required
+        next: plan
+      - condition: Unable to proceed with the fix
+        next: ABORT
+
+  - name: fix_dual_cqrs
+    tags: [coding, scoped-fix, scope-dual-cqrs]
+    edit: true
+    persona: coder
+    policy: *dual_cqrs_development_policy
+    knowledge: *dual_cqrs_development_knowledge
+    provider_options: *edit_provider_options
+    required_permission_mode: edit
+    pass_previous_response: false
+    instruction: fix
+    output_contracts: *fix_output_contracts
+    rules:
+      - condition: Fix completed
+        next: reclassify_review_scope_from_dual_cqrs
+      - condition: Replanning is required
+        next: plan
+      - condition: Unable to proceed with the fix
+        next: ABORT
+
+  - name: reclassify_review_scope_from_frontend
+    tags: [scope-classifier, review-scope, scope-frontend]
+    edit: false
+    persona: coding-reviewer
+    knowledge: [frontend, backend, cqrs-es, architecture]
+    provider_options: *review_provider_options
+    instruction: reclassify-review-scope-frontend
+    structured_output: *scope_structured_output
+    rules:
+      - condition: when(structured.reclassify_review_scope_from_frontend.work_type == "frontend")
+        next: review_frontend
+      - condition: when(structured.reclassify_review_scope_from_frontend.work_type == "dual")
+        next: review_dual
+      - condition: when(structured.reclassify_review_scope_from_frontend.work_type == "dual-cqrs")
+        next: review_dual_cqrs
+
+  - name: reclassify_review_scope_from_backend
+    tags: [scope-classifier, review-scope, scope-backend]
+    edit: false
+    persona: coding-reviewer
+    knowledge: [frontend, backend, cqrs-es, architecture]
+    provider_options: *review_provider_options
+    instruction: reclassify-review-scope-backend
+    structured_output: *scope_structured_output
+    rules:
+      - condition: when(structured.reclassify_review_scope_from_backend.work_type == "backend")
+        next: review_backend
+      - condition: when(structured.reclassify_review_scope_from_backend.work_type == "dual")
+        next: review_dual
+      - condition: when(structured.reclassify_review_scope_from_backend.work_type == "backend-cqrs")
+        next: review_backend_cqrs
+      - condition: when(structured.reclassify_review_scope_from_backend.work_type == "dual-cqrs")
+        next: review_dual_cqrs
+
+  - name: reclassify_review_scope_from_dual
+    tags: [scope-classifier, review-scope, scope-dual]
+    edit: false
+    persona: coding-reviewer
+    knowledge: [frontend, backend, cqrs-es, architecture]
+    provider_options: *review_provider_options
+    instruction: reclassify-review-scope-dual
+    structured_output: *scope_structured_output
+    rules:
+      - condition: when(structured.reclassify_review_scope_from_dual.work_type == "dual")
+        next: review_dual
+      - condition: when(structured.reclassify_review_scope_from_dual.work_type == "dual-cqrs")
+        next: review_dual_cqrs
+
+  - name: reclassify_review_scope_from_backend_cqrs
+    tags: [scope-classifier, review-scope, scope-backend-cqrs]
+    edit: false
+    persona: coding-reviewer
+    knowledge: [frontend, backend, cqrs-es, architecture]
+    provider_options: *review_provider_options
+    instruction: reclassify-review-scope-backend-cqrs
+    structured_output: *scope_structured_output
+    rules:
+      - condition: when(structured.reclassify_review_scope_from_backend_cqrs.work_type == "backend-cqrs")
+        next: review_backend_cqrs
+      - condition: when(structured.reclassify_review_scope_from_backend_cqrs.work_type == "dual-cqrs")
+        next: review_dual_cqrs
+
+  - name: reclassify_review_scope_from_dual_cqrs
+    tags: [scope-classifier, review-scope, scope-dual-cqrs]
+    edit: false
+    persona: coding-reviewer
+    knowledge: [frontend, backend, cqrs-es, architecture]
+    provider_options: *review_provider_options
+    instruction: reclassify-review-scope-dual-cqrs
+    structured_output: *scope_structured_output
+    rules:
+      - condition: when(structured.reclassify_review_scope_from_dual_cqrs.work_type == "dual-cqrs")
+        next: review_dual_cqrs
+
+  - name: supervise_frontend
+    tags: [review, final-gate, supervise, scope-frontend]
+    edit: false
+    persona: supervisor
+    policy: *frontend_review_policy
+    knowledge: *frontend_review_knowledge
+    provider_options: *review_provider_options
+    pass_previous_response: false
+    instruction: supervise
+    output_contracts: &supervise_output_contracts
+      report:
+        - name: supervisor-validation.md
+          format: supervisor-validation
+        - name: summary.md
+          format: supervisor-summary
+          use_judge: false
+    rules:
+      - condition: BLOCKED
+        next: ABORT
+      - condition: approved
+        next: COMPLETE
+      - condition: need_replan
+        next: plan
+      - condition: needs_fix
+        next: fix_frontend
+
+  - name: supervise_backend
+    tags: [review, final-gate, supervise, scope-backend]
+    edit: false
+    persona: supervisor
+    policy: *backend_review_policy
+    knowledge: *backend_review_knowledge
+    provider_options: *review_provider_options
+    pass_previous_response: false
+    instruction: supervise
+    output_contracts: *supervise_output_contracts
+    rules:
+      - condition: BLOCKED
+        next: ABORT
+      - condition: approved
+        next: COMPLETE
+      - condition: need_replan
+        next: plan
+      - condition: needs_fix
+        next: fix_backend
+
+  - name: supervise_dual
+    tags: [review, final-gate, supervise, scope-dual]
+    edit: false
+    persona: supervisor
+    policy: *dual_review_policy
+    knowledge: *dual_review_knowledge
+    provider_options: *review_provider_options
+    pass_previous_response: false
+    instruction: supervise
+    output_contracts: *supervise_output_contracts
+    rules:
+      - condition: BLOCKED
+        next: ABORT
+      - condition: approved
+        next: COMPLETE
+      - condition: need_replan
+        next: plan
+      - condition: needs_fix
+        next: fix_dual
+
+  - name: supervise_backend_cqrs
+    tags: [review, final-gate, supervise, scope-backend-cqrs]
+    edit: false
+    persona: supervisor
+    policy: *backend_cqrs_review_policy
+    knowledge: *backend_cqrs_review_knowledge
+    provider_options: *review_provider_options
+    pass_previous_response: false
+    instruction: supervise
+    output_contracts: *supervise_output_contracts
+    rules:
+      - condition: BLOCKED
+        next: ABORT
+      - condition: approved
+        next: COMPLETE
+      - condition: need_replan
+        next: plan
+      - condition: needs_fix
+        next: fix_backend_cqrs
+
+  - name: supervise_dual_cqrs
+    tags: [review, final-gate, supervise, scope-dual-cqrs]
+    edit: false
+    persona: supervisor
+    policy: *dual_cqrs_review_policy
+    knowledge: *dual_cqrs_review_knowledge
+    provider_options: *review_provider_options
+    pass_previous_response: false
+    instruction: supervise
+    output_contracts: *supervise_output_contracts
+    rules:
+      - condition: BLOCKED
+        next: ABORT
+      - condition: approved
+        next: COMPLETE
+      - condition: need_replan
+        next: plan
+      - condition: needs_fix
+        next: fix_dual_cqrs

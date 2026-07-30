@@ -1,6 +1,7 @@
 workflow_categories:
   🚀 クイックスタート:
     workflows:
+      - adaptive
       - simple
       - default
       - default-mini

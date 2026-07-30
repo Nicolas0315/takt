@@ -1,0 +1,23 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "work_type": {
+      "type": "string",
+      "enum": [
+        "frontend",
+        "backend",
+        "dual",
+        "backend-cqrs",
+        "dual-cqrs"
+      ]
+    },
+    "rationale": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "work_type",
+    "rationale"
+  ]
+}
