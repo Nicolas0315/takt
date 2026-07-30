@@ -1,5 +1,5 @@
 name: takt-default
-description: TAKT development workflow (plan -> write_tests -> draft (implement + AI self-review) -> peer-review (specialist reviewers + fix + sequential final gate) -> COMPLETE).
+description: TAKT development workflow (plan -> write_tests -> draft (implement + AI self-review) -> peer-review (specialist reviewers + fix planning + fix + sequential final gate) -> COMPLETE).
 workflow_config:
   provider_options:
     codex:
@@ -23,23 +23,13 @@ steps:
           - {question 1}
           - {question 2}
   - name: write_tests
-    tags:
-      - coding
-      - test-planning
-    edit: true
-    persona: coder
-    policy:
-      - coding
-      - testing
-    knowledge:
-      - takt
-      - architecture
-      - unit-testing
-      - e2e-testing
-    provider_options:
-      extends: edit
-    required_permission_mode: edit
-    instruction: write-tests-first
+    uses: implementation-write-tests
+    with:
+      test_knowledge:
+        - takt
+        - architecture
+        - unit-testing
+        - e2e-testing
     rules:
       - condition: Tests written
         next: draft
@@ -51,13 +41,8 @@ steps:
         next: write_tests
         requires_user_input: true
         interactive_only: true
-    output_contracts:
-      report:
-        - name: test-report.md
-          format: test-report
   - name: draft
-    kind: workflow_call
-    call: draft
+    uses: takt-default-draft
     rules:
       - condition: COMPLETE
         next: peer-review
@@ -66,8 +51,7 @@ steps:
       - condition: ABORT
         next: ABORT
   - name: peer-review
-    kind: workflow_call
-    call: peer-review
+    uses: takt-default-peer-review
     rules:
       - condition: COMPLETE
         next: COMPLETE
