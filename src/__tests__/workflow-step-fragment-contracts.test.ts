@@ -344,52 +344,6 @@ describe('workflow step fragment contracts', () => {
     })).toThrow('parallel step "reviewers" contains duplicate sub-step name "reviewer"');
   });
 
-  it('adds fragment provenance to callable argument expansion errors', () => {
-    const fragmentPath = writeFile(projectDir, '.takt/steps/parameterized.yaml', yaml(
-      'instruction:',
-      '  $param: required_instruction',
-    ));
-    const workflowPath = writeFile(projectDir, '.takt/workflows/parameterized.yaml', yaml(
-      'name: parameterized',
-      'subworkflow:',
-      '  callable: true',
-      '  params:',
-      '    required_instruction:',
-      '      type: facet_ref',
-      '      facet_kind: instruction',
-      'initial_step: parameterized',
-      'max_steps: 1',
-      'steps:',
-      '  - uses: parameterized',
-      '    rules:',
-      '      - condition: done',
-      '        next: COMPLETE',
-    ));
-
-    const message = errorMessage(() => loadWorkflowFromFile(workflowPath, projectDir));
-
-    expect(message).toContain('requires workflow_call arg "required_instruction"');
-    expectFragmentProvenance(message, workflowPath, 'parameterized', fragmentPath, 'fragment');
-  });
-
-  it('adds fragment provenance to non-callable param validation errors', () => {
-    const fragmentPath = writeFile(projectDir, '.takt/steps/parameterized.yaml', yaml(
-      'instruction:',
-      '  $param: required_instruction',
-    ));
-    const workflowPath = writeWorkflow(projectDir, 'non-callable-parameterized', yaml(
-      '  - uses: parameterized',
-      '    rules:',
-      '      - condition: done',
-      '        next: COMPLETE',
-    ).trimEnd(), 'parameterized');
-
-    const message = errorMessage(() => loadWorkflowFromFile(workflowPath, projectDir));
-
-    expect(message).toContain('cannot use $param in instruction outside a callable subworkflow');
-    expectFragmentProvenance(message, workflowPath, 'parameterized', fragmentPath, 'fragment');
-  });
-
   it('retains fragment context while identifying an inline field override as workflow-defined', () => {
     const fragmentPath = writeFile(projectDir, '.takt/steps/reviewer.yaml', yaml(
       'persona: reviewer',

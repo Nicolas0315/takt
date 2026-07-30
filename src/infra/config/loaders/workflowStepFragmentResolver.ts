@@ -19,9 +19,16 @@ import {
 } from './workflowStepFragmentReader.js';
 import {
   collectFragmentProvenance,
+  isPathWithin,
   withoutOverriddenProvenance,
   type WorkflowStepFragmentProvenance,
 } from './workflowStepFragmentProvenance.js';
+import {
+  bindStepFragmentParams,
+  getBoundStepFragmentSource,
+  getWorkflowParamDeclarations,
+  type FragmentParamDeclaration,
+} from './workflowStepFragmentParams.js';
 import { assertWorkflowCallTrustBoundaries } from './workflowStepFragmentTrust.js';
 import type { WorkflowTrustInfo } from './workflowTrustSource.js';
 import { getWorkflowStepKind } from '../../../core/models/workflow-step-kind.js';
@@ -57,6 +64,7 @@ export interface WorkflowStepFragmentResolverOptions {
 }
 
 interface InternalWorkflowStepFragmentResolverOptions extends WorkflowStepFragmentResolverOptions {
+  outerParams: ReadonlyMap<string, FragmentParamDeclaration>;
   rulePathMappings: WorkflowStepFragmentRulePathMapping[];
 }
 
@@ -412,7 +420,16 @@ function expandStep(
   if (stack.some((entry) => entry.realPath === realPath)) {
     throw workflowError(options.workflowPath, `circular step fragment reference "${uses}": ${[...stack.map((entry) => entry.sourcePath), resolved.path].join(' -> ')}`);
   }
-  const fragment = readStepFragment(resolved.path, options.workflowPath, uses);
+  const rawFragment = readStepFragment(resolved.path, options.workflowPath, uses);
+  const callerSource = getBoundStepFragmentSource(value);
+  const boundFragment = bindStepFragmentParams(rawFragment, value, {
+    callerPath: callerSource?.path ?? stepPath,
+    callerSourcePath: callerSource?.sourcePath ?? options.workflowPath,
+    fragmentPath: resolved.path,
+    outerParams: options.outerParams,
+    workflowPath: options.workflowPath,
+  });
+  const fragment = boundFragment.value;
   const fragmentScope: StepFragmentLookupScope = {
     context: options.context,
     candidateDirs: options.nestedCandidateDirs?.(resolved) ?? resolved.candidateDirs,
@@ -435,12 +452,13 @@ function expandStep(
   const fragmentInline = removeUses(fragment);
   const fragmentUses = getOwnValue(fragment, 'uses');
   const fragmentValue = expandedBase.value;
+  const boundPaths = boundFragment.boundPaths.map((path) => [...stepPath, ...path]);
   const fragmentProvenance = [
     ...(fragmentUses === undefined
       ? expandedBase.provenance
       : withoutOverriddenProvenance(expandedBase.provenance, expandedBase.value, fragmentInline, stepPath)),
     ...collectFragmentProvenance(fragmentInline, uses, resolved.path, stepPath),
-  ];
+  ].filter((entry) => !boundPaths.some((path) => isPathWithin(entry.stepPath, path)));
   const callerRuleSpec = getOwnValue(value, 'rules');
   const inlineStep = removeUses(value);
   try {
@@ -453,6 +471,7 @@ function expandStep(
     );
   }
   delete inlineStep.rules;
+  delete inlineStep.with;
   const merged = mergeStepValues(fragmentValue, inlineStep);
   const fragmentParallelContext = getOwnValue(fragmentInline, 'parallel') === undefined
     ? expandedBase.parallelContext
@@ -541,6 +560,7 @@ export function resolveWorkflowStepFragments(raw: unknown, options: WorkflowStep
   const rulePathMappings: WorkflowStepFragmentRulePathMapping[] = [];
   const internalOptions: InternalWorkflowStepFragmentResolverOptions = {
     ...options,
+    outerParams: getWorkflowParamDeclarations(raw),
     rulePathMappings,
   };
   const steps: unknown[] = [];

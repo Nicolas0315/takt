@@ -1,3 +1,7 @@
+params:
+  supervise_knowledge:
+    type: facet_ref[]
+    facet_kind: knowledge
 name: supervise
 tags: [review, final-gate, supervise]
 edit: false

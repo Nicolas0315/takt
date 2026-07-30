@@ -6,9 +6,19 @@ export type RawRecord = Record<string, unknown>;
 const FORBIDDEN_OBJECT_KEYS = new Set(['__proto__']);
 const MAX_STEP_FRAGMENT_BYTES = 1024 * 1024;
 
+interface StepFragmentConfigurationErrorOptions extends ErrorOptions {
+  readonly path?: readonly PropertyKey[];
+  readonly sourcePath?: string;
+}
+
 export class StepFragmentConfigurationError extends Error {
-  constructor(message: string, options?: ErrorOptions) {
+  readonly path?: readonly PropertyKey[];
+  readonly sourcePath?: string;
+
+  constructor(message: string, options?: StepFragmentConfigurationErrorOptions) {
     super(message, options);
+    this.path = options?.path;
+    this.sourcePath = options?.sourcePath;
   }
 }
 
@@ -153,6 +163,13 @@ export function readStepFragment(path: string, workflowPath: string, ref: string
   return parsed;
 }
 
-export function workflowError(workflowPath: string, message: string): Error {
-  return new StepFragmentConfigurationError(`Configuration error in workflow ${workflowPath}: ${message}`);
+export function workflowError(
+  workflowPath: string,
+  message: string,
+  options?: StepFragmentConfigurationErrorOptions,
+): Error {
+  return new StepFragmentConfigurationError(
+    `Configuration error in workflow ${workflowPath}: ${message}`,
+    options,
+  );
 }

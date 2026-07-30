@@ -190,35 +190,14 @@ steps:
       - condition: ABORT
         next: ABORT
   - name: fix
-    tags:
-      - coding
-    edit: true
-    persona: coder
-    policy:
-      - coding
-      - testing
-    knowledge:
-      - architecture
-      - security
-    provider_options:
-      claude:
-        allowed_tools:
-          - Read
-          - Glob
-          - Grep
-          - Edit
-          - Write
-          - Bash
-          - WebSearch
-          - WebFetch
-    required_permission_mode: edit
-    pass_previous_response: false
-    instruction: fix
-    output_contracts:
-      report:
-        - name: fix-report.md
-          format: fix-report
-          use_judge: false
+    uses: fix-with-provider-tools
+    with:
+      fix_policy:
+        - coding
+        - testing
+      fix_knowledge:
+        - architecture
+        - security
     rules:
       - condition: Fixes complete
         next: reviewers
