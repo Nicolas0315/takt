@@ -1,7 +1,6 @@
 workflow_categories:
   🚀 Quick Start:
     workflows:
-      - adaptive
       - simple
       - default
       - default-mini
