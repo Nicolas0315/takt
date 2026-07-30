@@ -47,7 +47,13 @@ function writeFile(root: string, relativePath: string, content: string): string 
 
 function workflowSteps(fragmentName?: string): string {
   const review = fragmentName
-    ? '  - uses: ' + fragmentName
+    ? [
+        '  - name: review',
+        '    uses: ' + fragmentName,
+        '    rules:',
+        '      - condition: issue',
+        '        next: fix',
+      ].join('\n')
     : [
         '  - name: review',
         '    instruction: review',
@@ -95,7 +101,13 @@ function workflowSteps(fragmentName?: string): string {
 
 function resumableWorkflowSteps(fragmentName?: string): string {
   const review = fragmentName
-    ? '  - uses: ' + fragmentName
+    ? [
+        '  - name: review',
+        '    uses: ' + fragmentName,
+        '    rules:',
+        '      - condition: issue',
+        '        next: fix',
+      ].join('\n')
     : [
         '  - name: review',
         '    instruction: review',
@@ -151,9 +163,6 @@ describe('workflow step fragment runtime contract', () => {
       '  report:',
       '    - name: review.md',
       '      format: review-finding-contract',
-      'rules:',
-      '  - condition: issue',
-      '    next: fix',
       '',
     ].join('\n'));
     const inlinePath = writeFile(projectDir, '.takt/workflows/inline.yaml', workflowSteps());
@@ -278,9 +287,6 @@ describe('workflow step fragment runtime contract', () => {
     writeFile(projectDir, '.takt/steps/review.yaml', [
       'name: review',
       'instruction: review',
-      'rules:',
-      '  - condition: issue',
-      '    next: fix',
       '',
     ].join('\n'));
     const inlinePath = writeFile(projectDir, '.takt/workflows/inline-resume.yaml', resumableWorkflowSteps());
