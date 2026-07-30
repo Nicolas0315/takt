@@ -316,6 +316,71 @@ args:
     expect(result.raw).not.toHaveProperty('steps.0.with');
   });
 
+  it('binds typed fragment params into workflow_call args', () => {
+    write(projectDir, '.takt/steps/delegate.yaml', `params:
+  child_knowledge:
+    type: facet_ref[]
+    facet_kind: knowledge
+kind: workflow_call
+call: child
+args:
+  knowledge:
+    $param: child_knowledge
+`);
+
+    const result = resolve({
+      steps: [caller('delegate', { child_knowledge: ['architecture'] })],
+    });
+
+    expect(result.raw).toHaveProperty('steps.0.args', {
+      knowledge: ['architecture'],
+    });
+  });
+
+  it('resolves a callable param passed through a fragment workflow_call arg', () => {
+    write(projectDir, '.takt/facets/knowledge/domain.md', 'domain knowledge');
+    write(projectDir, '.takt/steps/delegate.yaml', `params:
+  child_knowledge:
+    type: facet_ref[]
+    facet_kind: knowledge
+kind: workflow_call
+call: child
+args:
+  knowledge:
+    $param: child_knowledge
+`);
+    const path = write(projectDir, '.takt/workflows/callable.yaml', `name: callable
+initial_step: delegate
+max_steps: 1
+subworkflow:
+  callable: true
+  params:
+    workflow_knowledge:
+      type: facet_ref[]
+      facet_kind: knowledge
+knowledge:
+  domain: ../facets/knowledge/domain.md
+steps:
+  - name: delegate
+    uses: delegate
+    with:
+      child_knowledge:
+        $param: workflow_knowledge
+    rules:
+      - condition: COMPLETE
+        next: COMPLETE
+`);
+
+    const loaded = loadWorkflowFromFile(path, projectDir, {
+      callableArgs: { workflow_knowledge: ['domain'] },
+    });
+
+    expect(loaded.steps[0]).toMatchObject({
+      kind: 'workflow_call',
+      args: { knowledge: ['domain'] },
+    });
+  });
+
   it('applies caller overlay after param expansion', () => {
     write(projectDir, '.takt/steps/typed.yaml', `params:
   fragment_instruction:
@@ -373,6 +438,13 @@ instruction:
       fragment: 'params:\n  forbidden:\n    type: facet_ref\n    facet_kind: instruction\nmodel:\n  $param: forbidden\n',
       step: caller('invalid', { forbidden: 'model' }),
       path: ['model'],
+      source: 'fragment',
+    },
+    {
+      name: 'nested workflow_call arg reference',
+      fragment: 'params:\n  forbidden:\n    type: facet_ref\n    facet_kind: instruction\nkind: workflow_call\ncall: child\nargs:\n  nested:\n    value:\n      $param: forbidden\n',
+      step: caller('invalid', { forbidden: 'review' }),
+      path: ['args', 'nested', 'value'],
       source: 'fragment',
     },
     {

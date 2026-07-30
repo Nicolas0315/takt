@@ -68,6 +68,10 @@ const REPORT_FORMAT_CONTRACT: FieldContract = {
   kinds: ['report_format'],
   types: ['facet_ref'],
 };
+const WORKFLOW_CALL_ARG_CONTRACT: FieldContract = {
+  kinds: ['policy', 'knowledge', 'instruction', 'report_format'],
+  types: ['facet_ref', 'facet_ref[]'],
+};
 
 function fragmentError(
   options: BindStepFragmentParamsOptions,
@@ -365,6 +369,30 @@ function bindOutputContracts(
   return { ...value, report: expandedReport };
 }
 
+function bindWorkflowCallArgs(
+  value: unknown,
+  declarations: ReadonlyMap<string, FragmentParamDeclaration>,
+  bindings: ReadonlyMap<string, ResolvedFragmentBinding>,
+  options: BindStepFragmentParamsOptions,
+  path: readonly PropertyKey[],
+): unknown {
+  if (!isPlainObject(value)) {
+    assertNoParamReferences(value, options, path);
+    return value;
+  }
+  return Object.fromEntries(Object.entries(value).map(([name, binding]) => [
+    name,
+    substituteParam(
+      binding,
+      WORKFLOW_CALL_ARG_CONTRACT,
+      declarations,
+      bindings,
+      options,
+      [...path, name],
+    ),
+  ]));
+}
+
 function bindStepFields(
   step: RawRecord,
   declarations: ReadonlyMap<string, FragmentParamDeclaration>,
@@ -392,6 +420,9 @@ function bindStepFields(
         break;
       case 'output_contracts':
         expanded[key] = bindOutputContracts(value, declarations, bindings, options, fieldPath);
+        break;
+      case 'args':
+        expanded[key] = bindWorkflowCallArgs(value, declarations, bindings, options, fieldPath);
         break;
       case 'with':
         if (typeof getOwnValue(step, 'uses') !== 'string' || !isPlainObject(value)) {
