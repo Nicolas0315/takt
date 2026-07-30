@@ -356,6 +356,9 @@ function bindOutputContracts(
       return expandedEntry;
     })
     : report;
+  if (!Array.isArray(report)) {
+    assertNoParamReferences(report, options, [...path, 'report']);
+  }
   for (const [key, nested] of Object.entries(value)) {
     if (key !== 'report') assertNoParamReferences(nested, options, [...path, key]);
   }

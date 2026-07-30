@@ -375,6 +375,27 @@ instruction:
       path: ['model'],
       source: 'fragment',
     },
+    {
+      name: 'non-object caller bindings',
+      fragment: 'instruction: review\n',
+      step: caller('invalid', {}, { with: 'review' }),
+      path: ['steps', 0, 'with'],
+      source: 'caller',
+    },
+    {
+      name: 'non-object fragment params',
+      fragment: 'params: invalid\ninstruction: review\n',
+      step: caller('invalid', {}),
+      path: ['params'],
+      source: 'fragment',
+    },
+    {
+      name: 'params on a parallel child',
+      fragment: 'parallel:\n  - name: review\n    params: []\n    instruction: review\n',
+      step: caller('invalid', {}),
+      path: ['parallel', 0, 'params'],
+      source: 'fragment',
+    },
   ])('rejects $name with a structured source path', ({ fragment, step, path, source }) => {
     const fragmentPath = write(projectDir, '.takt/steps/invalid.yaml', fragment);
 
@@ -389,6 +410,26 @@ instruction:
     const configurationError = thrown as StepFragmentConfigurationError;
     expect(configurationError.path).toEqual(path);
     expect(configurationError.sourcePath).toBe(source === 'caller' ? workflowPath : fragmentPath);
+  });
+
+  it('rejects parameter references below a non-array output_contracts.report', () => {
+    const fragmentPath = write(projectDir, '.takt/steps/invalid-report.yaml', `params:
+  report:
+    type: facet_ref
+    facet_kind: report_format
+output_contracts:
+  report:
+    format:
+      $param: report
+`);
+
+    const error = captureConfigError(() => resolve({
+      steps: [caller('invalid-report', { report: 'implementation' })],
+    })) as StepFragmentConfigurationError;
+
+    expect(error).toBeInstanceOf(StepFragmentConfigurationError);
+    expect(error.path).toEqual(['output_contracts', 'report', 'format']);
+    expect(error.sourcePath).toBe(fragmentPath);
   });
 
   it('keeps rules owned by the concrete caller', () => {
