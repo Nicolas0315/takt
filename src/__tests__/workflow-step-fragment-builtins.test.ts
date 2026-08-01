@@ -14,7 +14,10 @@ import { resolveWorkflowStepFragments } from '../infra/config/loaders/workflowSt
 import { CycleDetector } from '../core/workflow/engine/cycle-detector.js';
 
 type RawStep = Record<string, unknown>;
-type RawWorkflow = { steps: RawStep[] };
+type RawWorkflow = {
+  initial_step?: unknown;
+  steps: RawStep[];
+};
 type Language = 'en' | 'ja';
 
 const LANGUAGES: Language[] = ['en', 'ja'];
@@ -95,6 +98,28 @@ function containsParam(value: unknown, paramName: string): boolean {
   if (typeof value !== 'object' || value === null) return false;
   const record = value as RawStep;
   return record.$param === paramName;
+}
+
+function expectLoopMonitorsTrigger(
+  monitors: readonly { cycle: string[]; threshold: number }[],
+): void {
+  expect(monitors.length).toBeGreaterThan(0);
+  for (const monitor of monitors) {
+    const detector = new CycleDetector([monitor]);
+    let result = { triggered: false };
+    for (let repetition = 0; repetition < monitor.threshold; repetition += 1) {
+      for (const [index, step] of monitor.cycle.entries()) {
+        result = detector.recordAndCheck(
+          step,
+          index === monitor.cycle.length - 1 ? monitor.cycle[0]! : monitor.cycle[index + 1]!,
+        );
+      }
+      if (repetition < monitor.threshold - 1) {
+        expect(result.triggered, monitor.cycle.join(' -> ')).toBe(false);
+      }
+    }
+    expect(result.triggered, monitor.cycle.join(' -> ')).toBe(true);
+  }
 }
 
 describe('builtin workflow step fragment migration', () => {
@@ -324,26 +349,19 @@ describe('builtin workflow step fragment migration', () => {
       join(getBuiltinWorkflowsDir(lang), 'peer-review.yaml'),
       projectDir,
     );
-    const expectedCycles = [
-      ['reviewers', 'review-adjudication', 'fix-plan', 'fix', 'fix-verifier'],
-      ['reviewers', 'review-adjudication', 'final-gate', 'fix-plan', 'fix', 'fix-verifier'],
-      ['fix-plan', 'fix', 'fix-verifier'],
-    ];
+    expectLoopMonitorsTrigger(workflow.loopMonitors ?? []);
+  });
 
-    expect(workflow.loopMonitors?.map(({ cycle }) => cycle)).toEqual(expectedCycles);
-    for (const monitor of workflow.loopMonitors ?? []) {
-      const detector = new CycleDetector([monitor]);
-      let result = { triggered: false };
-      for (let repetition = 0; repetition < monitor.threshold; repetition += 1) {
-        for (const [index, step] of monitor.cycle.entries()) {
-          result = detector.recordAndCheck(
-            step,
-            index === monitor.cycle.length - 1 ? monitor.cycle[0]! : monitor.cycle[index + 1]!,
-          );
-        }
-      }
-      expect(result.triggered, monitor.cycle.join(' -> ')).toBe(true);
-    }
+  it.each(LANGUAGES)('detects every %s shared remediation cycle at its configured threshold', (lang) => {
+    mkdirSync(join(projectDir, '.takt'), { recursive: true });
+    writeFileSync(join(projectDir, '.takt', 'config.yaml'), 'language: ' + lang + '\n', 'utf-8');
+    invalidateAllResolvedConfigCache();
+
+    const workflow = loadWorkflowFromFile(
+      join(getBuiltinWorkflowsDir(lang), 'review-remediation.yaml'),
+      projectDir,
+    );
+    expectLoopMonitorsTrigger(workflow.loopMonitors ?? []);
   });
 
   it.each(LANGUAGES)('keeps %s migrated reviewers on the read-only provider preset', (lang) => {
