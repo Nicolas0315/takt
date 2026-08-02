@@ -27,7 +27,7 @@ import { runReportPhase, ReportPhaseGenerationError } from '../phase-runner.js';
 import { RuleDetectionExhaustedError } from '../evaluation/RuleDetectionExhaustedError.js';
 import type { BasePhaseRunnerContext } from '../phase-runner.js';
 import { buildSessionKey } from '../session-key.js';
-import { incrementStepIteration, getPreviousOutput } from './state-manager.js';
+import { getPreviousOutput } from './state-manager.js';
 import { createLogger, getErrorMessage, slugify } from '../../../shared/utils/index.js';
 import type { OptionsBuilder } from './OptionsBuilder.js';
 import type { RunPaths } from '../run/run-paths.js';
@@ -69,9 +69,14 @@ import {
   projectReviewerRawStructuredOutput,
 } from '../findings/raw-canonicalization.js';
 import { invalidateExpectedPersonaSession, invalidatePersonaSessionIfExpected } from './session-invalidation.js';
-import type { InstructionBuildTransaction } from './instruction-build-transaction.js';
+import { InstructionBuildTransaction } from './instruction-build-transaction.js';
 import { evaluatePostExecutionRules } from './post-execution-rule-evaluator.js';
 import type { PullRequestContext } from '../pr-context.js';
+import {
+  requireWorkflowEventAttribution,
+  type WorkflowExecutionScope,
+  type WorkflowEventAttribution,
+} from '../workflow-execution-scope.js';
 
 const log = createLogger('step-executor');
 
@@ -121,6 +126,7 @@ export interface StepExecutorDeps {
     promptParts: PhasePromptParts,
     phaseExecutionId?: string,
     iteration?: number,
+    scope?: WorkflowExecutionScope,
   ) => void;
   readonly onPhaseComplete?: (
     step: WorkflowStep,
@@ -131,6 +137,7 @@ export interface StepExecutorDeps {
     error?: string,
     phaseExecutionId?: string,
     iteration?: number,
+    scope?: WorkflowExecutionScope,
   ) => void;
   readonly onJudgeStage?: (
     step: WorkflowStep,
@@ -139,6 +146,7 @@ export interface StepExecutorDeps {
     entry: JudgeStageEntry,
     phaseExecutionId?: string,
     iteration?: number,
+    scope?: WorkflowExecutionScope,
   ) => void;
 }
 
@@ -152,6 +160,14 @@ export interface PreparedNormalStepExecution {
   readonly phase1Instruction: string;
   readonly priorStepResponseText?: string;
   readonly stepIteration: number;
+  readonly rollbackPreparation: () => void;
+}
+
+export interface BuildInstructionOptions {
+  readonly iteration: number;
+  readonly fallbackContext?: FallbackContext;
+  readonly findingContractPolicy?: FindingContractInstructionPolicy;
+  readonly transaction?: InstructionBuildTransaction;
 }
 
 export class StepExecutor {
@@ -207,6 +223,7 @@ export class StepExecutor {
     response: AgentResponse;
     priorStepResponseText: string | undefined;
     relationClarification?: ReviewerRelationClarification;
+    eventAttribution?: WorkflowEventAttribution;
   }): Promise<FindingManagerRunResult> {
     if (!this.deps.findingLedgerStore) {
       throw new Error('Finding contract is configured but finding ledger store is not available');
@@ -238,6 +255,10 @@ export class StepExecutor {
       timestamp: new Date().toISOString(),
       priorStepResponseText: input.priorStepResponseText,
       refreshFindingsState: this.deps.refreshFindingsState,
+      eventAttribution: requireWorkflowEventAttribution(
+        input.eventAttribution,
+        'findings:ledger',
+      ),
       emitEvent: this.deps.emitEvent,
     });
   }
@@ -356,25 +377,43 @@ export class StepExecutor {
           findingContractContext,
         )
       : step as AgentWorkflowStep;
-    const instruction = this.buildInstruction(
-      executableStep,
-      stepIteration,
-      state,
-      task,
-      maxSteps,
-      undefined,
-      findingContractContext === undefined
-        ? undefined
-        : { mode: 'explicit', context: findingContractContext },
-    );
-
-    return {
-      executableStep,
-      ...(findingContractContext !== undefined ? { findingContractContext } : {}),
-      phase1Instruction: this.buildPhase1Instruction(instruction, executableStep, runtime),
-      ...(state.lastOutput?.content !== undefined ? { priorStepResponseText: state.lastOutput.content } : {}),
-      stepIteration,
-    };
+    const transaction = new InstructionBuildTransaction();
+    const previousResponseSourcePath = state.previousResponseSourcePath;
+    const pendingFallback = state.pendingFallback;
+    try {
+      const instruction = this.buildInstruction(
+        executableStep,
+        stepIteration,
+        state,
+        task,
+        maxSteps,
+        {
+          iteration: state.iteration + 1,
+          ...(runtime?.fallback === undefined ? {} : { fallbackContext: runtime.fallback }),
+          ...(findingContractContext === undefined
+            ? {}
+            : { findingContractPolicy: { mode: 'explicit', context: findingContractContext } }),
+          transaction,
+        },
+      );
+      return {
+        executableStep,
+        ...(findingContractContext !== undefined ? { findingContractContext } : {}),
+        phase1Instruction: this.buildPhase1Instruction(instruction, executableStep, runtime),
+        ...(state.lastOutput?.content !== undefined ? { priorStepResponseText: state.lastOutput.content } : {}),
+        stepIteration,
+        rollbackPreparation: () => {
+          transaction.rollback();
+          state.previousResponseSourcePath = previousResponseSourcePath;
+          state.pendingFallback = pendingFallback;
+        },
+      };
+    } catch (error) {
+      transaction.rollback();
+      state.previousResponseSourcePath = previousResponseSourcePath;
+      state.pendingFallback = pendingFallback;
+      throw error;
+    }
   }
 
   /**
@@ -581,24 +620,22 @@ export class StepExecutor {
     state: WorkflowState,
     task: string,
     maxSteps: number | 'infinite',
-    fallbackContext?: FallbackContext,
-    findingContractPolicy?: FindingContractInstructionPolicy,
-    transaction?: InstructionBuildTransaction,
+    options: BuildInstructionOptions,
   ): string {
-    this.ensurePreviousResponseSnapshot(state, step.name, stepIteration, transaction);
+    this.ensurePreviousResponseSnapshot(state, step.name, stepIteration, options.transaction);
     const policySnapshot = this.writeFacetSnapshot(
       'policy',
       step.name,
       stepIteration,
       step.policyContents,
-      transaction,
+      options.transaction,
     );
     const knowledgeSnapshot = this.writeFacetSnapshot(
       'knowledge',
       step.name,
       stepIteration,
       step.knowledgeContents,
-      transaction,
+      options.transaction,
     );
     const workflowSteps = this.deps.getWorkflowSteps();
     const reportDir = join(this.deps.getCwd(), this.deps.getReportDir());
@@ -608,7 +645,7 @@ export class StepExecutor {
     const reportsRootDir = this.deps.getRunPaths().reportsRootAbs;
     const instruction = new InstructionBuilder(step, {
       task,
-      iteration: state.iteration,
+      iteration: options.iteration,
       maxSteps,
       stepIteration,
       cwd: this.deps.getCwd(),
@@ -631,13 +668,10 @@ export class StepExecutor {
       knowledgeContents: knowledgeSnapshot?.content ?? step.knowledgeContents,
       knowledgeSourcePath: knowledgeSnapshot?.sourcePath,
       previousResponseSourcePath: state.previousResponseSourcePath,
-      fallbackContext: fallbackContext ?? state.pendingFallback,
+      fallbackContext: options.fallbackContext,
       workflowState: state,
-      findingContract: this.buildFindingContractInstructionContext(step, findingContractPolicy),
+      findingContract: this.buildFindingContractInstructionContext(step, options.findingContractPolicy),
     }).build();
-    if (fallbackContext === undefined) {
-      state.pendingFallback = undefined;
-    }
     return instruction;
   }
 
@@ -653,8 +687,9 @@ export class StepExecutor {
     stepIteration: number,
     response: AgentResponse,
     updatePersonaSession: (persona: string, sessionId: string | undefined) => void,
-    runtime?: RuntimeStepResolution,
-    onProviderAttempt?: BasePhaseRunnerContext['onProviderAttempt'],
+    runtime: RuntimeStepResolution | undefined,
+    onProviderAttempt: BasePhaseRunnerContext['onProviderAttempt'] | undefined,
+    eventAttribution: WorkflowEventAttribution,
   ): Promise<AgentResponse> {
     let nextResponse = response;
 
@@ -667,12 +702,14 @@ export class StepExecutor {
       state,
       nextResponse.content,
       updatePersonaSession,
-      this.deps.onPhaseStart,
-      this.deps.onPhaseComplete,
-      this.deps.onJudgeStage,
-      state.iteration,
-      runtime,
-      onProviderAttempt,
+      {
+        eventAttribution,
+        runtime,
+        onPhaseStart: this.deps.onPhaseStart,
+        onPhaseComplete: this.deps.onPhaseComplete,
+        onJudgeStage: this.deps.onJudgeStage,
+        onProviderAttempt,
+      },
     );
 
     // Phase 2: report output (resume same session, Write only)
@@ -731,25 +768,20 @@ export class StepExecutor {
   async runNormalStep(
     step: WorkflowStep,
     state: WorkflowState,
-    task: string,
-    maxSteps: number | 'infinite',
     updatePersonaSession: (persona: string, sessionId: string | undefined) => void,
-    prebuiltInstruction?: string,
-    runtime?: RuntimeStepResolution,
-    preparedExecution?: PreparedNormalStepExecution,
+    runtime: RuntimeStepResolution | undefined,
+    preparedExecution: PreparedNormalStepExecution,
+    eventAttribution: WorkflowEventAttribution,
   ): Promise<StepRunResult> {
+    if (preparedExecution === undefined) {
+      throw new Error(`Normal step "${step.name}" requires prepared execution input`);
+    }
+    const executionScope = eventAttribution.scope;
     await waitForStepDelay(step);
-    const stepIteration = preparedExecution?.stepIteration ?? (prebuiltInstruction
-      ? state.stepIterations.get(step.name) ?? 1
-      : incrementStepIteration(state, step.name));
+    const stepIteration = preparedExecution.stepIteration;
 
     const findingContractIntakeStep = this.resolveFindingContractIntakeStep(step);
     if (findingContractIntakeStep !== undefined) {
-      if (preparedExecution === undefined) {
-        throw new Error(
-          `Finding contract reviewer step "${step.name}" requires prepared execution input`,
-        );
-      }
       if (preparedExecution.findingContractContext === undefined) {
         throw new Error(`Prepared reviewer step "${step.name}" is missing finding contract context`);
       }
@@ -761,24 +793,14 @@ export class StepExecutor {
         throw new Error(`Prepared reviewer step "${step.name}" has mismatched structured output`);
       }
     }
-    const findingContractContext = preparedExecution?.findingContractContext;
-    const executableStep = preparedExecution?.executableStep ?? step;
+    const findingContractContext = preparedExecution.findingContractContext;
+    const executableStep = preparedExecution.executableStep;
     // 直前ステップ（通常は coder の fix）の応答。異議申告の裁定材料として
     // manager に渡すため、Phase 1 実行で lastOutput が上書きされる前に捕捉する
     // （ParallelRunner の priorStepResponseText 捕捉と同じタイミング）。
-    const priorStepResponseText = preparedExecution?.priorStepResponseText ?? state.lastOutput?.content;
+    const priorStepResponseText = preparedExecution.priorStepResponseText;
 
-    const instruction = preparedExecution?.phase1Instruction
-      ?? prebuiltInstruction
-      ?? this.buildInstruction(
-        executableStep,
-        stepIteration,
-        state,
-        task,
-        maxSteps,
-      );
-    const phase1Instruction = preparedExecution?.phase1Instruction
-      ?? this.buildPhase1Instruction(instruction, executableStep, runtime);
+    const phase1Instruction = preparedExecution.phase1Instruction;
     const providerInfo = this.deps.optionsBuilder.resolveStepProviderModel(executableStep, runtime);
     const sessionKey = buildSessionKey(executableStep, {
       provider: providerInfo.provider,
@@ -800,6 +822,7 @@ export class StepExecutor {
       iteration: state.iteration,
       phase: 1,
       sequence: 1,
+      workflowStack: [...executionScope.stack],
     });
     const baseAgentOptions = this.deps.optionsBuilder.buildAgentOptions(executableStep, runtime);
     const compactionOutcome = await compactSessionBeforePhase1(executableStep, baseAgentOptions);
@@ -816,7 +839,7 @@ export class StepExecutor {
       ...(compactionOutcome === 'fresh' ? { sessionId: undefined } : {}),
       onPromptResolved: (promptParts: PhasePromptParts) => {
         resolvedPromptParts = promptParts;
-        this.deps.onPhaseStart?.(step, 1, 'execute', phase1Instruction, promptParts, phaseExecutionId, state.iteration);
+        this.deps.onPhaseStart?.(step, 1, 'execute', phase1Instruction, promptParts, phaseExecutionId, state.iteration, executionScope);
         didEmitPhaseStart = true;
       },
     };
@@ -830,7 +853,7 @@ export class StepExecutor {
       phaseName: 'execute',
       instruction: phase1Instruction,
       phaseExecutionId,
-      workflowStack: this.deps.getCurrentWorkflowStack?.(),
+      workflowStack: [...executionScope.stack],
       sanitizeText: this.deps.sanitizeObservabilityText,
       providerInfo,
       getPromptParts: () => resolvedPromptParts,
@@ -847,7 +870,7 @@ export class StepExecutor {
     if (response.sessionId !== undefined) {
       updatePersonaSession(sessionKey, response.sessionId);
     }
-    this.deps.onPhaseComplete?.(step, 1, 'execute', response.content, response.status, response.error, phaseExecutionId, state.iteration);
+    this.deps.onPhaseComplete?.(step, 1, 'execute', response.content, response.status, response.error, phaseExecutionId, state.iteration, executionScope);
 
     // Empty output with done status is treated as an error to prevent
     // downstream phases from running with no content.
@@ -909,6 +932,7 @@ export class StepExecutor {
         response,
         priorStepResponseText,
         relationClarification,
+        eventAttribution,
       });
     }
 
@@ -920,6 +944,8 @@ export class StepExecutor {
         response,
         updatePersonaSession,
         runtime,
+        undefined,
+        eventAttribution,
       );
     } catch (error) {
       if (error instanceof RuleDetectionExhaustedError) {

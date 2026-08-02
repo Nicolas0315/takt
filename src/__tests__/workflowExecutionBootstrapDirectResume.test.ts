@@ -300,6 +300,23 @@ describe('createWorkflowExecutionBootstrap direct resume metadata', () => {
     expect(getAttachedWorkflowOpaqueRef(bootstrap.effectiveWorkflowConfig)).toBeUndefined();
   });
 
+  it('root workflow と設定に provider がなくても架空 provider を生成せず bootstrap できる', async () => {
+    const projectDir = createTempProject();
+    mockResolveConfigValueWithSource
+      .mockReturnValueOnce({ value: undefined, source: 'default' })
+      .mockReturnValueOnce({ value: undefined, source: 'default' });
+
+    const bootstrap = await createWorkflowExecutionBootstrap(
+      { ...workflowConfig, provider: undefined, model: undefined },
+      'Run provider-less wrapper',
+      projectDir,
+      { projectCwd: projectDir },
+    );
+
+    expect(bootstrap.currentProvider).toBeUndefined();
+    expect(bootstrap.configuredModel).toBeUndefined();
+  });
+
   it.each([
     { initialIterationOverride: 50, maxStepsOverride: undefined, expectedMaxSteps: 51 },
     { initialIterationOverride: 56, maxStepsOverride: undefined, expectedMaxSteps: 102 },

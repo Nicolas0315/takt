@@ -77,6 +77,7 @@ function loadRetryTransitionWorkflow(
 
   return {
     ...loaded,
+    subworkflow: undefined,
     initialStep: 'fix-verifier',
     maxSteps: 6,
     loopMonitors: undefined,

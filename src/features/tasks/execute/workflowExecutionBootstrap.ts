@@ -114,10 +114,10 @@ class AutoRoutingReachTracker {
 }
 
 function resolveMaxStepsForRestoredIteration(
-  currentMaxSteps: WorkflowConfig['maxSteps'],
-  workflowMaxSteps: WorkflowConfig['maxSteps'],
+  currentMaxSteps: NonNullable<WorkflowConfig['maxSteps']>,
+  workflowMaxSteps: NonNullable<WorkflowConfig['maxSteps']>,
   initialIteration: number | undefined,
-): WorkflowConfig['maxSteps'] {
+): NonNullable<WorkflowConfig['maxSteps']> {
   if (
     currentMaxSteps === 'infinite'
     || initialIteration === undefined
@@ -154,9 +154,13 @@ export async function createWorkflowExecutionBootstrap(
   cwd: string,
   options: WorkflowExecutionOptions,
 ): Promise<WorkflowExecutionBootstrap> {
+  if (workflowConfig.maxSteps === undefined) {
+    throw new Error(`Root workflow "${workflowConfig.name}" requires max_steps`);
+  }
+  const workflowMaxSteps = workflowConfig.maxSteps;
   const effectiveMaxSteps = resolveMaxStepsForRestoredIteration(
-    options.maxStepsOverride ?? workflowConfig.maxSteps,
-    workflowConfig.maxSteps,
+    options.maxStepsOverride ?? workflowMaxSteps,
+    workflowMaxSteps,
     options.initialIterationOverride,
   );
   const { headerPrefix = 'Running Workflow:', interactiveUserInput = false, outputMode = 'terminal' } = options;
@@ -350,9 +354,6 @@ export async function createWorkflowExecutionBootstrap(
         workflowContext: { provider: workflowConfig.provider },
       });
   const currentProvider = resolvedProvider.value;
-  if (!currentProvider) {
-    throw new Error('No provider configured. Set "provider" in ~/.takt/config.yaml');
-  }
   const currentProviderSource = resolvedProvider.source;
   const resolvedModel = options.model !== undefined
     ? {
@@ -410,9 +411,6 @@ export async function createWorkflowExecutionBootstrap(
 
   const analyticsEmitter = new AnalyticsEmitter(
     runSlug,
-    currentProvider,
-    configuredModel ?? '(default)',
-    workflowConfig.name,
     interactiveUserInput,
     workflowSessionId,
   );

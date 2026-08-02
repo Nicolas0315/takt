@@ -9,6 +9,7 @@ import { TaskStore } from '../infra/task/store.js';
 import { TaskRecordSchema, type TaskRecord, type TasksFileData } from '../infra/task/schema.js';
 import type { AutoRequeueResult } from '../infra/task/index.js';
 import { buildTerminalTaskRecord } from '../infra/task/taskRecordMutations.js';
+import { buildWorkflowCallInvocationFixture } from './helpers/workflow-resume-fixture.js';
 
 function loadTasksFile(testDir: string): { tasks: Array<Record<string, unknown>> } {
   const raw = readFileSync(join(testDir, '.takt', 'tasks.yaml'), 'utf-8');
@@ -288,15 +289,16 @@ describe('TaskRunner (tasks.yaml)', () => {
   });
 
   it('should fail interrupted running tasks with start_movement from run meta', () => {
+    const latestResumeStack = [
+      { workflow: 'default', step: 'delegate', kind: 'workflow_call' as const, call_instance: 1 },
+      { workflow: 'takt/coding', step: 'review', kind: 'agent' as const },
+    ];
     const latestResumePoint = {
       version: 2 as const,
-      stack: [
-        { workflow: 'default', step: 'delegate', kind: 'workflow_call' as const, call_instance: 1 },
-        { workflow: 'takt/coding', step: 'review', kind: 'agent' as const },
-      ],
+      stack: latestResumeStack,
       iteration: 7,
       elapsed_ms: 183245,
-      workflow_call_invocations: {},
+      workflow_call_invocations: buildWorkflowCallInvocationFixture(latestResumeStack),
       workflow_step_participations: {},
     };
     runner.addTask('Task A', {
@@ -307,7 +309,7 @@ describe('TaskRunner (tasks.yaml)', () => {
       resume_point: {
         version: 2,
         stack: [
-          { workflow: 'default', step: 'draft', kind: 'workflow_call', call_instance: 1 },
+          { workflow: 'default', step: 'draft', kind: 'agent' },
         ],
         iteration: 4,
         elapsed_ms: 120000,
@@ -359,7 +361,7 @@ describe('TaskRunner (tasks.yaml)', () => {
     const staleResumePoint = {
       version: 2 as const,
       stack: [
-        { workflow: 'default', step: 'delegate', kind: 'workflow_call' as const, call_instance: 1 },
+        { workflow: 'default', step: 'delegate', kind: 'agent' as const },
       ],
       iteration: 4,
       elapsed_ms: 120000,
@@ -399,7 +401,7 @@ describe('TaskRunner (tasks.yaml)', () => {
     const staleResumePoint = {
       version: 2 as const,
       stack: [
-        { workflow: 'default', step: 'delegate', kind: 'workflow_call' as const, call_instance: 1 },
+        { workflow: 'default', step: 'delegate', kind: 'agent' as const },
       ],
       iteration: 4,
       elapsed_ms: 120000,
@@ -439,16 +441,17 @@ describe('TaskRunner (tasks.yaml)', () => {
   });
 
   it('should preserve an inherited retry checkpoint when the new run has no checkpoint yet', () => {
+    const inheritedResumeStack = [
+      { workflow: 'default', step: 'develop', kind: 'workflow_call' as const, call_instance: 1 },
+      { workflow: 'development-core', step: 'peer-review', kind: 'workflow_call' as const, call_instance: 1 },
+      { workflow: 'peer-review', step: 'fix', kind: 'agent' as const },
+    ];
     const inheritedResumePoint = {
       version: 2 as const,
-      stack: [
-        { workflow: 'default', step: 'develop', kind: 'workflow_call' as const, call_instance: 1 },
-        { workflow: 'development-core', step: 'peer-review', kind: 'workflow_call' as const, call_instance: 1 },
-        { workflow: 'peer-review', step: 'fix', kind: 'agent' as const },
-      ],
+      stack: inheritedResumeStack,
       iteration: 59,
       elapsed_ms: 183245,
-      workflow_call_invocations: {},
+      workflow_call_invocations: buildWorkflowCallInvocationFixture(inheritedResumeStack),
       workflow_step_participations: {},
     };
     runner.addTask('Task A', {
@@ -493,16 +496,17 @@ describe('TaskRunner (tasks.yaml)', () => {
   });
 
   it('should prefer a checkpoint produced by the new run over an inherited checkpoint', () => {
+    const inheritedResumeStack = [
+      { workflow: 'default', step: 'develop', kind: 'workflow_call' as const, call_instance: 1 },
+      { workflow: 'development-core', step: 'peer-review', kind: 'workflow_call' as const, call_instance: 1 },
+      { workflow: 'peer-review', step: 'fix', kind: 'agent' as const },
+    ];
     const inheritedResumePoint = {
       version: 2 as const,
-      stack: [
-        { workflow: 'default', step: 'develop', kind: 'workflow_call' as const, call_instance: 1 },
-        { workflow: 'development-core', step: 'peer-review', kind: 'workflow_call' as const, call_instance: 1 },
-        { workflow: 'peer-review', step: 'fix', kind: 'agent' as const },
-      ],
+      stack: inheritedResumeStack,
       iteration: 59,
       elapsed_ms: 183245,
-      workflow_call_invocations: {},
+      workflow_call_invocations: buildWorkflowCallInvocationFixture(inheritedResumeStack),
       workflow_step_participations: {},
     };
     runner.addTask('Task A', {
@@ -1363,30 +1367,31 @@ describe('TaskRunner (tasks.yaml)', () => {
   });
 
   it('should persist resume_point when requeueing and starting re-execution', () => {
+    const stack = [
+      {
+        workflow: 'default',
+        step: 'implement',
+        kind: 'workflow_call' as const,
+        call_instance: 1,
+        step_iterations: { implement: 1 },
+      },
+      {
+        workflow: 'takt/coding',
+        step: 'review',
+        kind: 'agent' as const,
+        step_iterations: { review: 6, fix: 2 },
+      },
+    ];
     const resumePoint = {
       version: 2 as const,
-      stack: [
-        {
-          workflow: 'default',
-          step: 'implement',
-          kind: 'workflow_call' as const,
-          call_instance: 1,
-          step_iterations: { implement: 3 },
-        },
-        {
-          workflow: 'takt/coding',
-          step: 'review',
-          kind: 'agent' as const,
-          step_iterations: { review: 6, fix: 2 },
-        },
-      ],
+      stack,
       iteration: 7,
       elapsed_ms: 183245,
-      workflow_call_invocations: {},
+      workflow_call_invocations: buildWorkflowCallInvocationFixture(stack),
       workflow_step_participations: {},
       dynamic_parallel_selections: {
-        '{"workflow":"takt/coding","step":"review","calls":[]}': {
-          identity: '{"workflow":"takt/coding","step":"review","calls":[]}',
+        '{"workflow":"takt/coding","step":"review","owners":[]}': {
+          identity: '{"workflow":"takt/coding","step":"review","owners":[]}',
           step_name: 'review',
           round: 1,
           selected_pool_ids: ['frontend'],
@@ -1437,7 +1442,7 @@ describe('TaskRunner (tasks.yaml)', () => {
       resume_point: {
         version: 2,
         stack: [
-          { workflow: 'default', step: 'delegate', kind: 'workflow_call', call_instance: 1 },
+          { workflow: 'default', step: 'delegate', kind: 'agent' },
         ],
         iteration: 7,
         elapsed_ms: 183245,
@@ -1486,7 +1491,7 @@ describe('TaskRunner (tasks.yaml)', () => {
     const workflowCallResumePoint = {
       version: 2 as const,
       stack: [
-        { workflow: 'default', step: 'delegate', kind: 'workflow_call' as const, call_instance: 1 },
+        { workflow: 'default', step: 'delegate', kind: 'agent' as const },
       ],
       iteration: 7,
       elapsed_ms: 183900,
@@ -1500,7 +1505,7 @@ describe('TaskRunner (tasks.yaml)', () => {
       resume_point: {
         version: 2,
         stack: [
-          { workflow: 'default', step: 'delegate', kind: 'workflow_call', call_instance: 1 },
+          { workflow: 'default', step: 'delegate', kind: 'agent' },
           { workflow: 'takt/coding', step: 'review', kind: 'agent' },
         ],
         iteration: 6,
@@ -1549,7 +1554,7 @@ describe('TaskRunner (tasks.yaml)', () => {
     const staleResumePoint = {
       version: 2 as const,
       stack: [
-        { workflow: 'default', step: 'delegate', kind: 'workflow_call' as const, call_instance: 1 },
+        { workflow: 'default', step: 'delegate', kind: 'agent' as const },
       ],
       iteration: 7,
       elapsed_ms: 183245,
@@ -1596,7 +1601,7 @@ describe('TaskRunner (tasks.yaml)', () => {
     const staleResumePoint = {
       version: 2 as const,
       stack: [
-        { workflow: 'default', step: 'delegate', kind: 'workflow_call' as const, call_instance: 1 },
+        { workflow: 'default', step: 'delegate', kind: 'agent' as const },
       ],
       iteration: 7,
       elapsed_ms: 183245,
@@ -1650,7 +1655,7 @@ describe('TaskRunner (tasks.yaml)', () => {
     const staleResumePoint = {
       version: 2 as const,
       stack: [
-        { workflow: 'default', step: 'delegate', kind: 'workflow_call' as const, call_instance: 1 },
+        { workflow: 'default', step: 'delegate', kind: 'agent' as const },
       ],
       iteration: 7,
       elapsed_ms: 183245,
@@ -1699,7 +1704,7 @@ describe('TaskRunner (tasks.yaml)', () => {
     const staleResumePoint = {
       version: 2 as const,
       stack: [
-        { workflow: 'default', step: 'delegate', kind: 'workflow_call' as const, call_instance: 1 },
+        { workflow: 'default', step: 'delegate', kind: 'agent' as const },
       ],
       iteration: 7,
       elapsed_ms: 183245,
@@ -1746,7 +1751,7 @@ describe('TaskRunner (tasks.yaml)', () => {
     const staleResumePoint = {
       version: 2 as const,
       stack: [
-        { workflow: 'default', step: 'delegate', kind: 'workflow_call' as const, call_instance: 1 },
+        { workflow: 'default', step: 'delegate', kind: 'agent' as const },
       ],
       iteration: 7,
       elapsed_ms: 183245,
