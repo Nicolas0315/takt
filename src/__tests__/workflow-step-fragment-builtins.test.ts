@@ -46,6 +46,7 @@ const MINI_WORKFLOWS = [
   'backend-cqrs-mini',
   'dual-cqrs-mini',
 ];
+const LIGHTWEIGHT_CORE_WORKFLOWS = ['simple-core', 'mini-core', 'simple-mini'];
 const REMEDIATION_WORKFLOWS = [
   'review-fix-default',
   'review-fix-backend',
@@ -233,6 +234,7 @@ describe('builtin workflow step fragment migration', () => {
       ...FIX_WORKFLOWS,
       ...DEVELOPMENT_CORE_WORKFLOWS,
       ...MINI_WORKFLOWS,
+      ...LIGHTWEIGHT_CORE_WORKFLOWS,
       ...REMEDIATION_WORKFLOWS,
       'peer-review-suite-base',
       'peer-review-suite-frontend',
@@ -259,6 +261,59 @@ describe('builtin workflow step fragment migration', () => {
       expect(develop.call, workflowName).toBe('mini-core');
       expect(develop.args, workflowName).toEqual(expect.any(Object));
     }
+  });
+
+  it.each(LANGUAGES)('loads %s lightweight development routines with resolved runtime report contracts', (lang) => {
+    mkdirSync(join(projectDir, '.takt'), { recursive: true });
+    writeFileSync(join(projectDir, '.takt', 'config.yaml'), 'language: ' + lang + '\n', 'utf-8');
+    invalidateAllResolvedConfigCache();
+
+    for (const workflowName of LIGHTWEIGHT_CORE_WORKFLOWS) {
+      const workflowPath = join(getBuiltinWorkflowsDir(lang), workflowName + '.yaml');
+      const workflow = loadWorkflowFromFile(workflowPath, projectDir);
+      const plan = workflow.steps.find((step) => step.name === 'plan');
+      const implement = workflow.steps.find((step) => step.name === 'implement');
+      const planContract = plan?.outputContracts?.find((contract) => contract.name === 'plan.md');
+
+      expect(planContract, workflowName).toMatchObject({
+        formatRef: 'plan',
+        format: expect.any(String),
+      });
+      expect(planContract?.format?.trim().length, workflowName).toBeGreaterThan(0);
+      expect(
+        implement?.outputContracts?.some((contract) => contract.name === 'implementation-report.md'),
+        workflowName,
+      ).toBe(true);
+    }
+  });
+
+  it.each(LANGUAGES)('resolves a non-default %s plan report format through callable step composition', (lang) => {
+    mkdirSync(join(projectDir, '.takt'), { recursive: true });
+    writeFileSync(join(projectDir, '.takt', 'config.yaml'), 'language: ' + lang + '\n', 'utf-8');
+    invalidateAllResolvedConfigCache();
+
+    const workflow = loadWorkflowFromFile(join(getBuiltinWorkflowsDir(lang), 'mini-core.yaml'), projectDir, {
+      callableArgs: { plan_report_format: 'plan-frontend' },
+    });
+    const planContract = workflow.steps
+      .find((step) => step.name === 'plan')
+      ?.outputContracts?.find((contract) => contract.name === 'plan.md');
+
+    expect(planContract).toMatchObject({
+      formatRef: 'plan-frontend',
+      format: expect.any(String),
+    });
+    expect(planContract?.format?.trim().length).toBeGreaterThan(0);
+  });
+
+  it.each(LANGUAGES)('rejects an unknown %s callable plan report format', (lang) => {
+    mkdirSync(join(projectDir, '.takt'), { recursive: true });
+    writeFileSync(join(projectDir, '.takt', 'config.yaml'), 'language: ' + lang + '\n', 'utf-8');
+    invalidateAllResolvedConfigCache();
+
+    expect(() => loadWorkflowFromFile(join(getBuiltinWorkflowsDir(lang), 'mini-core.yaml'), projectDir, {
+      callableArgs: { plan_report_format: 'unknown-plan-format' },
+    })).toThrow();
   });
 
   it.each(LANGUAGES)('composes %s domain reviewer suites without dropping specialist or maintenance facets', (lang) => {
