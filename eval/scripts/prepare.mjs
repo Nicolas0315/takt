@@ -77,6 +77,22 @@ const TARGETS = [
     mutable: true,
   },
   {
+    id: 'implement-contract-traceability',
+    workflow: 'default',
+    step: 'implement',
+    fixture: 'eval/fixtures/implement-contract-traceability',
+    mutable: true,
+  },
+  {
+    id: 'implementation-report-contract-traceability',
+    workflow: 'default',
+    step: 'implement',
+    fixture: 'eval/fixtures/implement-contract-traceability',
+    mutable: true,
+    phase: 'phase2',
+    targetFile: 'implementation-report.md',
+  },
+  {
     id: 'follow-up-review-repair-regression',
     workflow: 'peer-review',
     step: 'coding-review',
@@ -101,6 +117,9 @@ const {
 );
 const { InstructionBuilder } = await import(
   pathToFileURL(join(repoRoot, 'dist/core/workflow/instruction/InstructionBuilder.js')).href
+);
+const { ReportInstructionBuilder } = await import(
+  pathToFileURL(join(repoRoot, 'dist/core/workflow/instruction/ReportInstructionBuilder.js')).href
 );
 const { StatusJudgmentBuilder } = await import(
   pathToFileURL(join(repoRoot, 'dist/core/workflow/instruction/StatusJudgmentBuilder.js')).href
@@ -164,7 +183,13 @@ for (const {
   fixture,
   mutable,
   workflowCallVars,
+  phase: requestedPhase,
+  targetFile,
 } of targets) {
+  if (requestedPhase !== undefined && monitorCycle !== undefined) {
+    throw new Error(`Target "${id}" cannot define both phase and monitorCycle`);
+  }
+  const resolvedPhase = requestedPhase ?? (monitorCycle ? 'phase3' : 'phase1');
   const fixtureDir = resolve(repoRoot, fixture);
 
   // Mutable (coder) targets work on a disposable copy.
@@ -263,13 +288,22 @@ for (const {
     language,
   };
 
-  const instruction = monitorCycle
-    ? new StatusJudgmentBuilder(target, {
+  const instruction = resolvedPhase === 'phase2'
+    ? new ReportInstructionBuilder(target, {
+        cwd: runDir,
+        reportDir,
+        stepIteration: 1,
+        language,
+        targetFile,
+        lastResponse: PREV_MARKER,
+      }).build()
+    : resolvedPhase === 'phase3'
+      ? new StatusJudgmentBuilder(target, {
         language,
         inputSource: 'response',
         lastResponse: `${target.instruction}\n\n## Scenario evidence\n${SCENARIO_MARKER}`,
-      }).build()
-    : new InstructionBuilder(target, context).build();
+        }).build()
+      : new InstructionBuilder(target, context).build();
 
   // The codex provider concatenates system prompt (persona) and instruction.
   const persona = target.personaPath
@@ -282,8 +316,7 @@ for (const {
 
   const outDir = join(repoRoot, 'eval', 'prompts');
   mkdirSync(outDir, { recursive: true });
-  const phase = monitorCycle ? 'phase3' : 'phase1';
-  const outPath = join(outDir, `${id}.${phase}.md`);
+  const outPath = join(outDir, `${id}.${resolvedPhase}.md`);
   writeFileSync(outPath, assembled);
 
   const targetName = monitorCycle ? `[${monitorCycle.join(' -> ')}] monitor` : stepName;
