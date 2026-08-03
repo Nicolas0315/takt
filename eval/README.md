@@ -36,6 +36,8 @@ not the pass/fail summary.
 | `initial-review-contract-discovery` | peer-review / initial coding-review | initial-review-contract-discovery | whether the initial review independently discovers multiple blocking families and completes each family sweep |
 | `initial-plan-contract-closure` | default / plan | initial-review-contract-discovery | whether the initial plan traces every completion contract, closes real multi-boundary impact paths, and keeps local changes local |
 | `replan-contract-closure` | takt-default-high / replan | initial-review-contract-discovery | whether replanning preserves the original task while adding required production boundaries and rejecting unrelated reviewer proposals |
+| `issue-plan-samples` | default / plan | nrslib/takt repository (read-only) | whether planning preserves explicit breadth, allowed design choices, and explicitly required architecture across Issues #1127, #1155, and #1136 |
+| `plan-report-source-authority` | default / plan report phase | synthetic Phase 1 draft (tool-less) | whether the final `plan.md` keeps the original task authoritative and demotes unsupported design details from requirements |
 | `write-tests-contract-traceability` | default / write_tests | write-tests-contract-traceability | whether generated tests accept the intended local contract, reject plausible mutations, and avoid inventing irrelevant impact paths |
 | `follow-up-review-repair-regression` | peer-review / follow-up coding-review | follow-up-review-repair-regression | whether follow-up review independently falsifies completion claims and distinguishes repair-induced defects from adjacent omissions |
 | `review-adjudication` | peer-review / review-adjudication | review-adjudication | whether real defects remain actionable while duplicates, overreach, false positives, and environment-only gaps are separated by evidence |
@@ -46,6 +48,21 @@ Reviewer suites run read-only against `eval/fixtures/*`. Coder suites run
 with `sandbox_mode: workspace-write` in a disposable copy under `eval/.work/`
 (recreated by prepare on every run) and are scored by Node assertion scripts
 in `eval/asserts/` that inspect the files the agent actually wrote.
+
+The `issue-plan-samples` and `plan-report-source-authority` suites are the
+exceptions to the reviewer fixture rule: `eval/scripts/prepare.mjs` uses
+`fixture: '.'` and their promptfoo configurations use `working_dir: ..`
+(resolved from `eval/`), so their repository context and provider working
+directory both point at the checked-out repository root. The former reads it in
+read-only mode; the latter renders the report-phase prompt. Reproduce either
+suite from the repository root after preparing it.
+
+`plan-report-source-authority` measures the rendered Phase 2 instruction and
+report content, not TAKT's runtime tool suppression. The promptfoo Codex SDK
+provider does not expose TAKT's `permissionMode` or `allowedTools` options; its
+strict config schema rejects those fields. Runtime tests for `OptionsBuilder`
+and the report phase separately verify `permissionMode: readonly`, an empty
+tool allowance, and rejection of emitted tool events.
 
 ## Improvement workflow (red -> green)
 
@@ -114,6 +131,8 @@ npm run eval:prompts:review-family-closure
 npm run eval:prompts:initial-review-contract-discovery
 npm run eval:prompts:initial-plan-contract-closure
 npm run eval:prompts:replan-contract-closure
+npm run eval:prompts:issue-plan-samples
+npm run eval:prompts:plan-report-source-authority
 npm run eval:prompts:write-tests-contract-traceability
 npm run eval:prompts:review-adjudication
 npm run eval:prompts:fix-plan-fresh-findings
