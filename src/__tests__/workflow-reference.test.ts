@@ -12,9 +12,11 @@ import {
 } from '../infra/config/loaders/workflowSourceMetadata.js';
 import {
   buildWorkflowResumePointEntry,
+  buildWorkflowRestartPointEntry,
   getWorkflowReference,
   workflowEntriesMatch,
   workflowEntryMatchesWorkflow,
+  workflowRestartEntryMatchesWorkflow,
 } from '../core/workflow/workflow-reference.js';
 import { trimResumePointStackForWorkflow } from '../core/workflow/run/resume-point.js';
 import { invalidateAllResolvedConfigCache, invalidateGlobalConfigCache } from '../infra/config/index.js';
@@ -36,6 +38,56 @@ afterEach(() => {
 });
 
 describe('workflow-reference', () => {
+  it('should store the canonical ref when a restart entry uses the workflow name', () => {
+    const workflow = normalizeWorkflowConfig({
+      name: 'default',
+      initial_step: 'review',
+      steps: [{ name: 'review', persona: 'reviewer', instruction: 'Review' }],
+    }, '/tmp/project');
+
+    expect(buildWorkflowRestartPointEntry(workflow, 'review', 'agent')).toEqual({
+      workflow: 'default',
+      workflow_ref: 'default',
+      step: 'review',
+      kind: 'agent',
+    });
+  });
+
+  it('should distinguish restart identity when opaque refs differ for the same workflow name', () => {
+    const workflow = attachWorkflowOpaqueRef(normalizeWorkflowConfig({
+      name: 'shared',
+      initial_step: 'review',
+      steps: [{ name: 'review', persona: 'reviewer', instruction: 'Review' }],
+    }, '/tmp/project'), 'project:shared-a');
+
+    expect(workflowRestartEntryMatchesWorkflow({
+      workflow: 'shared',
+      workflow_ref: 'project:shared-a',
+      step: 'review',
+      kind: 'agent',
+    }, workflow)).toBe(true);
+    expect(workflowRestartEntryMatchesWorkflow({
+      workflow: 'shared',
+      workflow_ref: 'project:shared-b',
+      step: 'review',
+      kind: 'agent',
+    }, workflow)).toBe(false);
+  });
+
+  it('should match by workflow name when a legacy resume entry lacks workflow_ref', () => {
+    const workflow = attachWorkflowOpaqueRef(normalizeWorkflowConfig({
+      name: 'shared',
+      initial_step: 'review',
+      steps: [{ name: 'review', persona: 'reviewer', instruction: 'Review' }],
+    }, '/tmp/project'), 'project:shared-a');
+
+    expect(workflowEntryMatchesWorkflow({
+      workflow: 'shared',
+      step: 'review',
+      kind: 'agent',
+    }, workflow)).toBe(true);
+  });
+
   it('agent entry の step iteration 差分を workflow_call instance として比較しない', () => {
     expect(workflowEntriesMatch(
       {
