@@ -6,6 +6,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.55.1] - 2026-08-04
+
+### Changed
+
+- The long-standing ban on unsolicited backward compatibility was made precise and contract-enforced (#1172). An explicit compatibility requirement now authorizes only its stated target and scope — with period and end condition when time-bounded — and each target (schema migration, data backfill, event upcasting, read-model rebuild, API compatibility) needs its own authority. Migrating current consumers to a new contract is classified as normal replacement work rather than legacy support, and current code, existing tests, stored data, or released status count as impact-analysis evidence, not authority to keep a superseded path. Plans record the supported target and its removal contract in the plan output contract, so reviewers verify compatibility as a contract instead of a prose guideline.
+
+### Fixed
+
+- Fresh installs no longer break the ACP integration (#1171). `@agentclientprotocol/sdk` is bumped to `^1.3.0` and the ACP entrypoint follows its renamed MCP server id field and extended elicitation response contract; a lockfile-less install had resolved 1.3.0 against code written for 1.0.x.
+
 ## [0.55.0] - 2026-08-03
 
 ### Added
