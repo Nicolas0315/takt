@@ -3797,7 +3797,7 @@ describe('WorkflowEngine structured caller defaults', () => {
     expect(artifactRawFindingIds).toEqual([
       `test-report-dir:${callNamespaces['child-a']}:review:1:review:raw-1`,
       `test-report-dir:${callNamespaces['child-b']}:review:1:review:raw-1`,
-    ]);
+    ].sort());
   });
 
   it('同じ workflow_call ステップがループで再実行されても、別イテレーションの raw finding id は衝突せず、台帳に別々の raw finding として残る', async () => {
