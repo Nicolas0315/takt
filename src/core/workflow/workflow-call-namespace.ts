@@ -1,65 +1,93 @@
-import { createHash } from 'node:crypto';
 import {
   parseWorkflowExecutionOwnerIdentity,
   type WorkflowExecutionOwnerIdentity,
 } from '../models/workflow-resume-contract.js';
 
-interface WorkflowCallStorageKey {
-  readonly scopeDigest: string;
+// stepPath and childWorkflow keep their canonical encoded form: parsing
+// validates canonicality, so raw equality equals decoded equality.
+interface WorkflowCallNamespaceKey {
   readonly callInstance: number | '*';
+  readonly stepPath: string;
+  readonly childWorkflow: string;
 }
 
-const WORKFLOW_CALL_STORAGE_KEY_PATTERN = /^call-([0-9a-f]{64})-([1-9]\d*|\*)$/;
-const STORAGE_SCOPE_DOMAIN = 'takt.workflow-call.storage-scope';
-export const MAX_WORKFLOW_CALL_STORAGE_KEY_BYTES = 86;
+const WORKFLOW_CALL_NAMESPACE_PATTERN = /^call-([1-9]\d*|\*)--step-([^/]+)--workflow-([^/]+)$/;
+
+// Uppercase letters are folded to '~' + lowercase so distinct names cannot
+// collide as directory names on case-insensitive filesystems (macOS, Windows).
+// Escaping every '-' that starts the value or precedes another '-' keeps '--'
+// out of encoded values and away from the structural marker boundaries, so the
+// '--step-' / '--workflow-' delimiters always split a segment unambiguously.
+function encodeSegmentValue(value: string): string {
+  const caseFolded = value.replace(/~/g, '~~').replace(/[A-Z]/g, (char) => `~${char.toLowerCase()}`);
+  return encodeURIComponent(caseFolded)
+    .replace(/[!'()*]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`)
+    .replace(/-(?=-)/g, '%2D')
+    .replace(/^-/, '%2D');
+}
+
+function restoreCaseFolded(value: string): string | undefined {
+  let result = '';
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index]!;
+    if (char !== '~') {
+      result += char;
+      continue;
+    }
+    const next = value[index + 1];
+    if (next === '~') {
+      result += '~';
+      index += 1;
+      continue;
+    }
+    if (next !== undefined && next >= 'a' && next <= 'z') {
+      result += next.toUpperCase();
+      index += 1;
+      continue;
+    }
+    return undefined;
+  }
+  return result;
+}
+
+function decodeCanonicalSegmentValue(value: string): string | undefined {
+  try {
+    const restored = restoreCaseFolded(decodeURIComponent(value));
+    return restored !== undefined && restored.length > 0 && encodeSegmentValue(restored) === value
+      ? restored
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+// The segment names the call relative to its enclosing workflow_call scope; the
+// segments above it in the namespace path carry the rest of the call stack.
+function localStepPathComponents(identity: WorkflowExecutionOwnerIdentity): string[] {
+  let lastCallIndex = -1;
+  identity.owners.forEach((owner, index) => {
+    if (owner.kind === 'workflow_call') {
+      lastCallIndex = index;
+    }
+  });
+  return [
+    ...identity.owners.slice(lastCallIndex + 1).map((owner) => owner.step),
+    identity.step,
+  ];
+}
+
+// encodeSegmentValue escapes '!', so a literal '!' can only be a component
+// delimiter — step names containing '/' or '!' stay unambiguous.
+function encodeStepPath(components: readonly string[]): string {
+  return components.map(encodeSegmentValue).join('!');
+}
+
+function isCanonicalStepPath(encoded: string): boolean {
+  return encoded.split('!').every((component) => decodeCanonicalSegmentValue(component) !== undefined);
+}
 
 export function isWorkflowCallNamespaceSegment(segment: string): boolean {
   return parseWorkflowCallNamespaceSegment(segment) !== undefined;
-}
-
-function canonicalOwnerIdentity(identity: WorkflowExecutionOwnerIdentity): object {
-  return {
-    workflow: identity.workflow,
-    step: identity.step,
-    owners: identity.owners.map((owner) => owner.kind === 'workflow_call'
-      ? {
-          workflow: owner.workflow,
-          step: owner.step,
-          kind: owner.kind,
-          instance: owner.instance,
-        }
-      : {
-          workflow: owner.workflow,
-          step: owner.step,
-          kind: owner.kind,
-        }),
-  };
-}
-
-function digestCanonicalJson(domain: string, payload: object): string {
-  return createHash('sha256').update(JSON.stringify({ domain, payload })).digest('hex');
-}
-
-function buildStorageKey(
-  invocation: WorkflowExecutionOwnerIdentity,
-  childWorkflow: string,
-  callInstance: number | '*',
-): WorkflowCallStorageKey {
-  return {
-    scopeDigest: digestCanonicalJson(STORAGE_SCOPE_DOMAIN, {
-      invocation: canonicalOwnerIdentity(invocation),
-      child_workflow_ref: childWorkflow,
-    }),
-    callInstance,
-  };
-}
-
-function serializeStorageKey(key: WorkflowCallStorageKey): string {
-  const segment = `call-${key.scopeDigest}-${key.callInstance}`;
-  if (Buffer.byteLength(segment) > MAX_WORKFLOW_CALL_STORAGE_KEY_BYTES) {
-    throw new Error('Workflow-call storage key exceeds its fixed byte limit');
-  }
-  return segment;
 }
 
 export function buildWorkflowCallNamespaceSegment(
@@ -69,32 +97,39 @@ export function buildWorkflowCallNamespaceSegment(
 ): string {
   const invocation = parseWorkflowExecutionOwnerIdentity(invocationIdentity);
   if (invocation === undefined) {
-    throw new Error('Workflow-call storage key requires a canonical invocation identity');
+    throw new Error('Workflow-call namespace segment requires a canonical invocation identity');
   }
   if (childWorkflow.length === 0) {
-    throw new Error('Workflow-call storage key requires a child workflow reference');
+    throw new Error('Workflow-call namespace segment requires a child workflow reference');
   }
   if (callInstance !== '*' && (!Number.isSafeInteger(callInstance) || callInstance < 1)) {
-    throw new Error('Workflow-call storage key requires a positive call instance');
+    throw new Error('Workflow-call namespace segment requires a positive call instance');
   }
-  return serializeStorageKey(buildStorageKey(invocation, childWorkflow, callInstance));
+  return `call-${callInstance}--step-${encodeStepPath(localStepPathComponents(invocation))}`
+    + `--workflow-${encodeSegmentValue(childWorkflow)}`;
 }
 
 export function parseWorkflowCallNamespaceSegment(
   segment: string,
-): WorkflowCallStorageKey | undefined {
-  const match = WORKFLOW_CALL_STORAGE_KEY_PATTERN.exec(segment);
+): WorkflowCallNamespaceKey | undefined {
+  const match = WORKFLOW_CALL_NAMESPACE_PATTERN.exec(segment);
   if (match === null) {
     return undefined;
   }
-  const callInstance = match[2] === '*' ? '*' : Number(match[2]);
+  const callInstance = match[1] === '*' ? '*' : Number(match[1]);
   if (callInstance !== '*' && !Number.isSafeInteger(callInstance)) {
     return undefined;
   }
-  return {
-    scopeDigest: match[1]!,
-    callInstance,
-  };
+  const stepPath = match[2]!;
+  const childWorkflow = match[3]!;
+  if (!isCanonicalStepPath(stepPath) || decodeCanonicalSegmentValue(childWorkflow) === undefined) {
+    return undefined;
+  }
+  return { callInstance, stepPath, childWorkflow };
+}
+
+function namespaceScopesMatch(a: WorkflowCallNamespaceKey, b: WorkflowCallNamespaceKey): boolean {
+  return a.stepPath === b.stepPath && a.childWorkflow === b.childWorkflow;
 }
 
 export function workflowCallReportRequestSegmentsMatch(
@@ -104,13 +139,12 @@ export function workflowCallReportRequestSegmentsMatch(
   if (actual === requested) {
     return true;
   }
-  const requestedStorageKey = parseWorkflowCallNamespaceSegment(requested);
-  const actualStorageKey = parseWorkflowCallNamespaceSegment(actual);
-  if (requestedStorageKey !== undefined && actualStorageKey !== undefined) {
-    return requestedStorageKey.callInstance === '*'
-      && requestedStorageKey.scopeDigest === actualStorageKey.scopeDigest;
+  const requestedKey = parseWorkflowCallNamespaceSegment(requested);
+  const actualKey = parseWorkflowCallNamespaceSegment(actual);
+  if (requestedKey === undefined || actualKey === undefined) {
+    return false;
   }
-  return false;
+  return requestedKey.callInstance === '*' && namespaceScopesMatch(requestedKey, actualKey);
 }
 
 export function workflowCallReportRequestPathsMatch(
@@ -132,10 +166,10 @@ function proveWorkflowCallRunNamespaceSegmentsCorrespond(
   if (source === target) {
     return { matches: true };
   }
-  const sourceStorageKey = parseWorkflowCallNamespaceSegment(source);
-  const targetStorageKey = parseWorkflowCallNamespaceSegment(target);
-  if (sourceStorageKey !== undefined && targetStorageKey !== undefined) {
-    return sourceStorageKey.scopeDigest === targetStorageKey.scopeDigest
+  const sourceKey = parseWorkflowCallNamespaceSegment(source);
+  const targetKey = parseWorkflowCallNamespaceSegment(target);
+  if (sourceKey !== undefined && targetKey !== undefined) {
+    return namespaceScopesMatch(sourceKey, targetKey)
       ? { matches: true }
       : { matches: false, reason: 'scope_mismatch' };
   }

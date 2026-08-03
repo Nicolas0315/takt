@@ -11,7 +11,6 @@ import {
   validateWorkflowCallInvocationRecord,
   validateWorkflowResumePointInvocationSemantics,
 } from '../models/workflow-resume-contract.js';
-import { buildWorkflowCallNamespaceSegment } from './workflow-call-namespace.js';
 
 export function buildWorkflowCallInvocationIdentity(
   workflowReference: string,
@@ -28,7 +27,6 @@ export function buildWorkflowCallInvocationIdentity(
 
 export class WorkflowCallInvocationIndex {
   private readonly records: Map<string, WorkflowCallInvocationRecord>;
-  private readonly storageKeyOwners = new Map<string, string>();
 
   constructor(initial: ReadonlyMap<string, WorkflowCallInvocationRecord>) {
     this.records = new Map();
@@ -37,30 +35,8 @@ export class WorkflowCallInvocationIndex {
         throw new Error(`Workflow-call invocation "${identity}" requires a positive instance`);
       }
       validateWorkflowCallInvocationRecord(identity, record);
-      this.assign(identity, record);
+      this.records.set(identity, { ...record });
     }
-  }
-
-  private storageKey(identity: string, record: WorkflowCallInvocationRecord): string {
-    return buildWorkflowCallNamespaceSegment(
-      identity,
-      record.child_workflow_ref,
-      record.call_instance,
-    );
-  }
-
-  private assign(identity: string, record: WorkflowCallInvocationRecord): void {
-    const storageKey = this.storageKey(identity, record);
-    const existingOwner = this.storageKeyOwners.get(storageKey);
-    if (existingOwner !== undefined && existingOwner !== identity) {
-      throw new Error(`Workflow-call storage key is already assigned to invocation "${existingOwner}"`);
-    }
-    const previous = this.records.get(identity);
-    if (previous !== undefined) {
-      this.storageKeyOwners.delete(this.storageKey(identity, previous));
-    }
-    this.records.set(identity, { ...record });
-    this.storageKeyOwners.set(storageKey, identity);
   }
 
   record(
@@ -78,7 +54,7 @@ export class WorkflowCallInvocationIndex {
       ownerPath,
     );
     validateWorkflowCallInvocationRecord(identity, record);
-    this.assign(identity, record);
+    this.records.set(identity, { ...record });
   }
 
   get(

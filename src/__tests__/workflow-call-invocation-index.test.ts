@@ -11,7 +11,6 @@ import {
   serializeWorkflowCallInvocationEvidence,
 } from '../core/workflow/workflow-call-invocation-index.js';
 import {
-  MAX_WORKFLOW_CALL_STORAGE_KEY_BYTES,
   buildWorkflowCallNamespaceSegment,
   parseWorkflowCallNamespaceSegment,
   workflowCallReportRequestSegmentsMatch,
@@ -68,8 +67,12 @@ describe('WorkflowCallInvocationIndex', () => {
       call_instance: 7,
       child_workflow_ref: 'grandchild',
     });
+    // Ancestor context is carried by the parent namespace directory, so the
+    // local segment only names the call step, child workflow, and instance.
     expect(storageKey('child', 'nested', [firstParentCall], 'grandchild', 4))
-      .not.toBe(storageKey('child', 'nested', [secondParentCall], 'grandchild', 7));
+      .toBe('call-4--step-nested--workflow-grandchild');
+    expect(storageKey('child', 'nested', [secondParentCall], 'grandchild', 4))
+      .toBe('call-4--step-nested--workflow-grandchild');
   });
 
   it('should distinguish the same call step owned by different parallel parents', () => {
@@ -90,7 +93,9 @@ describe('WorkflowCallInvocationIndex', () => {
     expect(index.get(parent, 'delegate', [firstOwner])?.child_workflow_ref).toBe('child');
     expect(index.get(parent, 'delegate', [secondOwner])?.child_workflow_ref).toBe('child');
     expect(storageKey('parent', 'delegate', [firstOwner], 'child', 1))
-      .not.toBe(storageKey('parent', 'delegate', [secondOwner], 'child', 1));
+      .toBe('call-1--step-fanout_a!delegate--workflow-child');
+    expect(storageKey('parent', 'delegate', [secondOwner], 'child', 1))
+      .toBe('call-1--step-fanout_b!delegate--workflow-child');
   });
 
   it('should reject a persisted invocation that disagrees with the resume stack', () => {
@@ -222,34 +227,52 @@ describe('WorkflowCallInvocationIndex', () => {
     }]]))).toThrow('Invalid workflow-call invocation identity');
   });
 
-  it('should project opaque and long identity values to a bounded lowercase ASCII key', () => {
-    const longValue = 'A/%#'.repeat(100);
-    const ownerPath = [{ workflow: longValue, step: `${longValue}owner`, kind: 'agent' as const }];
-    const segment = storageKey(longValue, `${longValue}step`, ownerPath, `${longValue}child`, 7);
+  it.each([
+    ['review', 'peer-review', 2, 'call-2--step-review--workflow-peer-review'],
+    ['Review', 'child', 1, 'call-1--step-~review--workflow-child'],
+    ['a~b', 'child', 1, 'call-1--step-a~~b--workflow-child'],
+    ['a!b', 'child', 1, 'call-1--step-a%21b--workflow-child'],
+    ['a/b', 'child', 1, 'call-1--step-a%2Fb--workflow-child'],
+    ['a--b', 'child', 1, 'call-1--step-a%2D-b--workflow-child'],
+    ['-a', 'child', 1, 'call-1--step-%2Da--workflow-child'],
+  ] as const)('should encode step %s calling %s canonically', (step, child, instance, expected) => {
+    const segment = storageKey('parent', step, [], child, instance);
 
-    expect(segment).toMatch(/^call-[0-9a-f]{64}-7$/);
-    expect(Buffer.byteLength(segment)).toBeLessThanOrEqual(MAX_WORKFLOW_CALL_STORAGE_KEY_BYTES);
-    expect(Buffer.byteLength(storageKey(longValue, `${longValue}step`, ownerPath, `${longValue}child`, Number.MAX_SAFE_INTEGER)))
-      .toBe(MAX_WORKFLOW_CALL_STORAGE_KEY_BYTES);
-    expect(MAX_WORKFLOW_CALL_STORAGE_KEY_BYTES).toBe(86);
-    expect(parseWorkflowCallNamespaceSegment(segment)?.callInstance).toBe(7);
-    expect(segment).toBe(segment.toLowerCase());
+    expect(segment).toBe(expected);
+    expect(parseWorkflowCallNamespaceSegment(segment)?.callInstance).toBe(instance);
   });
 
-  it('should distinguish every logical scope boundary and case-only differences', () => {
+  it('should keep structural delimiters out of encoded values', () => {
+    const embeddedInChild = storageKey('parent', 'review', [], 'child--workflow-v2', 1);
+    const embeddedInStep = storageKey('parent', 'review--workflow-child', [], 'v2', 1);
+
+    expect(embeddedInChild).toBe('call-1--step-review--workflow-child%2D-workflow-v2');
+    expect(embeddedInStep).toBe('call-1--step-review%2D-workflow-child--workflow-v2');
+    expect(workflowCallReportRequestSegmentsMatch(
+      embeddedInChild,
+      storageKey('parent', 'review--workflow-child', [], 'v2', '*'),
+    )).toBe(false);
+    const leadingDashChild = storageKey('parent', 'a', [], '-workflow-z', 1);
+    expect(leadingDashChild).toBe('call-1--step-a--workflow-%2Dworkflow-z');
+    expect(parseWorkflowCallNamespaceSegment(leadingDashChild)?.childWorkflow).toBe('%2Dworkflow-z');
+  });
+
+  it('should distinguish local step, child, and case differences within one scope', () => {
     const agentOwner = [{ workflow: 'parent', step: 'owner', kind: 'agent' as const }];
-    const systemOwner = [{ workflow: 'parent', step: 'owner', kind: 'system' as const }];
     const baseline = storageKey('parent', 'delegate', agentOwner, 'child', 1);
     const variants = [
-      storageKey('Parent', 'delegate', agentOwner, 'child', 1),
       storageKey('parent', 'Delegate', agentOwner, 'child', 1),
-      storageKey('parent', 'delegate', [{ ...agentOwner[0]!, workflow: 'Parent' }], 'child', 1),
       storageKey('parent', 'delegate', [{ ...agentOwner[0]!, step: 'Owner' }], 'child', 1),
-      storageKey('parent', 'delegate', systemOwner, 'child', 1),
       storageKey('parent', 'delegate', agentOwner, 'Child', 1),
+      storageKey('parent', 'delegate', agentOwner, 'child', 2),
     ];
 
     expect(new Set([baseline, ...variants]).size).toBe(variants.length + 1);
+    // Ancestor-only differences (containing workflow, owner kind) do not change
+    // the local segment: they live in the parent namespace directory.
+    expect(storageKey('Parent', 'delegate', agentOwner, 'child', 1)).toBe(baseline);
+    expect(storageKey('parent', 'delegate', [{ workflow: 'parent', step: 'owner', kind: 'system' as const }], 'child', 1))
+      .toBe(baseline);
   });
 
   it('should create separate real run directories for long case-only identities', () => {
@@ -277,10 +300,10 @@ describe('WorkflowCallInvocationIndex', () => {
     const namespace = Array.from({ length: MAX_WORKFLOW_CALL_DEPTH }, (_, index) => [
       'subworkflows',
       storageKey(
-        `workflow-${index}-${'w'.repeat(200)}`,
-        `delegate-${index}-${'s'.repeat(200)}`,
+        `workflow-${index}-${'w'.repeat(60)}`,
+        `delegate-${index}-${'s'.repeat(60)}`,
         [],
-        `child-${index}-${'c'.repeat(200)}`,
+        `child-${index}-${'c'.repeat(60)}`,
         1,
       ),
     ]).flat();
@@ -319,22 +342,23 @@ describe('WorkflowCallInvocationIndex', () => {
     )).toBe(false);
   });
 
-  it('should reject uppercase or malformed storage digests', () => {
+  it('should reject malformed or non-canonical namespace segments', () => {
     const canonical = storageKey('parent', 'delegate', [], 'child', 1);
 
     expect(parseWorkflowCallNamespaceSegment(canonical.toUpperCase())).toBeUndefined();
-    expect(parseWorkflowCallNamespaceSegment('call-deadbeef-deadbeef-1')).toBeUndefined();
-    expect(parseWorkflowCallNamespaceSegment(canonical.replace(/-1$/, '-0'))).toBeUndefined();
+    expect(parseWorkflowCallNamespaceSegment('call-1--step-Delegate--workflow-child')).toBeUndefined();
+    expect(parseWorkflowCallNamespaceSegment('call-0--step-delegate--workflow-child')).toBeUndefined();
+    expect(parseWorkflowCallNamespaceSegment('call-1--step-%2f--workflow-child')).toBeUndefined();
+    expect(parseWorkflowCallNamespaceSegment('call-1--step-a!!b--workflow-child')).toBeUndefined();
+    expect(parseWorkflowCallNamespaceSegment('call-1--step-~--workflow-child')).toBeUndefined();
+    expect(parseWorkflowCallNamespaceSegment('call-1--step-a--b--workflow-child')).toBeUndefined();
+    expect(parseWorkflowCallNamespaceSegment('call-1--step-delegate--workflow-')).toBeUndefined();
   });
 
-  it('should not match a request whose storage scope digest was modified', () => {
+  it('should not match a wildcard request whose step scope was modified', () => {
     const exact = storageKey('parent', 'delegate', [], 'child', 1);
     const wildcard = storageKey('parent', 'delegate', [], 'child', '*');
-    const digestOffset = 'call-'.length;
-    const replacement = wildcard[digestOffset] === '0' ? '1' : '0';
-    const modifiedWildcard = wildcard.slice(0, digestOffset)
-      + replacement
-      + wildcard.slice(digestOffset + 1);
+    const modifiedWildcard = wildcard.replace('--step-delegate--', '--step-delegatx--');
 
     expect(parseWorkflowCallNamespaceSegment(modifiedWildcard)).toBeDefined();
     expect(workflowCallReportRequestSegmentsMatch(exact, modifiedWildcard)).toBe(false);

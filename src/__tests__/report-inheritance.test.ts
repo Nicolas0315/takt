@@ -102,6 +102,8 @@ describe('inheritReviewReports', () => {
       'reviewers',
       1,
     );
+    // A step has exactly one kind within a workflow, so the local segment names
+    // the owner path by step names alone and the wildcard matches across kinds.
     const systemOwnerWildcard = buildWorkflowCallNamespaceSegment(
       buildWorkflowCallInvocationIdentity('parent', 'peer-review', [{
         workflow: 'parent',
@@ -111,7 +113,17 @@ describe('inheritReviewReports', () => {
       'reviewers',
       '*',
     );
-    expect(workflowCallReportRequestSegmentsMatch(agentOwnerNamespace, systemOwnerWildcard)).toBe(false);
+    expect(workflowCallReportRequestSegmentsMatch(agentOwnerNamespace, systemOwnerWildcard)).toBe(true);
+    const otherOwnerWildcard = buildWorkflowCallNamespaceSegment(
+      buildWorkflowCallInvocationIdentity('parent', 'peer-review', [{
+        workflow: 'parent',
+        step: 'other-fanout',
+        kind: 'agent',
+      }]),
+      'reviewers',
+      '*',
+    );
+    expect(workflowCallReportRequestSegmentsMatch(agentOwnerNamespace, otherOwnerWildcard)).toBe(false);
     expect(proveWorkflowCallRunNamespacePathsCorrespond(
       [callNamespace('peer-review', 'reviewers', 1)],
       [callNamespace('peer-review', 'reviewers', 2)],
