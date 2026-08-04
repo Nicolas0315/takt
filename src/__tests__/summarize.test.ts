@@ -57,6 +57,7 @@ beforeEach(() => {
   mockResolveNonWorkflowProviderModel.mockReturnValue({
     provider: 'claude',
     model: undefined,
+    runtimeManaged: false,
   });
   mockResolveNonWorkflowProviderOptions.mockReturnValue({
     codex: { skills: { repo: true, user: false } },
@@ -189,6 +190,7 @@ describe('summarizeTaskName', () => {
     mockResolveNonWorkflowProviderModel.mockReturnValue({
       provider: 'codex',
       model: 'gpt-4',
+      runtimeManaged: false,
     });
     mockProviderCall.mockResolvedValue({
       persona: 'summarizer',
@@ -218,6 +220,7 @@ describe('summarizeTaskName', () => {
     mockResolveNonWorkflowProviderModel.mockReturnValue({
       provider: 'mock',
       model: 'default-summary-model',
+      runtimeManaged: false,
     });
     mockProviderCall.mockResolvedValue({
       persona: 'summarizer',
@@ -237,10 +240,41 @@ describe('summarizeTaskName', () => {
     );
   });
 
+  it('should propagate a runtime-v1 managed provider/model/options to the provider call', async () => {
+    // Given: an active runtime.yaml defaults profile owns provider/model/options.
+    mockResolveNonWorkflowProviderModel.mockReturnValue({
+      provider: 'codex',
+      model: 'gpt-runtime',
+      providerOptions: { codex: { reasoningEffort: 'high' } },
+      runtimeManaged: true,
+    });
+    mockProviderCall.mockResolvedValue({
+      persona: 'summarizer',
+      status: 'done',
+      content: 'runtime-managed-slug',
+      timestamp: new Date(),
+    });
+
+    const result = await summarizeTaskName('test runtime profile', { cwd: '/project' });
+
+    expect(result).toBe('runtime-managed-slug');
+    expect(mockGetProvider).toHaveBeenCalledWith('codex');
+    expect(mockProviderCall).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        model: 'gpt-runtime',
+        providerOptions: { codex: { reasoningEffort: 'high' } },
+      }),
+    );
+    // The runtime profile owns its options; the legacy provider_options path must not run.
+    expect(mockResolveNonWorkflowProviderOptions).not.toHaveBeenCalled();
+  });
+
   it('should leave model undefined when the selected default provider omits it', async () => {
     mockResolveNonWorkflowProviderModel.mockReturnValue({
       provider: 'mock',
       model: undefined,
+      runtimeManaged: false,
     });
     mockProviderCall.mockResolvedValue({
       persona: 'summarizer',

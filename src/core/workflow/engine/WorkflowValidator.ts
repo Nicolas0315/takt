@@ -280,6 +280,7 @@ export function validateFindingContractManagerProviderModel(config: WorkflowConf
       modelSource: options.modelSource,
       autoRouting: options.autoRouting,
       providerRouting: options.providerRouting,
+      tagConflictPolicy: options.providerRoutingTagConflictPolicy,
       personaProviders: options.personaProviders,
     });
     const deterministicInfo = options.autoRouting !== undefined
@@ -503,6 +504,7 @@ function validateAgentStepProviderModel(
     modelSource: options.modelSource,
     autoRouting: options.autoRouting,
     providerRouting: options.providerRouting,
+    tagConflictPolicy: options.providerRoutingTagConflictPolicy,
     personaProviders: options.personaProviders,
   });
   let validationInfos: ValidationProviderInfo[];
@@ -825,6 +827,7 @@ export function validateWorkflowConfig(config: WorkflowConfig, options: Workflow
       modelSource: options.modelSource,
       autoRouting: options.autoRouting,
       providerRouting: options.providerRouting,
+      tagConflictPolicy: options.providerRoutingTagConflictPolicy,
       personaProviders: options.personaProviders,
     });
     // 実行時（LoopMonitorJudgeRunner）と同じ優先順位で検証するため、judge ステップ自身の
@@ -845,6 +848,7 @@ export function validateWorkflowConfig(config: WorkflowConfig, options: Workflow
       model: options.model,
       modelSource: options.modelSource,
       providerRouting: options.providerRouting,
+      tagConflictPolicy: options.providerRoutingTagConflictPolicy,
       personaProviders: options.personaProviders,
     });
     for (const validationInfo of expandAutoRoutingProviderInfos(
