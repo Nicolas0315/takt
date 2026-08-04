@@ -244,6 +244,12 @@ TAKT は 5 種類の step をサポートしています。必要な構造に応
 - サブ step の `rules` は取りうる結果を定義し、`next` は省略可能（親がルーティングを担当）
 - 並列サブ step は `promotion` をサポートしません
 
+### Finding Contract reviewer 出力の normalization
+
+Finding Contract reviewer は既定でnative structured outputを使います。
+runtime configの`finding_contract.intake_normalize`により、解決済みreviewerの
+provider/model完全一致を条件として、通常Markdownと隔離extractorを選択できます。
+
 ### Dynamic Parallel Step
 
 `parallel` には、常時実行する `fixed` と selector が選ぶ `pool` を指定するオブジェクト形式も使えます。TAKT は step へ進入した時点で read-only の内部 selector を実行します。selector は workflow step ではなく、agent や workflow 定義を生成・変更できません。selector は read-only 権限、permission bypass 無効、MCP server 非継承、TAKT が所有する structured output contract で実行されます。
@@ -293,8 +299,6 @@ TAKT は 5 種類の step をサポートしています。必要な構造に応
 
 ```yaml
 finding_contract:
-  ledger_path: .takt/findings/review.json
-  raw_findings_path: .takt/findings/review/raw
   manager:
     persona: findings-manager
     instruction: findings-manager
@@ -302,6 +306,9 @@ finding_contract:
     provider: codex
     model: gpt-5.5
 ```
+
+レポートはnormalizationより先に保存され、normalizerにはその1件のレポートだけが
+toolなしの新規sessionで渡されます。
 
 指定した値は Finding Manager の step レベル `provider` / `model` として扱われます。CLI と環境変数の明示 override は、これらより高い優先順位を維持します。manager の値は `provider_routing`、deprecated の `persona_providers.findings-manager`、effective auto routing、workflow/project/global fallback より優先されます。両方とも未指定の場合、manager は通常の workflow step provider/model 解決を維持します。`provider` だけを指定すると、下位優先度の model fallback は停止し、選択した provider 自身のデフォルトを使います。明示 model が必須の provider では検証エラーになります。
 

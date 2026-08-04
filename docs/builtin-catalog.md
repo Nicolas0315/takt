@@ -78,13 +78,14 @@ Organized by category.
 | | `e2e-test` | E2E test focused workflow: E2E analysis -> E2E implementation -> review -> fix (Vitest-based E2E flow). |
 | 🎵 TAKT Development | `takt-default` | TAKT-focused workflow using the shared development core with TAKT knowledge injected into planning, testing, implementation, review, and remediation. |
 | | `takt-default-team-high` | Team Leader variant of takt-default-high. The leader decomposes implementation and fixes for members, followed by the same six compact specialist reviews, Finding Contract, and final gate. Provider and model remain configurable. |
+| | `takt-default-localllm` | Composes the shared development core with Finding Contract stages that route regular reviews to local LLMs and recheck integrity, wiring, resource ownership, failure boundaries, and final readiness with a high-assurance model. Route `review`, `boundary-review`, and `final-gate` independently; providers and models are not hardcoded. |
 | | `takt-default-high` | Enhanced high-cost variant of takt-default: direct implementation and fixes, six compact specialist reviews, Finding Contract, and a merge-readiness/supervisor final gate. |
 | | `review-fix-takt-default` | Gathers the review target, then runs the TAKT-focused shared development core through implementation, review, remediation, and final gates. |
 | Others | `research` | Research workflow: planner -> digger -> supervisor. Autonomously executes research without asking questions. |
 | | `deep-research` | Deep research workflow: plan -> dig -> analyze -> supervise. Discovery-driven investigation that follows emerging questions with multi-perspective analysis. |
 | | `magi` | Deliberation system inspired by Evangelion. Three AI personas (MELCHIOR, BALTHASAR, CASPER) analyze and vote. |
 
-For local models, configure the provider and model on `takt-default-high` or `takt-default-team-high`; TAKT does not maintain a separate model-specific workflow family.
+To run an existing workflow entirely with local models, configure its provider and model normally. For a hybrid setup, route `review` to the local provider and route both `boundary-review` and `final-gate` to the commercial provider. Tags are applied in step order, so `final-gate` overrides the earlier `review` route on both `merge-readiness-review` and `supervise`. The integrity gate in `finding-contract-local-review` and the final gate in `finding-contract-boundary-review` use the same `merge-readiness-finding-contract-final-gate` subworkflow, so this one route covers both stages without hardcoding a provider or model in the workflow.
 
 Run `takt` to choose a workflow interactively.
 
