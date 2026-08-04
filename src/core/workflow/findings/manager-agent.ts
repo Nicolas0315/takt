@@ -36,6 +36,9 @@ import {
 } from '../../../shared/utils/canonical-json.js';
 import { computeFindingLifecycleProjectionDigest } from '../../models/finding-lifecycle-identity.js';
 import { selectActionableFindingEntries } from './context.js';
+import { composeFindingManagerInstruction } from './manager-instruction-composer.js';
+
+type ManagerOptionsBuilder = Pick<OptionsBuilder, 'buildAgentOptions'>;
 
 export { RAW_FINDINGS_SCHEMA_REF };
 export { FINDING_MANAGER_SCHEMA_REF } from './manager-step.js';
@@ -438,7 +441,7 @@ export function buildManagerInstruction(input: {
       ...findings.map((finding) => `  - ${finding.id} [${finding.severity}] ${finding.title}`),
     ].join('\n'))
     .join('\n');
-  return loadTemplate('finding_manager_instruction', 'en', {
+  const baseInstruction = loadTemplate('finding_manager_instruction', 'en', {
     managerInstruction,
     outputContract: input.contract.manager.outputContract,
     anchorRelevanceInstruction: PROVIDER_ANCHOR_RELEVANCE_INSTRUCTION,
@@ -456,6 +459,11 @@ export function buildManagerInstruction(input: {
     hasDuplicateLocusGroups: duplicateLocusGroups.size > 0,
     duplicateLocusGroupsBlock,
     coderResponse: renderFencedTextBlock(input.priorStepResponseText ?? '(no prior step response)'),
+  });
+  return composeFindingManagerInstruction({
+    baseInstruction,
+    policyContents: input.contract.manager.policyContents,
+    knowledgeContents: input.contract.manager.knowledgeContents,
   });
 }
 
@@ -482,7 +490,7 @@ export function parseManagerDecisions(
 }
 
 export function buildManagerAgentOptions(
-  optionsBuilder: OptionsBuilder,
+  optionsBuilder: ManagerOptionsBuilder,
   managerStep: AgentWorkflowStep,
 ): ReturnType<OptionsBuilder['buildAgentOptions']> {
   const options = {
@@ -502,7 +510,7 @@ export function buildManagerAgentOptions(
 export async function runManagerAttempt(input: {
   managerStep: AgentWorkflowStep;
   instruction: string;
-  optionsBuilder: OptionsBuilder;
+  optionsBuilder: ManagerOptionsBuilder;
   stepExecutor: Pick<StepExecutor, 'buildPhase1Instruction' | 'normalizeStructuredOutput' | 'recordSynthesizedAgentUsage'>;
 }): Promise<AgentResponse> {
   const phase1Instruction = input.stepExecutor.buildPhase1Instruction(input.instruction, input.managerStep);
@@ -517,7 +525,7 @@ export async function runManagerAttempt(input: {
 export async function runPreparedManagerAttempt(input: {
   managerStep: AgentWorkflowStep;
   phase1Instruction: string;
-  optionsBuilder: OptionsBuilder;
+  optionsBuilder: ManagerOptionsBuilder;
   stepExecutor: Pick<StepExecutor, 'normalizeStructuredOutput' | 'recordSynthesizedAgentUsage'>;
 }): Promise<AgentResponse> {
   const agentOptions = buildManagerAgentOptions(input.optionsBuilder, input.managerStep);

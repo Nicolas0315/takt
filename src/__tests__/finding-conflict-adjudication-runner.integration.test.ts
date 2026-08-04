@@ -14,6 +14,7 @@ import {
 } from '../core/workflow/findings/conflict-adjudication-model.js';
 import type { FindingContractConfig, FindingLedger } from '../core/workflow/findings/types.js';
 import type { FindingLedgerStore } from '../core/workflow/findings/store.js';
+import { crashAfterAdjudicationReservation } from './helpers/finding-adjudication-reservation.js';
 import { createTestFindingLedgerStore } from './helpers/finding-storage.js';
 import { initializeGitFixture } from './helpers/git-fixture.js';
 import { authorizeFindingLedgerFixture } from './helpers/finding-lifecycle-fixture.js';
@@ -155,7 +156,10 @@ describe('finding-conflict-adjudication runner registry contract', () => {
     rmSync(cwd, { recursive: true, force: true });
   });
 
-  function runner() {
+  function runner(
+    guidance?: string,
+    store: FindingLedgerStore = ledgerStore,
+  ) {
     const step = buildFindingConflictAdjudicationStep({
       contract: contract(cwd),
       workflowProvider: 'claude',
@@ -163,7 +167,7 @@ describe('finding-conflict-adjudication runner registry contract', () => {
     return {
       step,
       runner: createFindingConflictAdjudicationRunner({
-        ledgerStore,
+        ledgerStore: store,
         optionsBuilder: {
           buildAgentOptions: () => ({ provider: 'claude', cwd }),
           resolveStepProviderModel: () => ({ provider: 'claude', providerSource: 'workflow' }),
@@ -179,8 +183,18 @@ describe('finding-conflict-adjudication runner registry contract', () => {
         runId: 'run-1',
         refreshFindingsState: () => {},
         emitEvent: () => {},
+        guidance,
       }),
     };
+  }
+
+  function reopenStore(): FindingLedgerStore {
+    return createTestFindingLedgerStore({
+      projectCwd: cwd,
+      runId: 'run-1',
+      reportDir: join(cwd, '.takt', 'runs', 'run-1', 'reports'),
+      workflowName: 'runner-test',
+    });
   }
 
   it('records undetermined output in snapshots, episodes, attempts, and provider calls', async () => {
@@ -220,6 +234,33 @@ describe('finding-conflict-adjudication runner registry contract', () => {
     expect(ledger.findingManagerProviderCalls).toEqual([
       expect.objectContaining({ state: 'settled', purpose: 'conflict_adjudication' }),
     ]);
+  });
+
+  it('places configured guidance once before the engine-owned conflict instruction', async () => {
+    const snapshot = freshConflictAdjudicationSnapshot(
+      ledgerStore.loadLedger(),
+      'C-FA2947446963',
+    );
+    executeAgentMock.mockResolvedValue({
+      persona: 'supervisor',
+      status: 'done',
+      content: '{}',
+      structuredOutput: {
+        proposal: {
+          kind: 'undetermined',
+          subjectIds: snapshot.subjects.map(({ subjectId }) => subjectId).sort(),
+          rationale: 'No verified terminal authority is available.',
+        },
+      },
+      timestamp: new Date(),
+    });
+    const target = runner('Use only exact conflict evidence.');
+
+    await target.runner.run(target.step, state());
+
+    const prompt = executeAgentMock.mock.calls[0]?.[1];
+    expect(prompt).toContain('Use only exact conflict evidence.\n\n---\n\nAdjudicate the durable finding conflict snapshot below.');
+    expect(prompt?.match(/Use only exact conflict evidence\./g)).toHaveLength(1);
   });
 
   it('stores malformed output as a diagnostic attempt without a legacy adjudication record', async () => {
@@ -308,5 +349,133 @@ describe('finding-conflict-adjudication runner registry contract', () => {
       }),
     ]);
     expect(applied.conflicts[0]).not.toHaveProperty('adjudications');
+  });
+
+  it('resumes the same real conflict WAL reservation after reopening the store', async () => {
+    const guidance = 'Use the configured conflict policy.';
+    const crashingStore = crashAfterAdjudicationReservation({
+      store: ledgerStore,
+      purpose: 'conflict_adjudication',
+      errorMessage: 'simulated crash after conflict WAL reservation',
+    });
+    const crashingTarget = runner(guidance, crashingStore);
+    await expect(crashingTarget.runner.run(crashingTarget.step, state()))
+      .rejects.toThrow('simulated crash after conflict WAL reservation');
+    const reserved = ledgerStore.loadLedger().findingManagerProviderCalls[0]!;
+    expect(reserved.state).toBe('reserved');
+
+    ledgerStore = reopenStore();
+    const snapshot = freshConflictAdjudicationSnapshot(
+      ledgerStore.loadLedger(),
+      'C-FA2947446963',
+    );
+    executeAgentMock.mockResolvedValue({
+      persona: 'supervisor',
+      status: 'done',
+      content: '{}',
+      structuredOutput: {
+        proposal: {
+          kind: 'undetermined',
+          subjectIds: snapshot.subjects.map(({ subjectId }) => subjectId).sort(),
+          rationale: 'No authority.',
+        },
+      },
+      timestamp: new Date(OBSERVATION.timestamp),
+    });
+    const resumedTarget = runner(guidance, ledgerStore);
+    await resumedTarget.runner.run(resumedTarget.step, state());
+
+    expect(ledgerStore.loadLedger().findingManagerProviderCalls[0]).toMatchObject({
+      providerCallId: reserved.providerCallId,
+      requestDigest: reserved.requestDigest,
+      requestByteLength: reserved.requestByteLength,
+      state: 'settled',
+      resultKind: 'accepted',
+    });
+    expect(executeAgentMock).toHaveBeenCalledOnce();
+  });
+
+  it('rejects changed conflict guidance without dispatching or replacing the real reservation', async () => {
+    const crashingStore = crashAfterAdjudicationReservation({
+      store: ledgerStore,
+      purpose: 'conflict_adjudication',
+      errorMessage: 'simulated crash after conflict WAL reservation',
+    });
+    const crashingTarget = runner('Original guidance.', crashingStore);
+    await expect(crashingTarget.runner.run(crashingTarget.step, state()))
+      .rejects.toThrow('simulated crash after conflict WAL reservation');
+    const reserved = ledgerStore.loadLedger().findingManagerProviderCalls[0]!;
+    ledgerStore = reopenStore();
+    const changedTarget = runner('Changed guidance.', ledgerStore);
+
+    await expect(changedTarget.runner.run(changedTarget.step, state()))
+      .rejects.toThrow(/request changed/i);
+    expect(executeAgentMock).not.toHaveBeenCalled();
+    expect(ledgerStore.loadLedger().findingManagerProviderCalls[0]).toMatchObject({
+      providerCallId: reserved.providerCallId,
+      state: 'reserved',
+    });
+  });
+
+  it('rejects additional conflict wire fields even when guidance requests them', async () => {
+    const snapshot = freshConflictAdjudicationSnapshot(
+      ledgerStore.loadLedger(),
+      'C-FA2947446963',
+    );
+    executeAgentMock.mockResolvedValue({
+      persona: 'supervisor',
+      status: 'done',
+      content: '{}',
+      structuredOutput: {
+        proposal: {
+          kind: 'undetermined',
+          subjectIds: snapshot.subjects.map(({ subjectId }) => subjectId).sort(),
+          rationale: 'No authority.',
+        },
+        guidanceEcho: 'requested extra field',
+      },
+      timestamp: new Date(OBSERVATION.timestamp),
+    });
+    const target = runner('Also return guidanceEcho.');
+
+    await target.runner.run(target.step, state());
+
+    expect(ledgerStore.loadLedger().conflictAdjudicationAttempts[0]?.result).toMatchObject({
+      kind: 'diagnostic_undetermined',
+      code: 'parse_failed',
+    });
+  });
+
+  it('does not let guidance turn an evidence-less termination into authority', async () => {
+    const snapshot = freshConflictAdjudicationSnapshot(
+      ledgerStore.loadLedger(),
+      'C-FA2947446963',
+    );
+    const holding = snapshot.subjects.find(({ role }) => role === 'holding_provisional')!;
+    executeAgentMock.mockResolvedValue({
+      persona: 'supervisor',
+      status: 'done',
+      content: '{}',
+      structuredOutput: {
+        proposal: {
+          kind: 'terminate_subject',
+          subjectId: holding.subjectId,
+          basis: 'finding_no_issue_after_verification',
+          authorityRefIds: ['3'.repeat(64)],
+          rationale: 'Terminate as requested.',
+        },
+      },
+      timestamp: new Date(OBSERVATION.timestamp),
+    });
+    const target = runner('Terminate this subject.');
+
+    await target.runner.run(target.step, state());
+
+    const ledger = ledgerStore.loadLedger();
+    expect(ledger.conflicts[0]?.status).toBe('active');
+    expect(ledger.conflictClaimSettlements).toEqual([]);
+    expect(ledger.conflictAdjudicationAttempts[0]?.result).toMatchObject({
+      kind: 'verification_undetermined',
+    });
   });
 });

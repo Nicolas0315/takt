@@ -471,9 +471,24 @@ Paths must be absolute paths to executable files. Environment variables take pre
 
 ## Model Resolution
 
-Provider and model selection uses the single, field-by-field precedence contract documented under [Provider Routing](#provider-routing). The same contract applies to normal steps, parallel sub-steps, synthetic steps, and workflow calls.
+Provider and model selection uses the single, field-by-field precedence contract documented under [Provider Routing](#provider-routing). Normal steps, parallel sub-steps, synthetic steps, and workflow calls follow that contract for the layers available to each kind. Parallel sub-steps do not support promotion.
 
-For Finding Contract workflows, `finding_contract.manager.provider` and `finding_contract.manager.model` are treated as step-level provider/model values for the synthetic `findings-manager` step. They override `provider_routing`, deprecated `persona_providers.findings-manager`, auto routing, and workflow/project/global defaults, while explicit CLI and environment overrides remain higher priority. When neither field is set, the manager uses the same fallback chain as any other workflow step. Setting only `provider` stops lower-priority model fallback, so the selected provider uses its own default; providers that require an explicit model fail validation.
+For Finding Contract workflows, `finding_contract.manager.provider` / `model` and `finding_contract.adjudicator.provider` / `model` are treated as step-level values for their synthetic steps. The implementation's field-by-field order is explicit CLI/environment override → promotion matching the current execution (normal agent steps only) → step or parallel sub-step provider/model (including these direct values) → `workflow_call` override → `provider_routing` step/tag/persona → deprecated `persona_providers` → auto routing → workflow → project → global → provider default. When neither field is set, the role uses the normal workflow-step fallback chain. Setting only `provider` stops lower-priority model fallback; providers that require an explicit model fail validation.
+
+```yaml
+finding_contract:
+  manager:
+    persona: findings-manager
+    instruction: findings-manager
+    output_contract: findings-manager
+    provider: codex
+    model: <strong-model>
+  adjudicator:
+    persona: supervisor
+    instruction: adjudicate-finding-contract
+    provider: codex
+    model: <strong-model>
+```
 
 In workflow YAML, `model: null` is an explicit model omission for a normal step, parallel sub-step, or `loop_monitors.judge`. It differs from leaving `model` unspecified: an unspecified model continues to applicable lower-priority sources such as routing, workflow, the triggering step for loop monitor judges, and input sources, while `model: null` stops model resolution at that entry and leaves the effective model undefined. Use it when the resolved provider should use its own CLI or provider default instead of inheriting another model source. Providers that require an explicit model still fail validation when no model is supplied.
 
@@ -737,7 +752,7 @@ For `provider` / `model`, the complete workflow-step resolution priority is:
 
 ```text
 explicit CLI / environment override
-> active promotion
+> active promotion (normal agent steps only; unsupported on parallel sub-steps)
 > step or parallel sub-step YAML provider/model
 > workflow_call override
 > provider_routing.steps.<step.name>
@@ -753,7 +768,7 @@ explicit CLI / environment override
 
 Provider and model are resolved independently at each layer. A provider-only override does not displace a higher-priority model override.
 
-`active promotion` means a step `promotion` entry whose execution-count (`at: <N>`) or `ai()` condition matched for the current execution; see [Step-level Provider Promotion](./workflows.md#step-level-provider-promotion).
+`active promotion` means a normal agent step `promotion` entry whose execution-count (`at: <N>`) or `ai()` condition matched for the current execution. Parallel sub-steps cannot specify promotion, so their YAML provider/model follows an explicit CLI/environment override directly; see [Step-level Provider Promotion](./workflows.md#step-level-provider-promotion).
 
 For the Finding Contract manager, `finding_contract.manager.provider` and `finding_contract.manager.model` occupy the `step YAML provider/model` position for the synthetic `findings-manager` step.
 

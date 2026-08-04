@@ -17,12 +17,16 @@ import {
   parseWorkflowRuleCondition,
 } from '../../../core/models/workflow-rule-condition.js';
 import {
-  FINDING_CONFLICT_ADJUDICATION_PERSONA,
+  FINDING_ADJUDICATION_PERSONA,
   workflowWiresFindingConflictAdjudication,
 } from '../../../core/workflow/findings/adjudication-step.js';
 import { FINDING_CONFLICT_ADJUDICATION_STEP } from '../../../core/workflow/constants.js';
 import { normalizeAutoRoutingConfig, normalizeRateLimitFallback, normalizeRuntime } from '../configNormalizers.js';
-import type { FacetResolutionContext, WorkflowSections } from './resource-resolver.js';
+import type {
+  FacetResolutionContext,
+  ResolvedSectionMap,
+  WorkflowSections,
+} from './resource-resolver.js';
 import {
   extractPersonaDisplayName,
   resolvePersona,
@@ -49,6 +53,7 @@ import {
 import type { WorkflowTrustInfo } from './workflowTrustSource.js';
 import { withWorkflowConfigErrorPath as withWorkflowStepErrorPath } from '../../../core/workflow/workflow-config-error.js';
 import { validateDynamicParallelContracts } from '../../../core/workflow/dynamic-parallel/validator.js';
+import { isScopeRef } from 'faceted-prompting';
 
 function normalizeSubworkflowConfig(
   raw: ReturnType<typeof WorkflowConfigRawSchema.parse>['subworkflow'],
@@ -79,6 +84,105 @@ function normalizeSubworkflowConfig(
         ]),
       )
       : undefined,
+  };
+}
+
+function resolveFindingManagerAdditions(input: {
+  refs: readonly string[] | undefined;
+  resolved: Record<string, string> | ResolvedSectionMap | undefined;
+  workflowDir: string;
+  kind: 'policies' | 'knowledge';
+  field: 'policy' | 'knowledge';
+  context?: FacetResolutionContext;
+}): string[] | undefined {
+  return input.refs?.map((ref, index) => {
+    const fieldPath = `finding_contract.manager.${input.field}[${index}]`;
+    let content: string | undefined;
+    try {
+      content = resolveRefToContent(
+        ref,
+        input.resolved,
+        input.workflowDir,
+        input.kind,
+        input.context,
+      );
+    } catch (error) {
+      throw new Error(
+        `Configuration error: failed to resolve ${fieldPath} "${ref}"`,
+        { cause: error },
+      );
+    }
+    if (content === undefined) {
+      throw new Error(
+        `Configuration error: failed to resolve ${fieldPath} "${ref}"`,
+      );
+    }
+    return content;
+  });
+}
+
+type RawFindingContractAdjudicator = NonNullable<
+  NonNullable<ReturnType<typeof WorkflowConfigRawSchema.parse>['finding_contract']>['adjudicator']
+>;
+
+function findingContractAdjudicatorResolutionError(
+  field: 'persona' | 'instruction',
+  ref: string,
+  options?: ErrorOptions,
+): Error {
+  return new Error(
+    `Configuration error: failed to resolve finding_contract.adjudicator.${field} "${ref}"`,
+    options,
+  );
+}
+
+function resolveFindingContractAdjudicator(
+  raw: RawFindingContractAdjudicator,
+  sections: WorkflowSections,
+  workflowDir: string,
+  context?: FacetResolutionContext,
+): NonNullable<FindingContractConfig['adjudicator']> {
+  let resolvedPersona: ReturnType<typeof resolvePersona>;
+  try {
+    resolvedPersona = resolvePersona(raw.persona, sections, workflowDir, context);
+  } catch (error) {
+    throw findingContractAdjudicatorResolutionError('persona', raw.persona, { cause: error });
+  }
+
+  let resolvedInstruction: string | undefined;
+  try {
+    resolvedInstruction = resolveRefToContent(
+      raw.instruction,
+      sections.resolvedInstructionsWithSource ?? sections.resolvedInstructions,
+      workflowDir,
+      'instructions',
+      context,
+    );
+  } catch (error) {
+    throw findingContractAdjudicatorResolutionError('instruction', raw.instruction, { cause: error });
+  }
+
+  if (
+    resolvedPersona.personaSpec === undefined
+    || (isScopeRef(raw.persona) && resolvedPersona.personaPath === undefined)
+  ) {
+    throw findingContractAdjudicatorResolutionError('persona', raw.persona);
+  }
+  if (resolvedInstruction === undefined) {
+    throw findingContractAdjudicatorResolutionError('instruction', raw.instruction);
+  }
+
+  const routingKey = raw.persona.trim();
+  return {
+    persona: resolvedPersona.personaSpec,
+    personaDisplayName: resolvedPersona.personaPath
+      ? extractPersonaDisplayName(resolvedPersona.personaPath)
+      : resolvedPersona.personaSpec,
+    ...(routingKey ? { providerRoutingPersonaKey: routingKey } : {}),
+    ...(resolvedPersona.personaPath ? { personaPath: resolvedPersona.personaPath } : {}),
+    instruction: resolvedInstruction,
+    ...(raw.provider ? { provider: raw.provider } : {}),
+    ...(raw.model ? { model: raw.model } : {}),
   };
 }
 
@@ -117,6 +221,25 @@ function normalizeFindingContractConfig(
     throw new Error(`Configuration error: failed to resolve finding_contract.manager.output_contract "${raw.manager.output_contract}"`);
   }
   const providerRoutingPersonaKey = raw.manager.persona.trim();
+  const policyContents = resolveFindingManagerAdditions({
+    refs: raw.manager.policy,
+    resolved: sections.resolvedPoliciesWithSource ?? sections.resolvedPolicies,
+    workflowDir,
+    kind: 'policies',
+    field: 'policy',
+    context,
+  });
+  const knowledgeContents = resolveFindingManagerAdditions({
+    refs: raw.manager.knowledge,
+    resolved: sections.resolvedKnowledgeWithSource ?? sections.resolvedKnowledge,
+    workflowDir,
+    kind: 'knowledge',
+    field: 'knowledge',
+    context,
+  });
+  const adjudicator = raw.adjudicator === undefined
+    ? undefined
+    : resolveFindingContractAdjudicator(raw.adjudicator, sections, workflowDir, context);
 
   return {
     manager: {
@@ -126,9 +249,12 @@ function normalizeFindingContractConfig(
       ...(personaPath ? { personaPath } : {}),
       instruction,
       outputContract,
+      ...(policyContents === undefined ? {} : { policyContents }),
+      ...(knowledgeContents === undefined ? {} : { knowledgeContents }),
       ...(raw.manager.provider ? { provider: raw.manager.provider } : {}),
       ...(raw.manager.model ? { model: raw.manager.model } : {}),
     },
+    ...(adjudicator === undefined ? {} : { adjudicator }),
     // 有限停止予算（Finding Contract・対策バッチ B1 の拡張）: ここでは YAML に
     // 書かれた値だけをそのまま写す（未指定フィールドの穴埋めはしない）。
     // max_rounds の既定値適用は stop-budget.ts の resolveStopBudgetLimits が唯一の
@@ -174,9 +300,12 @@ function resolveFindingConflictAdjudicator(
   if (!findingContract) {
     return;
   }
+  if (findingContract.adjudicator !== undefined) {
+    return;
+  }
   const wires = workflowWiresFindingConflictAdjudication(steps, loopMonitors);
   const { personaSpec, personaPath } = resolvePersona(
-    FINDING_CONFLICT_ADJUDICATION_PERSONA,
+    FINDING_ADJUDICATION_PERSONA,
     sections,
     workflowDir,
     context,
@@ -186,13 +315,13 @@ function resolveFindingConflictAdjudicator(
       persona: personaSpec,
       personaPath,
       personaDisplayName: extractPersonaDisplayName(personaPath),
-      providerRoutingPersonaKey: FINDING_CONFLICT_ADJUDICATION_PERSONA,
+      providerRoutingPersonaKey: FINDING_ADJUDICATION_PERSONA,
     };
     return;
   }
   if (wires) {
     throw new Error(
-      `Configuration error: persona "${FINDING_CONFLICT_ADJUDICATION_PERSONA}" is required for `
+      `Configuration error: persona "${FINDING_ADJUDICATION_PERSONA}" is required for `
       + `next: ${FINDING_CONFLICT_ADJUDICATION_STEP} but could not be resolved`,
     );
   }
