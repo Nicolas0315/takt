@@ -52,7 +52,6 @@ describe('createStreamTrackingState', () => {
     expect(state.textOffsets.size).toBe(0);
     expect(state.thinkingOffsets.size).toBe(0);
     expect(state.startedTools.size).toBe(0);
-    expect(state.latestToolInputJson.size).toBe(0);
     expect(state.textBytes).toBe(0);
   });
 });
@@ -434,7 +433,7 @@ describe('handlePartUpdated', () => {
     for (let split = 1; split < secret.length; split += 1) {
       const onStream = vi.fn();
       const state = createStreamTrackingState();
-      state.sensitiveSources.add({ token: secret });
+      state.sensitiveSources.collect({ token: secret });
       const part: OpenCodeTextPart = { id: `p-${split}`, type: 'text', text: secret };
 
       handlePartUpdated(part, secret.slice(0, split), onStream, state);
@@ -646,7 +645,7 @@ describe('handlePartUpdated', () => {
         expect(jsonl).not.toContain(secret);
         expect(jsonl).toContain('[REDACTED]');
         expect(jsonl.match(/"event_type":"tool_use"/g)).toHaveLength(1);
-        expect(state.latestToolInputJson.get('call-late')).toBe(JSON.stringify({ token: secret }));
+        expect(state.sensitiveSources.values.has(secret)).toBe(true);
       } finally {
         rmSync(logsDir, { recursive: true, force: true });
       }
@@ -795,7 +794,6 @@ describe('handlePartUpdated', () => {
     }
 
     expect(state.exhausted).toBe(true);
-    expect(state.latestToolInputJson.size).toBe(0);
     expect(state.sensitiveSources.values.size).toBe(0);
     expect(sanitizeSensitiveTextWithKnownValues('unknown-secret', state.sensitiveSources)).toBe('[REDACTED]');
   });
@@ -813,7 +811,7 @@ describe('handlePartUpdated', () => {
       }, undefined, undefined, state)).toBe(true);
     }
 
-    expect(state.sensitiveSources.sourceCount).toBe(1);
+    expect(state.sensitiveSources.values.size).toBe(2);
     expect(state.sensitiveSources.values.has('first-revision-secret')).toBe(true);
     expect(state.sensitiveSources.values.has('second-revision-secret')).toBe(true);
   });
@@ -868,7 +866,7 @@ describe('trackOpenCodeTextBytes', () => {
     const state = createStreamTrackingState();
     state.textOffsets.set('text-1', 1);
     state.textRedactors.set('text-1', {} as never);
-    state.sensitiveSources.add({ token: 'secret-before-text-limit' });
+    state.sensitiveSources.collect({ token: 'secret-before-text-limit' });
 
     expect(trackOpenCodeTextBytes(state, 'a'.repeat(OPENCODE_STREAM_TEXT_BYTE_LIMIT))).toBe(true);
     expect(trackOpenCodeTextBytes(state, 'b')).toBe(false);

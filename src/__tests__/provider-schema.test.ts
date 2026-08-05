@@ -343,6 +343,41 @@ describe('Schemas accept opencode provider', () => {
     ).toThrow();
   });
 
+  it.each([
+    { model_profiles: { '': 'minimal' } },
+    { model_profiles: { 'opencode/*': 'disabled' } },
+    { model_profiles: ['minimal'] },
+    { model_profiles: 'minimal' },
+  ])('should reject invalid opencode guards model_profiles: %j', (guards) => {
+    expect(() => GlobalConfigSchema.parse({
+      provider_options: { opencode: { guards } },
+    })).toThrow();
+  });
+
+  it.each([
+    { profile: 'disabled' },
+    { call_timeout_ms: 59_999 },
+    { call_timeout_ms: 86_400_001 },
+    { call_timeout_ms: 60_000.5 },
+    { call_timeout_ms: 0 },
+  ])('should reject invalid opencode guard profile or timeout boundary: %j', (guards) => {
+    expect(() => GlobalConfigSchema.parse({
+      provider_options: { opencode: { guards } },
+    })).toThrow();
+  });
+
+  it('should reject unknown opencode guard keys in strict provider option contexts', () => {
+    expect(() => GlobalConfigSchema.parse({
+      takt_providers: {
+        selector: {
+          provider_options: {
+            opencode: { guards: { disable_mandatory: true } },
+          },
+        },
+      },
+    })).toThrow();
+  });
+
   it('should accept cursor_api_key in GlobalConfigSchema', () => {
     const result = GlobalConfigSchema.parse({
       cursor_api_key: 'cursor-key-123',
