@@ -20,6 +20,7 @@ import {
 } from '../dynamic-parallel/snapshot.js';
 import { cloneWorkflowResumePoint, parseWorkflowResumePoint } from '../resume-point-codec.js';
 import { DynamicParallelSelectionStore } from '../dynamic-parallel/selection-store.js';
+import { DynamicFacetSelectionStore, cloneDynamicFacetSelections, cloneDynamicFacetSelectionSnapshot } from '../dynamic-facets/dynamicFacetSelectionStore.js';
 import {
   restoreWorkflowCallInvocationEvidence,
   serializeWorkflowCallInvocationEvidence,
@@ -107,6 +108,8 @@ function snapshotWorkflowState(state: WorkflowState): WorkflowState {
     ...state,
     dynamicParallelSelections: cloneDynamicParallelSelections(state.dynamicParallelSelections),
     resumedDynamicParallelSteps: new Set(state.resumedDynamicParallelSteps),
+    dynamicFacetSelections: cloneDynamicFacetSelections(state.dynamicFacetSelections),
+    resumedDynamicFacetSteps: new Set(state.resumedDynamicFacetSteps),
   };
 }
 
@@ -271,6 +274,9 @@ export class WorkflowEngine extends EventEmitter {
     this.sharedRuntime.dynamicParallelSelectionStore ??= new DynamicParallelSelectionStore(
       new Map(Object.entries(this.options.resumePoint?.dynamic_parallel_selections ?? {})),
     );
+    this.sharedRuntime.dynamicFacetSelectionStore ??= new DynamicFacetSelectionStore(
+      new Map(Object.entries(this.options.resumePoint?.dynamic_facet_selections ?? {})),
+    );
     this.sharedRuntime.workflowCallInvocationEvidence ??=
       restoreWorkflowCallInvocationEvidence(this.options.resumePoint);
     this.sharedRuntime.workflowStepParticipationIndex ??=
@@ -304,6 +310,7 @@ export class WorkflowEngine extends EventEmitter {
       this.options.resumePoint,
     );
     this.syncStateDynamicParallelSelections();
+    this.syncStateDynamicFacetSelections();
     this.inheritPreviousReviewReports();
     // workflow_call の親から継承した Finding Contract があればそれを優先する。
     // 継承しないと子の parallel レビューが出す raw findings が親の台帳に届かず、
@@ -372,6 +379,7 @@ export class WorkflowEngine extends EventEmitter {
       ),
       setActiveResumePoint: this.setActiveResumePoint.bind(this),
       persistDynamicParallelSelection: this.persistDynamicParallelSelection.bind(this),
+      persistDynamicFacetSelection: this.persistDynamicFacetSelection.bind(this),
       refreshFindingsState: this.refreshFindingsState.bind(this),
       findingContract: this.findingContract,
       findingManagerAuthority: this.findingManagerAuthority,
@@ -870,6 +878,7 @@ export class WorkflowEngine extends EventEmitter {
     occurrence: number,
     resumeStackPrefix: readonly WorkflowResumePointEntry[],
     dynamicParallelSelections: ReadonlyMap<string, import('../../models/types.js').DynamicParallelSelectionSnapshot> = this.sharedRuntime.dynamicParallelSelectionStore!.snapshot(),
+    dynamicFacetSelections: ReadonlyMap<string, import('../../models/types.js').DynamicFacetSelectionSnapshot> = this.sharedRuntime.dynamicFacetSelectionStore!.snapshot(),
   ): WorkflowResumePoint {
     const workflowCallInstance = isWorkflowCallStep(step)
       ? this.sharedRuntime.workflowCallInvocationEvidence!.index.get(
@@ -901,6 +910,9 @@ export class WorkflowEngine extends EventEmitter {
       ...(dynamicParallelSelections.size === 0
         ? {}
         : { dynamic_parallel_selections: serializeDynamicParallelSelections(dynamicParallelSelections) }),
+      ...(dynamicFacetSelections.size === 0
+        ? {}
+        : { dynamic_facet_selections: serializeDynamicFacetSelectionsMap(dynamicFacetSelections) }),
       workflow_call_invocations: workflowCallInvocations,
       workflow_step_participations: workflowStepParticipations,
     };
@@ -970,6 +982,44 @@ export class WorkflowEngine extends EventEmitter {
     this.syncStateDynamicParallelSelections(selections);
   }
 
+  private async persistDynamicFacetSelection(
+    step: WorkflowStep,
+    iteration: number,
+    identity: string,
+    selection: import('../../models/types.js').DynamicFacetSelectionSnapshot,
+  ): Promise<void> {
+    const activeEntry = this.activeResumePoint?.stack[this.resumeStackPrefix.length];
+    if (
+      activeEntry === undefined
+      || activeEntry.step !== step.name
+      || !workflowEntryMatchesWorkflow(activeEntry, this.config)
+    ) {
+      throw new Error(`Cannot persist dynamic facet selection without an active resume frame for step '${step.name}'`);
+    }
+    const selections = await this.sharedRuntime.dynamicFacetSelectionStore!.commit(identity, selection, async (selections) => {
+      const resumePoint = this.buildResumePoint(
+        step,
+        iteration,
+        activeEntry.occurrence,
+        this.resumeStackPrefix,
+        this.sharedRuntime.dynamicParallelSelectionStore!.snapshot(),
+        selections,
+      );
+      this.activeResumePoint = resumePoint;
+      this.sharedRuntime.activeResumePoint = resumePoint;
+    });
+    this.syncStateDynamicFacetSelections(selections);
+  }
+
+  private syncStateDynamicFacetSelections(
+    selections = this.sharedRuntime.dynamicFacetSelectionStore!.snapshot(),
+  ): void {
+    this.state.dynamicFacetSelections.clear();
+    for (const [identity, selection] of selections) {
+      this.state.dynamicFacetSelections.set(identity, selection);
+    }
+  }
+
   getResumePoint(): WorkflowResumePoint | undefined {
     const activeResumePoint = this.sharedRuntime.activeResumePoint;
     const activeEntry = activeResumePoint?.stack[this.resumeStackPrefix.length];
@@ -997,6 +1047,7 @@ export class WorkflowEngine extends EventEmitter {
       workflowCallInstance,
     );
     const dynamicParallelSelections = this.sharedRuntime.dynamicParallelSelectionStore!.serialized();
+    const dynamicFacetSelections = this.sharedRuntime.dynamicFacetSelectionStore!.serialized();
     const workflowCallInvocations = serializeWorkflowCallInvocationEvidence(
       this.sharedRuntime.workflowCallInvocationEvidence!,
     );
@@ -1008,6 +1059,9 @@ export class WorkflowEngine extends EventEmitter {
       ...(dynamicParallelSelections === undefined
         ? {}
         : { dynamic_parallel_selections: dynamicParallelSelections }),
+      ...(dynamicFacetSelections === undefined
+        ? {}
+        : { dynamic_facet_selections: dynamicFacetSelections }),
       workflow_call_invocations: workflowCallInvocations,
       workflow_step_participations: workflowStepParticipations,
     };
@@ -1253,7 +1307,23 @@ function restoreActiveResumePoint(
     } else {
       restored.dynamic_parallel_selections = current.dynamic_parallel_selections;
     }
+    if (current.dynamic_facet_selections === undefined) {
+      delete restored.dynamic_facet_selections;
+    } else {
+      restored.dynamic_facet_selections = Object.fromEntries(
+        Object.entries(current.dynamic_facet_selections)
+          .map(([identity, snapshot]) => [identity, cloneDynamicFacetSelectionSnapshot(snapshot)]),
+      );
+    }
   }
 
   sharedRuntime.activeResumePoint = restored;
+}
+
+function serializeDynamicFacetSelectionsMap(
+  selections: ReadonlyMap<string, import('../../models/types.js').DynamicFacetSelectionSnapshot>,
+): Record<string, import('../../models/types.js').DynamicFacetSelectionSnapshot> {
+  return Object.fromEntries(
+    [...selections].map(([identity, snapshot]) => [identity, cloneDynamicFacetSelectionSnapshot(snapshot)]),
+  );
 }

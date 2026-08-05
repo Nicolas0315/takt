@@ -124,6 +124,8 @@ export function resolveResourceContentWithSource(
   facetType?: FacetType,
   refName?: string,
   context?: FacetResolutionContext,
+  trustedRoot?: string,
+  requireFile?: boolean,
 ): ResolvedFacetContent | undefined {
   if (spec == null) {
     return undefined;
@@ -131,12 +133,22 @@ export function resolveResourceContentWithSource(
   if (spec.endsWith('.md')) {
     const resolved = resolveResourcePath(spec, workflowDir);
     if (existsSync(resolved)) {
+      if (trustedRoot !== undefined) {
+        assertPathSegmentsAreSafe(
+          trustedRoot,
+          resolved,
+          (_violation, segmentPath) => new Error(`External facet pool resource must stay inside the pool source layer root: ${segmentPath}`),
+        );
+      }
       return {
         content: readResourceFile(resolved, facetType, workflowDir, context),
         sourcePath: resolved,
         facetType,
         refName,
       };
+    }
+    if (requireFile === true) {
+      throw new Error(`Facet resource file not found: ${resolved}`);
     }
   }
   return { content: spec, facetType, refName };
@@ -147,13 +159,14 @@ export function resolveSectionMapWithSource(
   workflowDir: string,
   facetType: FacetType,
   context?: FacetResolutionContext,
+  trustedRoot?: string,
 ): ResolvedSectionMap | undefined {
   if (!raw) {
     return undefined;
   }
   const resolved: ResolvedSectionMap = {};
   for (const [name, value] of Object.entries(raw)) {
-    const content = resolveResourceContentWithSource(value, workflowDir, facetType, name, context);
+    const content = resolveResourceContentWithSource(value, workflowDir, facetType, name, context, trustedRoot);
     if (content?.content) {
       resolved[name] = content;
     }
@@ -515,16 +528,56 @@ function applyFacetIncludes(
   return body !== resolved.content ? { ...resolved, content: body } : resolved;
 }
 
+export interface ResolveRefToContentWithSourceOptions {
+  /**
+   * 当該呼出が facet pool の自己完結解決（context === undefined）のように
+   * bare facet name への最終フォールバックを許可しない境界で実行されている場合 true。
+   * true のとき、context === undefined かつ bare ref（`isResourcePath(ref)` false・
+   * `isScopeRef(ref)` false）が section map・candidate dirs のいずれでも解決できなかった
+   * 場合は、ref 名を content とする最終フォールバックを skip し undefined を返す。
+   * 呼出元は undefined を fail-fast として扱う。既存の汎用呼出元は未指定で従来通り
+   * 最終フォールバックを維持する。
+   */
+  readonly strictBareName?: boolean;
+  /**
+   * external facet pool 境界など、facet ファイル解決後に resolved パスが
+   * 指定 root に留まることを検証する必要がある呼出元で指定する。
+   * `resolveResourceContentWithSource` が read 前に `assertPathSegmentsAreSafe`
+   * で境界チェックを行う。未指定の場合は従来通りの境界チェック動作を維持する。
+   */
+  readonly trustedRoot?: string;
+  /**
+   * true のとき、.md パス参照がファイルに解決できない場合は undefined を返さず
+   * fail-fast で例外を投げる。facet pool の候補参照など、存在しない .md が
+   * リテラル文字列として本文に混入するのを防ぐために指定する。
+   */
+  readonly requireFile?: boolean;
+}
+
 export function resolveRefToContentWithSource(
   ref: string,
   resolvedMap: ResolvedMapInput | undefined,
   workflowDir: string,
   facetType?: FacetType,
   context?: FacetResolutionContext,
+  options?: ResolveRefToContentWithSourceOptions,
 ): ResolvedFacetContent | undefined {
   const mapped = resolvedMap?.[ref];
   if (mapped !== undefined) {
-    return applyFacetIncludes(expandFacetInheritance(toResolvedContent(mapped, facetType, ref), facetType, context), context);
+    const resolved = toResolvedContent(mapped, facetType, ref);
+    // When requireFile is set and the mapped value is a .md path that was never
+    // resolved to an actual file (sourcePath is undefined), the path string leaked
+    // into content. Re-resolve with requireFile to fail-fast on missing files.
+    if (
+      options?.requireFile === true
+      && resolved.sourcePath === undefined
+      && resolved.content.endsWith('.md')
+    ) {
+      const resource = resolveResourceContentWithSource(resolved.content, workflowDir, facetType, ref, context, options?.trustedRoot, true);
+      if (resource === undefined) return undefined;
+      return applyFacetIncludes(expandFacetInheritance(resource, facetType, context), context);
+    }
+    return applyFacetIncludes(expandFacetInheritance(resolved, facetType, context), context);
   }
 
   if (facetType && context && isScopeRef(ref) && context.repertoireDir) {
@@ -541,7 +594,7 @@ export function resolveRefToContentWithSource(
   }
 
   if (isResourcePath(ref)) {
-    const resource = resolveResourceContentWithSource(ref, workflowDir, facetType, ref, context);
+    const resource = resolveResourceContentWithSource(ref, workflowDir, facetType, ref, context, options?.trustedRoot, options?.requireFile);
     return resource ? applyFacetIncludes(expandFacetInheritance(resource, facetType, context), context) : undefined;
   }
 
@@ -555,7 +608,16 @@ export function resolveRefToContentWithSource(
     }
   }
 
-  const resource = resolveResourceContentWithSource(ref, workflowDir, facetType, ref, context);
+  // Facet pool self-contained resolution (context === undefined) must not fall back to
+  // using a bare ref name as content for a bare facet name that missed every resolution
+  // layer. The compileExternalPool boundary opts into fail-fast via strictBareName so
+  // pool-external bare names throw at the caller instead of being silently captured.
+  const isBareName = !isResourcePath(ref) && !isScopeRef(ref);
+  if (options?.strictBareName === true && context === undefined && isBareName) {
+    return undefined;
+  }
+
+  const resource = resolveResourceContentWithSource(ref, workflowDir, facetType, ref, context, options?.trustedRoot);
   return resource ? applyFacetIncludes(expandFacetInheritance(resource, facetType, context), context) : undefined;
 }
 
@@ -572,6 +634,23 @@ export function resolveRefList(
   for (const ref of list) {
     const content = resolveRefToContent(ref, resolvedMap, workflowDir, facetType, context);
     if (content) contents.push(content);
+  }
+  return contents.length > 0 ? contents : undefined;
+}
+
+export function resolveRefListWithSource(
+  refs: string | string[] | undefined,
+  resolvedMap: ResolvedMapInput | undefined,
+  workflowDir: string,
+  facetType?: FacetType,
+  context?: FacetResolutionContext,
+): ResolvedFacetContent[] | undefined {
+  if (refs == null) return undefined;
+  const list = Array.isArray(refs) ? refs : [refs];
+  const contents: ResolvedFacetContent[] = [];
+  for (const ref of list) {
+    const resolved = resolveRefToContentWithSource(ref, resolvedMap, workflowDir, facetType, context);
+    if (resolved) contents.push(resolved);
   }
   return contents.length > 0 ? contents : undefined;
 }
