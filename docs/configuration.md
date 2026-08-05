@@ -284,6 +284,7 @@ ignore_exceed: false          # Applies to takt run and takt watch like --ignore
 #         "opencode/big-pickle": minimal
 #         "lmstudio/*": standard
 #       call_timeout_ms: 3600000
+#       event_limit: 500000
 #       text_byte_limit: 1048576
 #       reasoning_byte_limit: 4194304
 #   kiro:
@@ -322,8 +323,15 @@ map.
 
 Each OpenCode call has a 3,600,000 ms (60 minute) wall-clock limit. A call that
 may run longer than 60 minutes must explicitly set `call_timeout_ms` from 60,000
-through 86,400,000. `text_byte_limit` defaults to 1 MiB and
+through 86,400,000. `event_limit` defaults to 500,000 and can be overridden by
+`TAKT_OPENCODE_STREAM_EVENT_LIMIT`. `text_byte_limit` defaults to 1 MiB and
 `reasoning_byte_limit` to 4 MiB.
+
+Invalid numeric limits are treated differently per input path. Values written
+under `guards.*` (including those from `TAKT_PROVIDER_OPTIONS_*`) are declared
+configuration, so a non-positive-integer value fails fast with an error. Values
+from `TAKT_OPENCODE_*` are ad-hoc overrides for experiments and tests, so an
+invalid value is ignored and the default applies.
 
 The legacy `TAKT_OPENCODE_TOOL_ERROR_BUDGET`,
 `TAKT_OPENCODE_TOOL_SIGNATURE_ABSOLUTE`,
