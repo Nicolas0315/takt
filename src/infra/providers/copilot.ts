@@ -45,6 +45,7 @@ function toCopilotOptions(options: ProviderCallOptions): CopilotCallOptions {
 /** Copilot provider — delegates to GitHub Copilot CLI */
 export class CopilotProvider implements Provider {
   readonly supportsStructuredOutput = false;
+  readonly supportsIsolatedStructuredExecution = false;
   readonly supportsNativeImageInput = false;
   readonly supportsStrictInternalAgentIsolation = false;
 
@@ -71,5 +72,17 @@ export class CopilotProvider implements Provider {
         return callCopilot(name, prompt, toCopilotOptions(options));
       },
     };
+  }
+
+  setupIsolatedStructured(config: AgentSetup): ProviderAgent {
+    const call = async (_prompt: string, options: ProviderCallOptions): Promise<AgentResponse> => ({
+      persona: config.name,
+      status: 'error',
+      content: 'Provider "copilot" does not support isolated structured execution',
+      timestamp: new Date(),
+      sessionId: options.sessionId,
+      error: 'Provider "copilot" does not support isolated structured execution',
+    });
+    return { call };
   }
 }

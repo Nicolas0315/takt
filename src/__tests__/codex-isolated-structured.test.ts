@@ -153,7 +153,7 @@ describe('Codex strict isolated structured execution', () => {
     }
   });
 
-  it('rejects an unsupported provider before invoking it', async () => {
+  it('rejects an unsupported provider when invoked', async () => {
     const projectDir = mkdtempSync(join(tmpdir(), 'takt-isolated-provider-project-'));
     const globalDir = mkdtempSync(join(tmpdir(), 'takt-isolated-provider-global-'));
     const originalConfigDir = process.env.TAKT_CONFIG_DIR;
@@ -163,15 +163,17 @@ describe('Codex strict isolated structured execution', () => {
       invalidateGlobalConfigCache();
       invalidateAllResolvedConfigCache();
 
-      await expect(runAgent(undefined, 'normalize', {
+      const response = await runAgent(undefined, 'normalize', {
         cwd: projectDir,
         executionProfile: 'isolated-structured',
-        resolvedProvider: 'opencode',
+        resolvedProvider: 'copilot',
         resolvedModel: 'test-model',
         resolvedProviderOptions: null,
         outputSchema: { type: 'object' },
-      })).rejects.toThrow(
-        'Provider "opencode" does not support strict isolated structured execution',
+      });
+      expect(response.status).toBe('error');
+      expect(response.error).toBe(
+        'Provider "copilot" does not support isolated structured execution',
       );
     } finally {
       if (originalConfigDir === undefined) {
