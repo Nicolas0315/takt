@@ -30,6 +30,14 @@ const ENTITY_ADJUDICATION_PROVISIONAL_KINDS = new Set<FindingProvisionalKind>([
 export function isOpenProvisional(
   finding: FindingLedgerEntry,
 ): finding is FindingLedgerEntry & { provisional: NonNullable<FindingLedgerEntry['provisional']> } {
+  return finding.status === 'open'
+    && finding.provisional !== undefined
+    && finding.reviewerAnomalyReclassification === undefined;
+}
+
+export function isOpenProvisionalForActionRecovery(
+  finding: FindingLedgerEntry,
+): finding is FindingLedgerEntry & { provisional: NonNullable<FindingLedgerEntry['provisional']> } {
   return finding.status === 'open' && finding.provisional !== undefined;
 }
 

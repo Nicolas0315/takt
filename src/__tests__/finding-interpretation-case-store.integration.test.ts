@@ -299,7 +299,7 @@ describe('interpretation case SQLite begin transaction', () => {
   it('returns retry ownership to the interrupted attempt when retry reservation is rejected', async () => {
     const budgetLimits = {
       maxCallsPerRound: 1,
-      maxAdapterVisibleInputTokensPerCall: 24_000,
+      maxAdapterVisibleInputBytesPerCall: 24_000,
       maxOutputTokensPerCall: 10_000,
       maxChargedInputTokensPerRound: 64_000,
       maxChargedOutputTokensPerRound: 40_000,
@@ -371,7 +371,7 @@ describe('interpretation case SQLite begin transaction', () => {
   it('fails fast when resume changes limits for the same provider budget round', async () => {
     const initialLimits = {
       maxCallsPerRound: 2,
-      maxAdapterVisibleInputTokensPerCall: 24_000,
+      maxAdapterVisibleInputBytesPerCall: 24_000,
       maxOutputTokensPerCall: 10_000,
       maxChargedInputTokensPerRound: 48_000,
       maxChargedOutputTokensPerRound: 20_000,
@@ -411,7 +411,7 @@ describe('interpretation case SQLite begin transaction', () => {
     const harness = openHarness({
       budgetLimits: {
         maxCallsPerRound: 1,
-        maxAdapterVisibleInputTokensPerCall: 100_000,
+        maxAdapterVisibleInputBytesPerCall: 100_000,
         maxOutputTokensPerCall: 10_000,
         maxChargedInputTokensPerRound: 100_000,
         maxChargedOutputTokensPerRound: 10_000,
@@ -538,11 +538,11 @@ describe('interpretation case SQLite begin transaction', () => {
     harness.resolver.close();
   });
 
-  it('cleans every unreserved registry when the third batch of 33 cases exceeds budget', async () => {
+  it('charges measured request input and keeps all three small batches within budget', async () => {
     const harness = openHarness({
       budgetLimits: {
         maxCallsPerRound: 4,
-        maxAdapterVisibleInputTokensPerCall: 24_000,
+      maxAdapterVisibleInputBytesPerCall: 24_000,
         maxOutputTokensPerCall: 10_000,
         maxChargedInputTokensPerRound: 64_000,
         maxChargedOutputTokensPerRound: 40_000,
@@ -565,14 +565,14 @@ describe('interpretation case SQLite begin transaction', () => {
     const leasedCaseIds = new Set(begun.providerCases.map(({ caseId }) => caseId));
     const leasedRawFindingIds = new Set(begun.attempts.flatMap(({ rawFindingIds }) => rawFindingIds));
 
-    expect(begun.providerCases).toHaveLength(32);
-    expect(begun.attempts).toHaveLength(32);
-    expect(begun.directPlans).toHaveLength(1);
-    expect(stored.findingManagerProviderCalls).toHaveLength(2);
-    expect(stored.interpretationCaseSnapshots).toHaveLength(32);
+    expect(begun.providerCases).toHaveLength(33);
+    expect(begun.attempts).toHaveLength(33);
+    expect(begun.directPlans).toHaveLength(0);
+    expect(stored.findingManagerProviderCalls).toHaveLength(3);
+    expect(stored.interpretationCaseSnapshots).toHaveLength(33);
     expect(stored.interpretationCaseSnapshots.every(({ caseId }) => leasedCaseIds.has(caseId)))
       .toBe(true);
-    expect(stored.interpretationRawObservations).toHaveLength(32);
+    expect(stored.interpretationRawObservations).toHaveLength(33);
     expect(stored.interpretationRawObservations.every(({ rawFindingId }) => (
       leasedRawFindingIds.has(rawFindingId)
     ))).toBe(true);
@@ -581,10 +581,138 @@ describe('interpretation case SQLite begin transaction', () => {
     ))).toBe(true);
     expect(stored.rawCanonicalSnapshots.filter(({ rawFindingId }) => (
       leasedRawFindingIds.has(rawFindingId)
-    ))).toHaveLength(32);
+    ))).toHaveLength(33);
     expect(stored.rawFindings.filter(({ rawFindingId }) => (
       leasedRawFindingIds.has(rawFindingId)
-    ))).toHaveLength(32);
+    ))).toHaveLength(33);
+    harness.resolver.close();
+  });
+
+  it('continues after a byte-limited batch is reduced within the same round', async () => {
+    const harness = openHarness({
+      prepareProviderRequest: (_ledger, cases) => ({
+        requestBytes: 'x'.repeat(cases.length * 40),
+        adapterSupportsUtf8ByteUpperBound: true,
+      }),
+      budgetLimits: {
+        maxCallsPerRound: 4,
+        maxAdapterVisibleInputBytesPerCall: 100,
+        maxOutputTokensPerCall: 10_000,
+        maxChargedInputTokensPerRound: 400_000,
+        maxChargedOutputTokensPerRound: 40_000,
+      },
+    });
+    const ledger = baseLedger();
+    await seed(harness, ledger);
+    const items = Array.from({ length: 4 }, (_, index) => taintedItems({
+      rawFindingIds: [`raw-reduced-batch-${index + 1}`],
+      ledger,
+      description: `Reduced batch defect ${index + 1}.`,
+      evidenceLine: index + 1,
+    })[0]!);
+
+    const begun = await harness.beginInterpretationCases({
+      items,
+      provisionalOnlyRawFindingIds: new Set(),
+    });
+
+    expect(begun.providerCases).toHaveLength(4);
+    expect(begun.directPlans).toHaveLength(0);
+    expect(harness.store.loadLedger().findingManagerProviderCalls)
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({ requestByteLength: 80 }),
+      ]));
+    expect(harness.store.loadLedger().findingManagerProviderCalls).toHaveLength(2);
+    harness.resolver.close();
+  });
+
+  it('lands an irreducible oversized case and continues with the following case', async () => {
+    let oversizedCaseId: string | undefined;
+    const harness = openHarness({
+      prepareProviderRequest: (_ledger, cases) => {
+        oversizedCaseId ??= cases[0]?.caseId;
+        return {
+          requestBytes: 'x'.repeat(cases.some(({ caseId }) => caseId === oversizedCaseId) ? 80 : 20),
+          adapterSupportsUtf8ByteUpperBound: true,
+        };
+      },
+      budgetLimits: {
+        maxCallsPerRound: 4,
+        maxAdapterVisibleInputBytesPerCall: 50,
+        maxOutputTokensPerCall: 10_000,
+        maxChargedInputTokensPerRound: 400_000,
+        maxChargedOutputTokensPerRound: 40_000,
+      },
+    });
+    const ledger = baseLedger();
+    await seed(harness, ledger);
+    const oversizedItems = taintedItems({
+        rawFindingIds: ['raw-irreducible-overflow'],
+        ledger,
+        description: 'Irreducible oversized defect.',
+      });
+    const followingItems = taintedItems({
+        rawFindingIds: ['raw-after-overflow'],
+        ledger,
+        description: 'Following reservable defect.',
+        evidenceLine: 2,
+      });
+    const items = [...oversizedItems, ...followingItems];
+
+    const begun = await harness.beginInterpretationCases({
+      items,
+      provisionalOnlyRawFindingIds: new Set(),
+    });
+    const stored = harness.store.loadLedger();
+
+    expect(begun.providerCases).toHaveLength(1);
+    expect(begun.providerCases.flatMap(({ members }) => members.map(({ rawFindingId }) => rawFindingId)))
+      .toEqual([followingItems[0]!.canonical.rawFindingId]);
+    expect(begun.directPlans).toEqual([
+      expect.objectContaining({
+        items: [oversizedItems[0]],
+        decision: expect.objectContaining({ kind: 'provisional' }),
+        unreservedAuthority: expect.objectContaining({ reason: 'manager-input-overflow' }),
+      }),
+    ]);
+    expect(stored.interpretationAttempts).toHaveLength(1);
+    expect(stored.findingManagerProviderCalls).toHaveLength(1);
+    harness.resolver.close();
+  });
+
+  it('lands the remaining cases as budget exhausted after the current batch', async () => {
+    const harness = openHarness({
+      prepareProviderRequest: (_ledger, cases) => ({
+        requestBytes: 'x'.repeat(cases.length * 40),
+        adapterSupportsUtf8ByteUpperBound: true,
+      }),
+      budgetLimits: {
+        maxCallsPerRound: 1,
+        maxAdapterVisibleInputBytesPerCall: 100,
+        maxOutputTokensPerCall: 10_000,
+        maxChargedInputTokensPerRound: 400_000,
+        maxChargedOutputTokensPerRound: 40_000,
+      },
+    });
+    const ledger = baseLedger();
+    await seed(harness, ledger);
+    const items = Array.from({ length: 4 }, (_, index) => taintedItems({
+      rawFindingIds: [`raw-budget-tail-${index + 1}`],
+      ledger,
+      description: `Budget tail defect ${index + 1}.`,
+      evidenceLine: index + 1,
+    })[0]!);
+
+    const begun = await harness.beginInterpretationCases({
+      items,
+      provisionalOnlyRawFindingIds: new Set(),
+    });
+
+    expect(begun.providerCases).toHaveLength(2);
+    expect(begun.directPlans).toHaveLength(2);
+    expect(begun.directPlans.every((plan) => (
+      plan.unreservedAuthority?.reason === 'manager-budget-exhausted'
+    ))).toBe(true);
     harness.resolver.close();
   });
 
@@ -855,7 +983,7 @@ describe('interpretation case SQLite begin transaction', () => {
         prepareProviderRequest,
         budgetLimits: {
           maxCallsPerRound: 4,
-          maxAdapterVisibleInputTokensPerCall: 24_000,
+          maxAdapterVisibleInputBytesPerCall: 24_000,
           maxOutputTokensPerCall: 10_000,
           maxChargedInputTokensPerRound: 96_000,
           maxChargedOutputTokensPerRound: 40_000,

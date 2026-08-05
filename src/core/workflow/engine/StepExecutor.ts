@@ -118,6 +118,7 @@ import {
   PLAIN_TEXT_NORMALIZED_FINDING_REVIEW_PUBLICATION_PROTOCOL,
   STRUCTURED_FINDING_REVIEW_PUBLICATION_PROTOCOL,
   type CanonicalFindingReviewPublication,
+  type FindingReviewPresentationContext,
   type FindingReviewPublicationIdentity,
   type FindingReviewPublicationProtocol,
   type ReviewerExecutionIdentity,
@@ -356,6 +357,7 @@ export class StepExecutor {
       timestamp: new Date().toISOString(),
       priorStepResponseText: input.priorStepResponseText,
       managerAuthority: this.deps.findingManagerAuthority,
+      reviewPublicationDir: this.deps.getRunPaths().reportsAbs,
       refreshFindingsState: this.deps.refreshFindingsState,
       emitEvent: this.deps.emitEvent,
     });
@@ -637,6 +639,7 @@ export class StepExecutor {
     readonly state: WorkflowState;
     readonly identity: FindingReviewPublicationIdentity;
     readonly runtime?: RuntimeStepResolution;
+    readonly presentationContext?: FindingReviewPresentationContext;
   }): Promise<
     StructuredOutputNormalizationResult
     & {
@@ -690,6 +693,7 @@ export class StepExecutor {
     const runtime: RuntimeStepResolution = { providerInfo };
     const execute = async (
       mode: 'initial' | 'correction',
+      extractionFidelityCorrection = false,
     ): Promise<
       StructuredOutputNormalizationResult
       & {
@@ -707,6 +711,7 @@ export class StepExecutor {
           language: this.deps.getLanguage(),
           abortSignal: this.deps.abortSignal,
           mode,
+          extractionFidelityCorrection,
           onPromptResolved: (resolved) => {
             promptParts = resolved;
             this.deps.onPhaseStart?.(
@@ -773,6 +778,7 @@ export class StepExecutor {
               normalized.response,
             ),
             reviewerRawResourceEnvelope: normalized.reviewerRawResourceEnvelope,
+            ...(input.presentationContext === undefined ? {} : { presentationContext: input.presentationContext }),
           }),
         };
       } catch (error) {
@@ -785,10 +791,39 @@ export class StepExecutor {
       }
     };
 
+    const hasExtractionFidelityFailure = (response: AgentResponse): boolean => {
+      const rawFindings = response.structuredOutput;
+      if (
+        typeof rawFindings !== 'object'
+        || rawFindings === null
+        || Array.isArray(rawFindings)
+        || !Array.isArray(Reflect.get(rawFindings, 'rawFindings'))
+      ) {
+        return false;
+      }
+      return (Reflect.get(rawFindings, 'rawFindings') as unknown[]).some((item) => {
+        if (typeof item !== 'object' || item === null || Array.isArray(item)) {
+          return false;
+        }
+        const rawExcerpt = Reflect.get(item, 'rawExcerpt');
+        const candidate = Reflect.get(item, 'candidate');
+        return typeof rawExcerpt === 'string'
+          && rawExcerpt.length > 0
+          && typeof candidate === 'object'
+          && candidate !== null
+          && !Array.isArray(candidate)
+          && Reflect.get(candidate, 'description') === null;
+      });
+    };
+
     const initial = await execute('initial');
+    const extractionFidelityFailure = initial.invalidDetail === undefined
+      && initial.response.status === 'done'
+      && hasExtractionFidelityFailure(initial.response);
     const normalized = initial.invalidDetail !== undefined
       && initial.invalidKind === 'model_output'
-      ? await execute('correction')
+      || extractionFidelityFailure
+      ? await execute('correction', extractionFidelityFailure)
       : initial;
     if (
       initial.invalidDetail !== undefined
@@ -825,6 +860,45 @@ export class StepExecutor {
         },
       };
     }
+    if (
+      initial.invalidDetail !== undefined
+      && initial.invalidKind === 'model_output'
+      && normalized.invalidDetail === undefined
+      && normalized.response.status === 'done'
+      && hasExtractionFidelityFailure(normalized.response)
+    ) {
+      return {
+        ...normalized,
+        response: {
+          ...normalized.response,
+          status: 'error',
+          error: `Finding intake normalizer for reviewer "${input.reviewerStep.name}" extraction-fidelity correction failed: ${
+            normalized.response.error ?? normalized.response.content
+          }`,
+        },
+      };
+    }
+    if (
+      extractionFidelityFailure
+      && (
+        normalized.invalidDetail !== undefined
+        || normalized.response.status !== 'done'
+        || hasExtractionFidelityFailure(normalized.response)
+      )
+    ) {
+      return {
+        ...normalized,
+        response: {
+          ...normalized.response,
+          status: 'error',
+          error: `Finding intake normalizer for reviewer "${input.reviewerStep.name}" extraction-fidelity correction failed: ${
+            normalized.invalidDetail
+              ?? normalized.response.error
+              ?? normalized.response.content
+          }`,
+        },
+      };
+    }
     if (normalized.invalidDetail !== undefined || normalized.response.status !== 'done') {
       return normalized;
     }
@@ -851,6 +925,7 @@ export class StepExecutor {
     readonly stepIteration: number;
     readonly state: WorkflowState;
     readonly runtime?: RuntimeStepResolution;
+    readonly presentationContext?: FindingReviewPresentationContext;
   }): Promise<{
     readonly publication: CanonicalFindingReviewPublication;
     readonly response: AgentResponse;
@@ -904,6 +979,7 @@ export class StepExecutor {
         state: input.state,
         identity,
         runtime: input.runtime,
+        presentationContext: pending.presentationContext,
       });
       if (
         normalized.response.status === 'blocked'
@@ -992,6 +1068,7 @@ export class StepExecutor {
     >;
     readonly updatePersonaSession: (persona: string, sessionId: string | undefined) => void;
     readonly runtime?: RuntimeStepResolution;
+    readonly presentationContext?: FindingReviewPresentationContext;
   }): Promise<
     | {
         readonly publication: CanonicalFindingReviewPublication;
@@ -1144,6 +1221,7 @@ export class StepExecutor {
           workflowName: this.deps.getWorkflowName(),
           reportContent: report.reportContent,
           reviewerExecutionIdentity: reviewerSelectionIdentity,
+          ...(input.presentationContext === undefined ? {} : { presentationContext: input.presentationContext }),
         }),
       );
     }
@@ -1162,6 +1240,7 @@ export class StepExecutor {
         state: input.state,
         identity,
         runtime: input.runtime,
+        presentationContext: input.presentationContext,
       });
       normalized = plainNormalization;
       normalizerProviderInfo = plainNormalization.providerInfo;
@@ -1317,6 +1396,7 @@ export class StepExecutor {
             normalizedResponse,
           ),
           reviewerRawResourceEnvelope: publicationResourceEnvelope,
+          ...(input.presentationContext === undefined ? {} : { presentationContext: input.presentationContext }),
         });
     if (publication === undefined) {
       throw new Error(
@@ -1843,6 +1923,7 @@ export class StepExecutor {
         stepIteration,
         state,
         runtime: publicationResumeRuntime,
+        presentationContext: findingContractContext?.reviewer?.presentationContext,
       });
       if (resumedPublication !== undefined) {
         if ('terminalResponse' in resumedPublication) {
@@ -2085,6 +2166,7 @@ export class StepExecutor {
         },
         updatePersonaSession,
         runtime: executionRuntime,
+        presentationContext: findingContractContext?.reviewer?.presentationContext,
       });
       if ('terminalResponse' in prepared) {
         response = replaceResponseProviderUsage(

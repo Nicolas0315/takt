@@ -20,12 +20,14 @@ import type {
   CanonicalRawFinding,
   FindingLedger,
   FindingReconcileContext,
+  IntakeContractDefect,
   RawFinding,
   RawFindingEvidence,
   ReviewerAnomalyEntry,
   ReviewerAnomalyKind,
 } from './types.js';
 import { computeReviewerAnomalyStableKey } from './raw-canonicalization.js';
+import type { RestatementRequestBinding, RestatementRequestV1 } from './review-publication.js';
 
 export interface ReviewerAnomalySpec {
   kind: ReviewerAnomalyKind;
@@ -38,37 +40,49 @@ export interface ReviewerAnomalySpec {
   claimedLocation?: string;
   claimedExcerpt?: string;
   mismatchReason: string;
+  intakeContract?: IntakeContractDefect;
 }
 
 export function createReviewerAnomalySpec(input: {
   wire: RawFinding;
-  canonical: Pick<CanonicalRawFinding, 'reviewerStableKey' | 'lineageKey'>;
+  canonical: CanonicalRawFinding;
   anomalyKind: ReviewerAnomalyKind;
   reason: string;
   failedEvidence?: RawFindingEvidence;
+  intakeContract?: IntakeContractDefect;
 }): ReviewerAnomalySpec {
   const fileQuote = input.failedEvidence?.kind === 'file_quote'
     ? input.failedEvidence
     : undefined;
+  const originalClaimExcerpt = input.wire.description?.trim().length
+    ? input.wire.description
+    : input.wire.rawExcerpt?.trim().length
+      ? input.wire.rawExcerpt
+      : input.canonical.rawExcerpt;
+  const claimedExcerpt = fileQuote?.kind === 'file_quote'
+    ? fileQuote.verbatimExcerpt
+    : originalClaimExcerpt ?? input.canonical.rawExcerpt;
   return {
     kind: input.anomalyKind,
     stableKey: computeReviewerAnomalyStableKey({
       reviewerStableKey: input.canonical.reviewerStableKey,
       lineageKey: input.canonical.lineageKey,
       anomalyKind: input.anomalyKind,
+      ...(input.anomalyKind === 'intake-contract-incomplete'
+        ? { sourceExcerptDigest: input.wire.sourceBinding.excerptDigest }
+        : {}),
     }),
     lineageKey: input.canonical.lineageKey,
     sourceRawFindingIds: [input.wire.rawFindingId],
     sourceIntakeIds: [],
     reviewers: [input.wire.reviewer],
     title: input.wire.title ?? `Reviewer evidence anomaly ${input.wire.rawFindingId}`,
-    ...(fileQuote?.kind === 'file_quote'
-      ? {
-        claimedLocation: fileQuote.path,
-        claimedExcerpt: fileQuote.verbatimExcerpt,
-      }
+    ...(fileQuote?.kind === 'file_quote' ? { claimedLocation: fileQuote.path } : {}),
+    ...(claimedExcerpt !== undefined && claimedExcerpt.length > 0
+      ? { claimedExcerpt }
       : {}),
     mismatchReason: input.reason,
+    ...(input.intakeContract === undefined ? {} : { intakeContract: structuredClone(input.intakeContract) }),
   };
 }
 
@@ -88,6 +102,79 @@ function formatReviewerAnomalyId(stableKey: string, episodeSeed?: string): strin
 
 function mergeUnique(current: readonly string[], next: readonly string[]): string[] {
   return Array.from(new Set([...current, ...next]));
+}
+
+function normalizeClaimAtom(value: string): string {
+  return value.trim().replace(/\s+/gu, ' ');
+}
+
+function hasRestatementCorrespondence(input: {
+  anomaly: ReviewerAnomalyEntry;
+  sourceRaw: RawFinding;
+  admittedRaw: RawFinding;
+  request: RestatementRequestV1;
+}): boolean {
+  const { anomaly, sourceRaw, admittedRaw, request } = input;
+  // 前段の shape 判定は候補計数と共通の1関数に集約する — 複製すると片方だけが
+  // 変更されて「候補として数えるのに昇格しない/その逆」の不整合が生まれる。
+  if (!hasRestatementCandidateShape(request, anomaly, sourceRaw, admittedRaw)) {
+    return false;
+  }
+  const sourceAtom = sourceRaw.description?.trim().length
+    ? sourceRaw.description
+    : anomaly.claimedExcerpt?.trim().length
+      ? anomaly.claimedExcerpt
+      : sourceRaw.rawExcerpt?.trim().length
+        ? sourceRaw.rawExcerpt
+        : undefined;
+  const admittedAtom = admittedRaw.description?.trim().length
+    ? admittedRaw.description
+    : undefined;
+  if (sourceAtom === undefined || admittedAtom === undefined) {
+    return false;
+  }
+  if (normalizeClaimAtom(sourceAtom) !== normalizeClaimAtom(admittedAtom)) {
+    return false;
+  }
+  const sourceQuotes = sourceRaw.evidence.filter((evidence) => evidence.kind === 'file_quote');
+  if (sourceQuotes.length === 0) {
+    return true;
+  }
+  const admittedQuotes = admittedRaw.evidence.filter((evidence) => evidence.kind === 'file_quote');
+  return sourceQuotes.every((sourceQuote) => admittedQuotes.some((admittedQuote) => (
+    admittedQuote.path === sourceQuote.path
+    && admittedQuote.startLine === sourceQuote.startLine
+    && admittedQuote.endLine === sourceQuote.endLine
+    && admittedQuote.verbatimExcerpt === sourceQuote.verbatimExcerpt
+  )));
+}
+
+function hasRestatementCandidateShape(
+  request: RestatementRequestV1,
+  anomaly: ReviewerAnomalyEntry,
+  sourceRaw: RawFinding,
+  admittedRaw: RawFinding,
+): boolean {
+  return request.anomalyId === anomaly.id
+    && request.reviewer === anomaly.intakeContract?.presentationOwnerReviewer
+    && sourceRaw.reviewer === request.reviewer
+    && admittedRaw.reviewer === request.reviewer
+    && admittedRaw.relation === 'new'
+    && admittedRaw.targetFindingId === null
+    && admittedRaw.targetPrecondition === undefined;
+}
+
+function hasValidRestatementEcho(
+  admittedRaw: RawFinding,
+  anomaly: ReviewerAnomalyEntry,
+  bindings: readonly RestatementRequestBinding[],
+): boolean {
+  const echoedAnomalyId = admittedRaw.reassertsReviewerAnomalyId;
+  if (echoedAnomalyId === undefined) {
+    return true;
+  }
+  return echoedAnomalyId === anomaly.id
+    && bindings.some((binding) => binding.request.anomalyId === echoedAnomalyId);
 }
 
 function anomalySpecObservationKey(spec: ReviewerAnomalySpec): string {
@@ -113,10 +200,24 @@ function assertSameAnomalyIdentity(
   anomaly: ReviewerAnomalyEntry,
   spec: ReviewerAnomalySpec,
 ): void {
-  if (anomaly.kind !== spec.kind || anomaly.lineageKey !== spec.lineageKey) {
+  if (
+    anomaly.kind !== spec.kind
+    || (anomaly.kind !== 'intake-contract-incomplete' && anomaly.lineageKey !== spec.lineageKey)
+  ) {
     throw new Error(
       `Reviewer anomaly stable key "${spec.stableKey}" cannot identify different anomaly content`,
     );
+  }
+  if (anomaly.kind === 'intake-contract-incomplete') {
+    if (anomaly.intakeContract === undefined || spec.intakeContract === undefined) {
+      throw new Error(`Reviewer anomaly stable key "${spec.stableKey}" is missing intake contract metadata`);
+    }
+    if (
+      anomaly.intakeContract.presentationOwnerReviewer !== spec.intakeContract.presentationOwnerReviewer
+      || anomaly.intakeContract.classificationAuthorityId !== spec.intakeContract.classificationAuthorityId
+    ) {
+      throw new Error(`Reviewer anomaly stable key "${spec.stableKey}" cannot change intake contract ownership or limit`);
+    }
   }
 }
 
@@ -218,6 +319,7 @@ export function applyReviewerAnomalySpecsToLedger(
       ...(spec.claimedLocation !== undefined ? { claimedLocation: spec.claimedLocation } : {}),
       ...(spec.claimedExcerpt !== undefined ? { claimedExcerpt: spec.claimedExcerpt } : {}),
       mismatchReason: spec.mismatchReason,
+      ...(spec.intakeContract === undefined ? {} : { intakeContract: structuredClone(spec.intakeContract) }),
       firstObserved: observation,
       lastObserved: observation,
       occurrences: 1,
@@ -232,6 +334,8 @@ export interface ReviewerAnomalyPromotionCandidate {
   lineageKey: string;
   /** この raw を含む product finding を reconciled ledger から探すためのキー。 */
   rawFindingId: string;
+  /** engine-owned request binding for intake-contract correspondence */
+  restatementRequestBindings?: readonly RestatementRequestBinding[];
 }
 
 /**
@@ -257,18 +361,86 @@ export function linkPromotedReviewerAnomalies(
     }
   }
   const promotedFindingIdByLineageKey = new Map<string, string>();
+  // restatement promotion は「correspondence が成立した edge」だけを数え、anomaly 側・
+  // raw 側の双方で exact-one の組だけに authority を与える。request binding は
+  // publication（= report）単位で全 admitted raw に配られるため、shape 一致だけを
+  // 数えると batch 内の全 raw が全 anomaly の候補になり、複数 restatement の
+  // 同時成立が構造的に不可能になる（report 単位 binding の副作用）。
+  const restatementEdges: Array<{
+    anomalyId: string;
+    rawFindingId: string;
+    findingId: string;
+  }> = [];
+  const correspondingRawFindingIds = new Set<string>();
   for (const candidate of candidates) {
     const findingId = findingIdByRawFindingId.get(candidate.rawFindingId);
-    if (findingId !== undefined) {
+    const requestBindings = candidate.restatementRequestBindings ?? [];
+    const admittedRaw = ledger.rawFindings.find((raw) => raw.rawFindingId === candidate.rawFindingId);
+    const edgeAnomalyIds = new Set<string>();
+    for (const binding of requestBindings) {
+      const anomaly = anomalies.find((entry) => entry.id === binding.request.anomalyId);
+      const sourceRaw = anomaly?.sourceRawFindingIds
+        .map((rawFindingId) => ledger.rawFindings.find((raw) => raw.rawFindingId === rawFindingId))
+        .find((raw) => raw !== undefined);
+      if (
+        findingId === undefined
+        || anomaly?.kind !== 'intake-contract-incomplete'
+        || anomaly.promotedFindingId !== undefined
+        || anomaly.settlement !== undefined
+        || sourceRaw === undefined
+        || admittedRaw === undefined
+        || binding.reportDigest !== admittedRaw.sourceBinding.reportDigest
+        || !hasValidRestatementEcho(admittedRaw, anomaly, requestBindings)
+        || edgeAnomalyIds.has(anomaly.id)
+        || !hasRestatementCorrespondence({ anomaly, sourceRaw, admittedRaw, request: binding.request })
+      ) {
+        continue;
+      }
+      edgeAnomalyIds.add(anomaly.id);
+      restatementEdges.push({
+        anomalyId: anomaly.id,
+        rawFindingId: candidate.rawFindingId,
+        findingId,
+      });
+      correspondingRawFindingIds.add(candidate.rawFindingId);
+    }
+    // correspondence が成立しなかった raw は通常の新規 claim として扱い、既存の
+    // lineage 昇格（非 intake anomaly 用）から除外しない。restatement 由来という
+    // だけで一括抑止すると、restatement round 中の clean 観測が他 anomaly の
+    // 回復に使えなくなる。
+    if (findingId !== undefined && !correspondingRawFindingIds.has(candidate.rawFindingId)) {
       promotedFindingIdByLineageKey.set(candidate.lineageKey, findingId);
     }
   }
-  if (promotedFindingIdByLineageKey.size === 0) {
+  const anomalyEdgeCounts = new Map<string, number>();
+  const rawEdgeCounts = new Map<string, number>();
+  for (const edge of restatementEdges) {
+    anomalyEdgeCounts.set(edge.anomalyId, (anomalyEdgeCounts.get(edge.anomalyId) ?? 0) + 1);
+    rawEdgeCounts.set(edge.rawFindingId, (rawEdgeCounts.get(edge.rawFindingId) ?? 0) + 1);
+  }
+  const restatementPromotionByAnomalyId = new Map<string, string>();
+  for (const edge of restatementEdges) {
+    if (
+      anomalyEdgeCounts.get(edge.anomalyId) === 1
+      && rawEdgeCounts.get(edge.rawFindingId) === 1
+    ) {
+      restatementPromotionByAnomalyId.set(edge.anomalyId, edge.findingId);
+    }
+  }
+  if (promotedFindingIdByLineageKey.size === 0 && restatementPromotionByAnomalyId.size === 0) {
     return ledger;
   }
   let changed = false;
   const updated = anomalies.map((anomaly) => {
     if (!isOutstandingReviewerAnomaly(anomaly)) {
+      return anomaly;
+    }
+    if (anomaly.kind === 'intake-contract-incomplete') {
+      const promotedFindingId = restatementPromotionByAnomalyId.get(anomaly.id);
+      if (promotedFindingId !== undefined) {
+        changed = true;
+        return { ...anomaly, promotedFindingId };
+      }
       return anomaly;
     }
     const promotedFindingId = promotedFindingIdByLineageKey.get(anomaly.lineageKey);
@@ -282,5 +454,8 @@ export function linkPromotedReviewerAnomalies(
 }
 
 export function isOutstandingReviewerAnomaly(anomaly: ReviewerAnomalyEntry): boolean {
-  return anomaly.promotedFindingId === undefined && anomaly.settlement === undefined;
+  return anomaly.promotedFindingId === undefined
+    && anomaly.settlement === undefined
+    && anomaly.intakeContract?.terminalDisposition?.workflowOutcome
+      !== 'non_claim_observation_rejected';
 }
