@@ -6,7 +6,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [0.56.0] - 2026-08-06
+## [0.56.0] - 2026-08-07
 
 ### Added
 
@@ -25,15 +25,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Finding Contract legacy-compatibility machinery was removed (#1201). Ledgers from before the SQLite consolidation are not readable; run state is self-contained per run, so a new run is unaffected.
 - Shared instruction facets no longer branch on Finding Contract state (#1180). Each affected instruction is split into a standard variant with zero FC vocabulary and a `*-finding-contract` variant driven by the live ledger, with the common body extracted into partials; workflows wire the variant they need. Structural tests pin that standard facets stay FC-free after partial expansion.
 - The `peer-review` reviewers-cycle loop monitor threshold dropped from 5 to 3 (#1211), so a review/fix cycle is caught earlier.
-- Reviewer anomalies are now settled by a subsequent review rather than looping (#1209, #1210). An anomaly reaches a decision through the next review round, which removes the `need_replan` infinite cycle, and withdrawal settlement records the publication of every observer so the audit trail stays complete.
 
 ### Fixed
 
-- **Upgrading no longer breaks an existing `.takt/tasks.yaml`** (#1214). Every release from v0.39.0 through v0.55.1 wrote a task's start step under the key `start_movement`, and #1207 removed reading and writing of that key at the same time — so after upgrading, a single task carrying it made the whole file fail validation and even `takt list` stopped working. The key is read again and normalized to `start_step`; writes stay on `start_step`, so a file migrates as soon as anything saves it.
-- Tasks recorded before the session-state envelope migration are readable again (#1191), which unblocks "Mark as failed" on those tasks.
 - Content deltas are excluded from OpenCode's structural event count (#1185), so streamed text no longer consumes the guard's budget.
-- An empty response from OpenCode isolated structured execution now surfaces as an error instead of an empty `blocked` result (#1202), and the Phase 2 guard no longer rejects OpenCode's structured-output pseudo tool as a disallowed tool (#1203).
-- A `null` candidate from a provider is routed into the correction mechanism instead of escaping silently, and the missing prompt conditional that let it through was fixed (#1204).
 - Repeated tool-input updates no longer double-count sensitive sources (#1184).
 
 ### Internal
