@@ -21,8 +21,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
-- **BREAKING:** Isolated structured execution is now a required `Provider` method (#1198). Every provider must implement `setupIsolatedStructured` and declare `supportsIsolatedStructuredExecution`; OpenCode gained a real implementation. Custom providers built against the previous optional-capability shape must add the method.
-- **BREAKING:** All Finding Contract legacy-compatibility machinery was removed (#1201). Ledgers and report formats from before the SQLite consolidation are not readable — run state is self-contained per run, so no migration is provided.
+- OpenCode now supports isolated structured execution (#1198), so steps that need a structured result run on OpenCode the same way they do on the other providers.
+- Finding Contract legacy-compatibility machinery was removed (#1201). Ledgers from before the SQLite consolidation are not readable; run state is self-contained per run, so a new run is unaffected.
 - Shared instruction facets no longer branch on Finding Contract state (#1180). Each affected instruction is split into a standard variant with zero FC vocabulary and a `*-finding-contract` variant driven by the live ledger, with the common body extracted into partials; workflows wire the variant they need. Structural tests pin that standard facets stay FC-free after partial expansion.
 - The `peer-review` reviewers-cycle loop monitor threshold dropped from 5 to 3 (#1211), so a review/fix cycle is caught earlier.
 - Reviewer anomalies are now settled by a subsequent review rather than looping (#1209, #1210). An anomaly reaches a decision through the next review round, which removes the `need_replan` infinite cycle, and withdrawal settlement records the publication of every observer so the audit trail stays complete.

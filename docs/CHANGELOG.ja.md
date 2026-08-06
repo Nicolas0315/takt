@@ -21,8 +21,8 @@
 
 ### Changed
 
-- **BREAKING:** 隔離構造化実行を `Provider` の必須メソッドにしました (#1198)。すべてのプロバイダが `setupIsolatedStructured` を実装し `supportsIsolatedStructuredExecution` を宣言する必要があります。OpenCode には実実装が入りました。従来の任意ケーパビリティ前提で作られた独自プロバイダはメソッドの追加が必要です。
-- **BREAKING:** Finding Contract のレガシー互換機構をすべて削除しました (#1201)。SQLite 一本化より前の台帳とレポート形式は読めません。run 状態は run ごとに自己完結するため、移行手段は提供しません。
+- OpenCode が隔離構造化実行に対応しました (#1198)。構造化された結果を必要とするステップが、他のプロバイダーと同じように OpenCode でも動きます。
+- Finding Contract のレガシー互換機構を削除しました (#1201)。SQLite 一本化より前の台帳は読めません。run 状態は run ごとに自己完結するため、新しい run には影響しません。
 - 共有 instruction ファセットが Finding Contract の状態で分岐しないようにしました (#1180)。対象の instruction を、FC 用語をまったく含まない標準版と、ライブ台帳を前提とする `*-finding-contract` 版へ分割し、共通部分は partial へ抽出しました。ワークフロー側が必要な版を配線します。partial 展開後も標準ファセットが FC フリーであることは構造テストで固定しています。
 - `peer-review` の reviewers サイクル loop monitor しきい値を 5 から 3 へ下げました (#1211)。review/fix のサイクルをより早く検出します。
 - レビュアー anomaly を周回ではなく後続レビューで決着させるようにしました (#1209, #1210)。anomaly は次のレビューラウンドで決着へ至るため、`need_replan` の無限周回が解消されます。あわせて withdrawal settlement が全観測者の publication を記録し、監査証跡の完全性を保ちます。
