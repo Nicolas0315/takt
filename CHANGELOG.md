@@ -6,6 +6,32 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.56.0] - 2026-08-07
+
+### Added
+
+- Finding Contract (experimental) was overhauled (#1128, #1193, #1187, #1188, #1201, #1180): findings now live in a per-run SQLite ledger as machine-verified records, intake is contract-based so weak reviewer models no longer stall a round, a `takt-default-fc` workflow variant was added, and the manager/adjudicator roles are configurable from the workflow. Ledgers from before the consolidation are not readable. Workflows without `finding_contract:` are unaffected.
+- Dynamic facet pools (#1138). A normal agent step can declare `dynamic_facets: { pool, max_selected }`, and an internal selector agent picks which policies or knowledge facets from the named pool to inject for that round. Pools live in `.takt/facet-pools/`, `~/.takt/facet-pools/`, or a repertoire package; unknown selections fail before the step runs rather than silently degrading to the whole pool, and a resumed round restores its saved selection without re-running the selector. `parallel` sub-steps reject `dynamic_facets` at schema level. `takt eject` copies referenced pools alongside ejected workflows.
+- `runtime.yaml`, a dedicated provider configuration layer (#1136). `~/.takt/runtime.yaml` and `<project>/.takt/runtime.yaml` (project wins) own provider, model, provider options, auto routing, and internal-agent assignment in one place, replacing the provider settings scattered across `config.yaml`. It replaces the `config.yaml` provider keys as the configuration-layer default — step-side overrides (`promotion`, step `provider` / `model`, `workflow_call`, `provider_routing`, auto routing) still apply above it, and provider and model resolve independently per field. Mixing it with the legacy provider keys is rejected with a diagnostic naming the offending file and the key to migrate to, rather than silently picking one. CLI and environment overrides (`TAKT_PROVIDER` / `TAKT_MODEL`) still win, including on the non-workflow and selector seams. `config.yaml` continues to work unchanged when no `runtime.yaml` is present.
+- A `replan` step in `development-core` (#1206). `need_replan` used to restart the whole workflow from the beginning; it now routes to a dedicated replan step that revises the plan in place and continues, so a mid-run replan no longer discards completed work.
+- Post-edit self-scan in the builtin implement and fix instructions (#1179). After editing, the agent re-reads what it changed and checks the edit against the stated contract before handing off.
+
+### Changed
+
+- OpenCode now supports isolated structured execution (#1198), so steps that need a structured result run on OpenCode the same way they do on the other providers.
+- The `peer-review` reviewers-cycle loop monitor threshold dropped from 5 to 3 (#1211), so a review/fix cycle is caught earlier.
+
+### Fixed
+
+- Content deltas are excluded from OpenCode's structural event count (#1185), so streamed text no longer consumes the guard's budget.
+- Repeated tool-input updates no longer double-count sensitive sources (#1184).
+
+### Internal
+
+- Test-suite consolidation and pool rebalancing, plus a fix for a quadratic sanitize path (#1176).
+- Test timeout corrections: per-case budgets for the observability wiring tests that exceeded the shared 15s ceiling under 4-shard parallelism (#1212), a concurrent-CAS test that pinned one of two valid conflict paths (#1215), and a Windows-only 60s test timeout — three of the last four Windows CI failures were 15s timeouts (#1216).
+- Documentation: `CLAUDE.md` rewritten against the current architecture (#1189), all manuals aligned with the implementation (#1177), and the TAKT logo added and refined (#1186, #1194, #1213).
+
 ## [0.55.1] - 2026-08-04
 
 ### Changed
