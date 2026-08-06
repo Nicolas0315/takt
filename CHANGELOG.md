@@ -6,6 +6,42 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.56.0] - 2026-08-06
+
+### Added
+
+- The Finding Contract is now backed by a per-run SQLite ledger (#1128). A workflow that defines `finding_contract:` gets a `finding-contract.sqlite` under its run directory, and review findings become durable machine-verified records instead of prose in a report. Reviewers emit structured raw findings whose quotes and anchors the engine verifies byte-exact against the files; a `findings-manager` role runs after each review step to admit findings, judge same/new identity for dedup, and record rejected observations, but it cannot dismiss anything. Dismissal and conflict settlement belong to a separate adjudicator whose every basis requires machine-verifiable evidence, and terminal authority is granted only through `finding_contract_authority: terminal_adjudication` on a workflow call. Findings carry a lifecycle identity across rounds (`new` / `persists` / `reopened` / `resolved`) where resolution needs verified confirmation — "I fixed it" never resolves a finding on its own. Provider calls run under persistent leases with input/output/call budgets recorded in the ledger, and `stop_budget.max_rounds` (default 40) guarantees the loop terminates. Workflows without `finding_contract:` are unaffected.
+- Finding Contract intake was redesigned around an explicit contract (#1193). Weak or local reviewer models used to stall the intake stage; extraction, normalization, and admission are now separate contracted stages, so a reviewer that returns malformed or partial output produces a recorded anomaly instead of blocking the round.
+- `takt-default-fc`, a Finding Contract edition of the everyday development workflow (#1187). It has no prompt-based adjudication step — the manager plus terminal adjudication replace it — and its fix, plan, and monitor instructions treat the engine-injected live ledger state as the single source of truth rather than report files. The non-FC `takt-default` is unchanged.
+- `finding_contract.manager` and `finding_contract.adjudicator` are configurable from the workflow (#1188). The manager accepts `persona` / `instruction` / `output_contract` plus optional `policy` and `knowledge` additions and its own `provider` / `model`; the optional adjudicator accepts `persona` / `instruction` / `provider` / `model`, and omitting it keeps the previous supervisor-derived prompts byte-identical. Wire formats — structured output schemas, allowed actions, evidence requirements — remain engine-owned, so facets contribute judgment guidance only.
+- Dynamic facet pools (#1138). A normal agent step can declare `dynamic_facets: { pool, max_selected }`, and an internal selector agent picks which policies or knowledge facets from the named pool to inject for that round. Pools live in `.takt/facet-pools/`, `~/.takt/facet-pools/`, or a repertoire package; unknown selections fail before the step runs rather than silently degrading to the whole pool, and a resumed round restores its saved selection without re-running the selector. `parallel` sub-steps reject `dynamic_facets` at schema level. `takt eject` copies referenced pools alongside ejected workflows.
+- `runtime.yaml`, a dedicated provider configuration layer (#1136). `~/.takt/runtime.yaml` and `<project>/.takt/runtime.yaml` (project wins) own provider, model, provider options, auto routing, and internal-agent assignment in one place, replacing the provider settings scattered across `config.yaml`. Activating it switches the whole resolution ladder to runtime-v1 — mixing runtime-v1 with the legacy provider keys is rejected with a diagnostic naming the offending file and the key to migrate to, rather than silently picking one. CLI and environment overrides (`TAKT_PROVIDER` / `TAKT_MODEL`) still win, including on the non-workflow and selector seams. `config.yaml` continues to work unchanged when no `runtime.yaml` is present.
+- A `replan` step in `development-core` (#1206). `need_replan` used to restart the whole workflow from the beginning; it now routes to a dedicated replan step that revises the plan in place and continues, so a mid-run replan no longer discards completed work.
+- Post-edit self-scan in the builtin implement and fix instructions (#1179). After editing, the agent re-reads what it changed and checks the edit against the stated contract before handing off.
+
+### Changed
+
+- **BREAKING:** Isolated structured execution is now a required `Provider` method (#1198). Every provider must implement `setupIsolatedStructured` and declare `supportsIsolatedStructuredExecution`; OpenCode gained a real implementation. Custom providers built against the previous optional-capability shape must add the method.
+- **BREAKING:** All Finding Contract legacy-compatibility machinery was removed (#1201). Ledgers and report formats from before the SQLite consolidation are not readable — run state is self-contained per run, so no migration is provided.
+- Shared instruction facets no longer branch on Finding Contract state (#1180). Each affected instruction is split into a standard variant with zero FC vocabulary and a `*-finding-contract` variant driven by the live ledger, with the common body extracted into partials; workflows wire the variant they need. Structural tests pin that standard facets stay FC-free after partial expansion.
+- The `peer-review` reviewers-cycle loop monitor threshold dropped from 5 to 3 (#1211), so a review/fix cycle is caught earlier.
+- Reviewer anomalies are now settled by a subsequent review rather than looping (#1209, #1210). An anomaly reaches a decision through the next review round, which removes the `need_replan` infinite cycle, and withdrawal settlement records the publication of every observer so the audit trail stays complete.
+
+### Fixed
+
+- **Upgrading no longer breaks an existing `.takt/tasks.yaml`** (#1214). Every release from v0.39.0 through v0.55.1 wrote a task's start step under the key `start_movement`, and #1207 removed reading and writing of that key at the same time — so after upgrading, a single task carrying it made the whole file fail validation and even `takt list` stopped working. The key is read again and normalized to `start_step`; writes stay on `start_step`, so a file migrates as soon as anything saves it.
+- Tasks recorded before the session-state envelope migration are readable again (#1191), which unblocks "Mark as failed" on those tasks.
+- Content deltas are excluded from OpenCode's structural event count (#1185), so streamed text no longer consumes the guard's budget.
+- An empty response from OpenCode isolated structured execution now surfaces as an error instead of an empty `blocked` result (#1202), and the Phase 2 guard no longer rejects OpenCode's structured-output pseudo tool as a disallowed tool (#1203).
+- A `null` candidate from a provider is routed into the correction mechanism instead of escaping silently, and the missing prompt conditional that let it through was fixed (#1204).
+- Repeated tool-input updates no longer double-count sensitive sources (#1184).
+
+### Internal
+
+- Test-suite consolidation and pool rebalancing, plus a fix for a quadratic sanitize path (#1176).
+- Test timeout corrections: per-case budgets for the observability wiring tests that exceeded the shared 15s ceiling under 4-shard parallelism (#1212), a concurrent-CAS test that pinned one of two valid conflict paths (#1215), and a Windows-only 60s test timeout — three of the last four Windows CI failures were 15s timeouts (#1216).
+- Documentation: `CLAUDE.md` rewritten against the current architecture (#1189), all manuals aligned with the implementation (#1177), and the TAKT logo added and refined (#1186, #1194, #1213).
+
 ## [0.55.1] - 2026-08-04
 
 ### Changed

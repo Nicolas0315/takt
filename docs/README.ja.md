@@ -364,6 +364,10 @@ export TAKT_COPILOT_GITHUB_TOKEN=ghp_...   # GitHub Copilot CLI
 export TAKT_KIRO_API_KEY=...               # Kiro CLI
 ```
 
+### プロバイダー設定専用レイヤー（`runtime.yaml`）
+
+プロバイダー・モデル・プロバイダーオプション・自動ルーティング・内部エージェント割り当ては、`config.yaml` ではなく専用レイヤーに置けます。`~/.takt/runtime.yaml` と `<project>/.takt/runtime.yaml` があり、プロジェクト側が優先されます。`runtime.yaml` のプロバイダーセクションが有効になると解決ラダー全体をそちらが持ち、`config.yaml` の旧プロバイダーキーとの混在は、問題のファイルと移行先キーを示す診断つきで拒否されます。CLI と環境変数の上書きは引き続き最優先です。`runtime.yaml` がなければ `config.yaml` は従来どおり動作します。
+
 全設定項目・プロバイダープロファイル・モデル解決の詳細は [Configuration Guide](./configuration.ja.md) を参照してください。
 
 ## カスタマイズ

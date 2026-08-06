@@ -394,6 +394,18 @@ The removed `TAKT_OPENCODE_TOOL_ERROR_BUDGET`,
 `TAKT_OPENCODE_TOOL_RESULT_STAGNATION_REPEATS` variables are ignored and emit a
 one-time migration warning. See the configuration guide for the v6 guard policy.
 
+### Dedicated provider configuration (`runtime.yaml`)
+
+Provider, model, provider options, auto routing, and internal-agent assignment
+can live in a dedicated layer instead of `config.yaml`: `~/.takt/runtime.yaml`
+and `<project>/.takt/runtime.yaml`, with the project layer winning. Once a
+`runtime.yaml` provider section is active it owns the whole resolution ladder,
+and mixing it with the legacy provider keys in `config.yaml` is rejected with a
+diagnostic naming the file and the key to migrate to. CLI and environment
+overrides still win. Without a `runtime.yaml`, `config.yaml` behaves exactly as
+before. See [docs/configuration.md](docs/configuration.md) for the schema and
+the migration table.
+
 ## Customization
 
 ### Custom workflows
