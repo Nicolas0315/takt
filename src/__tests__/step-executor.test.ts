@@ -42,6 +42,8 @@ import { initializeGitFixture } from './helpers/git-fixture.js';
 import { verifiedSourceQuoteFields } from './helpers/finding-evidence.js';
 import { authorizeFindingLedgerFixture } from './helpers/finding-lifecycle-fixture.js';
 import {
+  computeRestatementRequestId,
+  createFindingReviewPresentationContextV2,
   createPendingFindingReviewNormalization,
   createFindingReviewPublication,
   loadPendingFindingReviewNormalization,
@@ -486,6 +488,91 @@ describe('StepExecutor', () => {
         model: 'normalizer-model',
       });
     }
+  });
+
+  it('Phase 2 は明示指定された finding contract context を使い restatement-only 契約を保つ', async () => {
+    const rawFinding = {
+      rawExcerpt: 'Issue: src/example.ts still bypasses the required boundary.',
+      candidate: {
+        rawFindingId: null,
+        familyTag: null,
+        severity: null,
+        title: null,
+        description: 'src/example.ts still bypasses the required boundary.',
+        suggestion: null,
+        relation: null,
+        targetFindingIds: [],
+        target: null,
+        evidenceRequests: [],
+      },
+    };
+    const harness = createPlainTextPublicationHarness([{
+      persona: 'default',
+      status: 'done',
+      content: '{"rawFindings":[]}',
+      structuredOutput: { rawFindings: [rawFinding] },
+      timestamp: new Date('2026-08-07T00:00:01.000Z'),
+    }]);
+    const requestWithoutId = {
+      anomalyId: 'RA-PHASE2-OVERRIDE',
+      reviewer: 'escalation-reviewer',
+      presentationOrdinal: 1,
+      reviewScopeSnapshotId: '7'.repeat(64),
+      sourceExcerptDigest: '8'.repeat(64),
+      claimedExcerpt: 'A bounded reviewer claim.',
+      targetPaths: [] as const,
+      missingRequirements: [] as const,
+      expectedRelation: 'new' as const,
+      expectedTargetFindingId: null,
+      expectedTargetPreconditionClass: 'absent' as const,
+    };
+    const presentationContext = createFindingReviewPresentationContextV2({
+      reviewScopeSnapshotId: requestWithoutId.reviewScopeSnapshotId,
+      restatementRequests: [{
+        ...requestWithoutId,
+        restatementRequestId: computeRestatementRequestId(requestWithoutId),
+      }],
+    });
+    // Phase 2 の既定経路（reviewer step 名から context を組み直す）は、この
+    // harness の phase context に buildFindingContractInstructionContext が無いため
+    // Finding Contract ブロックを一切出さない。明示 override が届いて初めて
+    // restatement-only 契約が Phase 2 の指示に残る。
+    const explicitContext = {
+      ledgerSummary: '{"findings":[]}',
+      reportLedgerSummary: '{"ids":[]}',
+      hasOpenFindings: false,
+      hasWaivedFindings: false,
+      hasDismissedFindings: false,
+      reviewer: {
+        mode: 'plain_text_normalized' as const,
+        reviewScopeSnapshotId: requestWithoutId.reviewScopeSnapshotId,
+        presentationContext,
+      },
+    };
+
+    await harness.executor.prepareFindingReviewPublication({
+      step: harness.step,
+      executableStep: harness.step,
+      reviewerOutputStrategy: PLAIN_TEXT_NORMALIZED_STRATEGY,
+      parentStepName: 'reviewers',
+      stepIteration: 1,
+      state: harness.state,
+      phase1Response: {
+        persona: 'reviewer',
+        status: 'done',
+        content: 'phase 1 investigation',
+        sessionId: 'reviewer-phase1-session',
+        timestamp: new Date('2026-08-07T00:00:00.000Z'),
+      },
+      agentOptions: { resolvedProvider: 'mock' },
+      onProviderAttempt: vi.fn(),
+      updatePersonaSession: harness.updatePersonaSession,
+      findingContractContext: explicitContext,
+    });
+
+    const reportInstruction = vi.mocked(executeAgent).mock.calls[0]?.[1] ?? '';
+    expect(reportInstruction).toContain('restatement-only review');
+    expect(reportInstruction).toContain('RA-PHASE2-OVERRIDE');
   });
 
   it('plain-text normalizerはmodel output不正時だけ新規抽出を1回訂正する', async () => {
@@ -2272,7 +2359,20 @@ describe('StepExecutor', () => {
     );
 
     expect(buildFindingContractInstructionContext)
-      .toHaveBeenCalledWith(step, { kind: 'structured', reportGeneration: 'structured', intake: 'reviewer_structured' });
+      .toHaveBeenCalledWith(
+        step,
+        { kind: 'structured', reportGeneration: 'structured', intake: 'reviewer_structured' },
+        undefined,
+        // owner context と escalation slot が同じ ledger / presentation counts を
+        // 見るための凍結キー。区切りは固定なので分解して検証する。
+        expect.any(String),
+      );
+    const freezeKey = String(buildFindingContractInstructionContext.mock.calls[0]![3]);
+    const freezeKeyParts = freezeKey.split('\u0000');
+    expect(freezeKeyParts).toHaveLength(3);
+    expect(freezeKeyParts[0]).toBe(step.name);
+    expect(Number(freezeKeyParts[1])).toBeGreaterThan(0);
+    expect(Number(freezeKeyParts[2])).toBeGreaterThan(0);
     expect(buildAgentOptions).toHaveBeenCalledWith(expect.objectContaining({
       structuredOutput,
     }), undefined);
