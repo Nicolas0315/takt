@@ -10,10 +10,7 @@
 
 ### Added
 
-- Finding Contract を run 単位の SQLite 台帳へ一本化しました (#1128)。`finding_contract:` を定義したワークフローは run ディレクトリ配下に `finding-contract.sqlite` を持ち、レビュー指摘がレポート内の文章ではなく機械検証された永続レコードになります。レビュアーは構造化された raw finding を出力し、引用とアンカーはファイルに対してバイト単位で検証されます。各レビューステップの後に `findings-manager` ロールが動き、採択・同一性判定（重複マージ）・却下観測の記録を行いますが、指摘を却下する権限は持ちません。却下と衝突の決着は別の adjudicator が担い、その根拠には必ず機械検証可能な証拠が要ります。終局権限はワークフロー呼び出しの `finding_contract_authority: terminal_adjudication` でのみ付与されます。指摘はラウンドをまたいでライフサイクル同一性（`new` / `persists` / `reopened` / `resolved`）を持ち、解決には検証済みの確認が必要です。「直しました」という申告だけでは解決になりません。プロバイダ呼び出しは入力・出力・呼び出し回数の予算を台帳に記録する永続リースの下で実行され、`stop_budget.max_rounds`（既定40）が有限停止を保証します。`finding_contract:` を持たないワークフローは影響を受けません。
-- Finding Contract の intake を契約ベースへ再設計しました (#1193)。弱いモデルやローカルモデルのレビュアーで intake 段階が滞留していた問題に対し、抽出・正規化・採択を独立した契約段階へ分離しました。壊れた出力や部分的な出力を返すレビュアーは、ラウンドを止める代わりに anomaly として記録されます。
-- 日常開発ワークフローの Finding Contract 版 `takt-default-fc` を追加しました (#1187)。プロンプトによる adjudication ステップを持たず、manager と終局 adjudication がその役割を担います。fix・plan・monitor の instruction は、レポートファイルではなくエンジンが注入する台帳のライブ状態を唯一の正本として扱います。非 FC 版の `takt-default` は変更ありません。
-- `finding_contract.manager` と `finding_contract.adjudicator` をワークフローから構成できるようにしました (#1188)。manager は `persona` / `instruction` / `output_contract` に加えて `policy`・`knowledge` の追加と独自の `provider` / `model` を受け付けます。adjudicator は任意で `persona` / `instruction` / `provider` / `model` を受け付け、省略時は従来の supervisor 由来のプロンプトがバイト単位で同一に保たれます。構造化出力スキーマ・許可アクション・証拠要件といったワイヤーフォーマットはエンジン所有のままなので、ファセットが足せるのは判断のガイダンスだけです。
+- 実験的機能の Finding Contract を刷新しました (#1128, #1193, #1187, #1188, #1201, #1180)。指摘は run 単位の SQLite 台帳で機械検証されたレコードとして管理され、intake の契約化により弱いレビュアーモデルでもラウンドが止まらなくなりました。ワークフロー版 `takt-default-fc` を追加し、manager / adjudicator はワークフローから構成できます。一本化より前の台帳は読めません。`finding_contract:` を持たないワークフローは影響を受けません。
 - 動的ファセットプールを追加しました (#1138)。通常のエージェントステップに `dynamic_facets: { pool, max_selected }` を宣言すると、内部のセレクターエージェントが指定プールからそのラウンドに注入する policy / knowledge を選びます。プールは `.takt/facet-pools/`、`~/.takt/facet-pools/`、レパートリーパッケージに置けます。未知の選択はステップ開始前に失敗し、プール全体へ黙って退避することはありません。再開時は保存済みの選択を復元し、セレクターを再実行しません。`parallel` の子ステップは `dynamic_facets` をスキーマレベルで拒否します。`takt eject` は参照されたプールもあわせてコピーします。
 - プロバイダ設定専用のレイヤー `runtime.yaml` を追加しました (#1136)。`~/.takt/runtime.yaml` と `<project>/.takt/runtime.yaml`（プロジェクト優先）が、プロバイダ・モデル・プロバイダオプション・自動ルーティング・内部エージェント割り当てを1か所で持ちます。これまで `config.yaml` に散在していたプロバイダ設定の置き換えです。有効化すると解決ラダー全体が runtime-v1 へ切り替わり、runtime-v1 と旧プロバイダキーの混在は、どちらかを黙って採用するのではなく、問題のファイルと移行先キーを示す診断つきで拒否されます。CLI と環境変数の上書き（`TAKT_PROVIDER` / `TAKT_MODEL`）は引き続き最優先で、非ワークフロー seam とセレクター seam でも同じです。`runtime.yaml` がなければ `config.yaml` は従来どおり動作します。
 - `development-core` に `replan` ステップを追加しました (#1206)。`need_replan` はこれまでワークフロー全体を先頭から再走させていましたが、専用の replan ステップへ遷移して計画をその場で改訂し継続するようになりました。実行途中の再計画で完了済みの作業を捨てなくなります。
@@ -22,8 +19,6 @@
 ### Changed
 
 - OpenCode が隔離構造化実行に対応しました (#1198)。構造化された結果を必要とするステップが、他のプロバイダーと同じように OpenCode でも動きます。
-- Finding Contract のレガシー互換機構を削除しました (#1201)。SQLite 一本化より前の台帳は読めません。run 状態は run ごとに自己完結するため、新しい run には影響しません。
-- 共有 instruction ファセットが Finding Contract の状態で分岐しないようにしました (#1180)。対象の instruction を、FC 用語をまったく含まない標準版と、ライブ台帳を前提とする `*-finding-contract` 版へ分割し、共通部分は partial へ抽出しました。ワークフロー側が必要な版を配線します。partial 展開後も標準ファセットが FC フリーであることは構造テストで固定しています。
 - `peer-review` の reviewers サイクル loop monitor しきい値を 5 から 3 へ下げました (#1211)。review/fix のサイクルをより早く検出します。
 
 ### Fixed
