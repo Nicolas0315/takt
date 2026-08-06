@@ -25,6 +25,11 @@ import { resolveDeterministicAutoRoutingProviderInfo, toAutoRoutingStepMetadata 
 import { buildFindingManagerStep } from '../../core/workflow/findings/manager-step.js';
 import { buildFindingTerminalAdjudicationStep } from '../../core/workflow/findings/adjudication-step.js';
 import {
+  collectTaskReviewScope,
+  resolveReviewScopeBaseRange,
+  type TaskReviewScope,
+} from '../../core/workflow/review-scope.js';
+import {
   validateFindingContractSyntheticProviderModels,
   type FindingContractSyntheticProviderValidationOptions,
 } from '../../core/workflow/engine/WorkflowValidator.js';
@@ -39,6 +44,7 @@ import { redactProviderOptions } from '../../core/workflow/providerOptionsRedact
 import { header, info, error, blankLine } from '../../shared/ui/index.js';
 import { DEFAULT_WORKFLOW_NAME } from '../../shared/constants.js';
 import { sanitizeTerminalText } from '../../shared/utils/text.js';
+import { getErrorMessage } from '../../shared/utils/error.js';
 import { translateWorkflowConfigError } from '../../shared/workflowConfigMetadata.js';
 
 function printStepExecutionMetadata(step: WorkflowStep): void {
@@ -177,12 +183,33 @@ function printFindingContractMetadata(
   info(`Finding adjudicator model: ${formatConfiguredValue(adjudicatorProviderInfo.model)}`);
 }
 
+/**
+ * レビュー範囲はプレビュー実行ごとに1度だけ解決する。ステップ・並列サブステップごとに
+ * 再解決すると、同じプレビュー出力の中で提示される範囲がずれ得る。
+ *
+ * `takt prompt` は診断ツールであり、レビュー範囲はプレビュー対象の一部でしかない。
+ * git が使えない、リポジトリが壊れている、パスが非 UTF-8 といった理由で範囲を
+ * 解決できなくても、プロンプト本体のプレビューは見せる価値がある。そのため
+ * ここだけ例外を診断値へ変換する。**この変換は preview 経路限定** であり、
+ * 実行時（WorkflowEngineSetup 経由）のスコープ解決は fail-fast のまま変えない。
+ * 範囲が undefined のとき `{review_scope}` は「算出していません」に解決する。
+ */
+function resolvePreviewReviewScope(cwd: string): TaskReviewScope | undefined {
+  try {
+    return collectTaskReviewScope({ cwd, baseRange: resolveReviewScopeBaseRange(cwd) });
+  } catch (err) {
+    info(`Review scope unavailable: ${sanitizeTerminalText(getErrorMessage(err))}`);
+    return undefined;
+  }
+}
+
 function buildInstructionContext(
   cwd: string,
   config: WorkflowConfig,
   stepIndex: number,
   step: WorkflowStep,
   language: Language,
+  reviewScope: TaskReviewScope | undefined,
 ): InstructionContext {
   return {
     task: '<task content>',
@@ -199,6 +226,7 @@ function buildInstructionContext(
     // （containment 検証は維持される）。
     validateReportReferences: false,
     language,
+    reviewScope,
   };
 }
 
@@ -208,10 +236,11 @@ function previewAgentStep(
   stepIndex: number,
   step: WorkflowStep,
   language: Language,
+  reviewScope: TaskReviewScope | undefined,
 ): void {
   printStepExecutionMetadata(step);
 
-  const context = buildInstructionContext(cwd, config, stepIndex, step, language);
+  const context = buildInstructionContext(cwd, config, stepIndex, step, language, reviewScope);
   const phase1Builder = new InstructionBuilder(step, context);
   console.log('\n--- Phase 1 (Main Execution) ---\n');
   console.log(phase1Builder.build());
@@ -223,6 +252,7 @@ function previewAgentStep(
       reportDir: '.takt/runs/preview/reports',
       stepIteration: 1,
       language,
+      reviewScope: context.reviewScope,
     });
     console.log('\n--- Phase 2 (Report Output) ---\n');
     console.log(reportBuilder.build());
@@ -291,6 +321,8 @@ export async function previewPrompts(
   printFindingContractMetadata(config, providerResolution);
   blankLine();
 
+  const reviewScope = resolvePreviewReviewScope(cwd);
+
   for (const [i, step] of config.steps.entries()) {
     const separator = '='.repeat(60);
     const safeStepName = sanitizeTerminalText(step.name);
@@ -310,10 +342,10 @@ export async function previewPrompts(
           ? step.parallel.fixed.some((fixed) => fixed === substep) ? 'fixed' : 'pool candidate'
           : 'parallel';
         console.log(`\n--- ${role} substep ${subIndex + 1}: ${safeSubstepName} (persona: ${safeSubstepPersonaDisplayName}) ---\n`);
-        previewAgentStep(cwd, config, i, substep, language);
+        previewAgentStep(cwd, config, i, substep, language, reviewScope);
       }
     } else {
-      previewAgentStep(cwd, config, i, step, language);
+      previewAgentStep(cwd, config, i, step, language, reviewScope);
     }
 
     blankLine();
