@@ -146,6 +146,32 @@ describe('TaskExecutionConfigSchema', () => {
     expect(config.start_step).toBe('plan');
   });
 
+  it('should read the legacy start_movement key as start_step', () => {
+    const config = TaskExecutionConfigSchema.parse({
+      start_movement: 'develop',
+    }) as Record<string, unknown>;
+
+    expect(config.start_step).toBe('develop');
+    expect(config.start_movement).toBeUndefined();
+  });
+
+  it('should prefer start_step when the legacy start_movement key is also present', () => {
+    const config = TaskExecutionConfigSchema.parse({
+      start_step: 'plan',
+      start_movement: 'develop',
+    }) as Record<string, unknown>;
+
+    expect(config.start_step).toBe('plan');
+    expect(config.start_movement).toBeUndefined();
+  });
+
+  it('should not let the legacy start_movement key mask a non-string start_step', () => {
+    expect(() => TaskExecutionConfigSchema.parse({
+      start_step: 123,
+      start_movement: 'develop',
+    })).toThrow();
+  });
+
   it('should require occurrence and accept omitted or positive integer step iterations', () => {
     const baseResumePoint = {
       version: 2,
