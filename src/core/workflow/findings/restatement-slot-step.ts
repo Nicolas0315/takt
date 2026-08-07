@@ -1,6 +1,8 @@
 import type { AgentWorkflowStep } from '../../models/types.js';
+import type { ProviderEscalationTarget, ProviderRoutingEntry } from '../../models/config-types.js';
 import type { StepProviderOptions } from '../../models/workflow-types.js';
 import type { ProviderType } from '../../../shared/types/provider.js';
+import { internalAgentSeatOverride } from '../internal-agent-seat.js';
 import { FINDING_ESCALATION_REVIEWER_ROUTING_KEY } from '../../models/finding-types.js';
 import type { RestatementPresentationPhase } from './restatement-presentation-phase.js';
 
@@ -42,12 +44,43 @@ export function findingRestatementSlotReportName(input: {
 
 /**
  * 言い直し slot の1呼び出しが使う provider/model。呼び出し側が解決済みの値を渡す。
- * `model` は owner 側が model を持たない構成をそのまま引き継ぐため optional。
+ * `model` は owner 側が model を持たない構成をそのまま引き継ぐため optional で、
+ * 未指定は「この provider の既定に任せる」を意味する（下位層で再解決させない）。
  */
 export interface RestatementSlotProviderTarget {
   provider: ProviderType;
   model?: string;
   providerOptions?: StepProviderOptions;
+}
+
+/**
+ * 格上げ枠（最終提示）の宛先を決める。
+ *
+ * **発火条件は owner が解決された profile の `escalate` 宣言だけ**である。宣言が無い
+ * レビュアー（最上位 profile など、意図的に格上げ先を持たない構成）は最終提示も本人が
+ * 受け持ち、格上げ枠は発生しない。`escalation-reviewer` seat はこの発火条件を動かさず、
+ * 「発火したときにどこへ出すか」だけを上書きする。seat を置いた途端に全レビュアーの
+ * 最終枠が代打へ移ると、格上げを持たない構成の意味が消える。
+ *
+ * 提示フェーズの判定（WorkflowEngineSetup の escalationEnabled）と実際の宛先解決
+ * （restatement-slot-runner）が同じ答えを出すよう、判定はここ1箇所に集約する。
+ */
+export function resolveFindingEscalationTarget(input: {
+  readonly seat: ProviderRoutingEntry | undefined;
+  readonly escalation: ProviderEscalationTarget | undefined;
+}): RestatementSlotProviderTarget | undefined {
+  if (input.escalation === undefined) {
+    return undefined;
+  }
+  const seat = internalAgentSeatOverride(input.seat);
+  if (seat !== undefined) {
+    return {
+      provider: seat.provider,
+      ...(seat.model === undefined ? {} : { model: seat.model }),
+      ...(seat.providerOptions === undefined ? {} : { providerOptions: seat.providerOptions }),
+    };
+  }
+  return input.escalation;
 }
 
 /**
@@ -137,11 +170,13 @@ export function buildFindingRestatementSlotStep(input: {
     // owner と同じ道具立てで走る。target が providerOptions を持たない場合
     // （格上げ先 profile が指定していない）は owner のものを引き継ぐ。
     // provider/model は呼び出し側で解決済み。以降の routing 層で再解決させない。
+    // model が undefined でも `modelSpecified` は立てる — 立てないと model だけが
+    // routing 層で再解決され、別 provider 向けの model が混ざった組になる
+    // （provider だけを指名した escalation-reviewer seat がこの経路を通る）。
     provider: input.target.provider,
     providerSpecified: true,
-    ...(input.target.model === undefined
-      ? {}
-      : { model: input.target.model, modelSpecified: true }),
+    ...(input.target.model === undefined ? {} : { model: input.target.model }),
+    modelSpecified: true,
     ...(input.target.providerOptions === undefined
       ? (owner.providerOptions === undefined ? {} : { providerOptions: owner.providerOptions })
       : { providerOptions: input.target.providerOptions }),

@@ -5,8 +5,6 @@ import { getProviderValidationErrorSource } from '../core/workflow/provider-vali
 
 const VALID_ADJUDICATOR = {
   persona: 'supervisor',
-  provider: 'codex' as const,
-  model: 'gpt-5',
 };
 
 const {
@@ -443,14 +441,10 @@ describe('previewPrompts', () => {
           personaDisplayName: 'Findings Manager',
           instruction: 'manager instruction',
           outputContract: 'manager output contract',
-          provider: 'codex',
-          model: 'gpt-5.5',
         },
         adjudicator: {
           persona: 'supervisor',
           personaDisplayName: 'Finding Adjudicator',
-          provider: 'codex',
-          model: 'gpt-5.5',
         },
       },
       steps: [
@@ -578,7 +572,7 @@ describe('previewPrompts', () => {
     expect(mockInfo).toHaveBeenCalledWith('Finding manager model: env-model');
   });
 
-  it('finding manager の provider 直接指定時は persona model を表示しない', async () => {
+  it('findings-manager seat 指定時は persona model を表示しない', async () => {
     mockResolveAuxiliaryProviderEnvironment.mockReturnValue(compiledEnvironment({
       personaProviders: {
         'Findings Manager': {
@@ -586,6 +580,7 @@ describe('previewPrompts', () => {
           model: 'opencode/persona-model',
         },
       },
+      internalAgents: { findingsManager: { provider: 'codex' } },
     }));
     mockLoadWorkflowByIdentifier.mockReturnValueOnce({
       name: 'finding-contract-preview',
@@ -596,7 +591,6 @@ describe('previewPrompts', () => {
           personaDisplayName: 'Findings Manager',
           instruction: 'manager instruction',
           outputContract: 'manager output contract',
-          provider: 'codex',
         },
         adjudicator: VALID_ADJUDICATOR,
       },

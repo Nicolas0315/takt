@@ -498,21 +498,21 @@ kiro_cli_path: /usr/local/bin/kiro-cli
 
 provider と model の選択には、[Provider Routing](#provider-routing) に記載した単一のフィールド別優先順位を使用します。通常 step、parallel sub-step、合成 step、workflow call は、各種類で利用可能なレイヤーについて同じ契約に従います。parallel sub-step は promotion をサポートしません。
 
-Finding Contract workflow では、`finding_contract.manager.provider` / `model` と `finding_contract.adjudicator.provider` / `model` は、それぞれの合成 step の step レベル provider/model として扱われます。実装上のフィールド別優先順は、CLI/環境変数の明示 override → 実行時にマッチした promotion（通常の agent step のみ）→ step または parallel sub-step の provider/model（これらの直接指定を含む）→ `workflow_call` override → `provider_routing` の step/tag/persona → deprecated の `persona_providers` → auto routing → workflow → project → global → provider default です。両方とも未指定の場合は通常の workflow step と同じ fallback chain を使います。`provider` だけを指定すると下位優先度の model fallback は停止し、明示 model が必須の provider では検証エラーになります。
+Finding Contract workflow に provider や model の名前は書きません。合成ロールの宛先は `runtime.yaml` の `provider.targets.internal_agents` seat（すべて任意）で指名し、指定された seat はそのロールの合成 step の step レベル provider/model として扱われます。実装上のフィールド別優先順は、CLI/環境変数の明示 override → 実行時にマッチした promotion（通常の agent step のみ）→ step または parallel sub-step の provider/model（seat 指定を含む）→ `workflow_call` override → `provider_routing` の step/tag/persona → deprecated の `persona_providers` → auto routing → workflow → project → global → provider default です。seat 未指定のロールは通常の workflow step と同じ fallback chain を使います。provider だけを指名した seat は下位優先度の model fallback を止めるため、明示 model が必須の provider では検証エラーになります。
 
 ```yaml
-finding_contract:
-  manager:
-    persona: findings-manager
-    instruction: findings-manager
-    output_contract: findings-manager
-    provider: codex
-    model: <strong-model>
-  adjudicator:
-    persona: supervisor
-    instruction: adjudicate-finding-contract
-    provider: codex
-    model: <strong-model>
+# runtime.yaml
+version: 1
+provider:
+  profiles:
+    strong: { provider: codex, model: <strong-model> }
+  targets:
+    internal_agents:
+      findings-manager:     { profile: strong }
+      terminal-adjudicator: { profile: strong }
+      loop-judge:           { profile: strong }
+      escalation-reviewer:  { profile: strong }
+      intake-normalizer:    { profile: strong }
 ```
 
 workflow YAML では、通常 step、parallel sub-step、`loop_monitors.judge` の `model: null` は model の明示的な省略を表します。`model` 未指定とは異なります。未指定の場合は routing、workflow、loop monitor judge のトリガー元 step、入力由来の値など、適用可能な下位優先度のソースへフォールバックしますが、`model: null` はその entry で model 解決を止め、実効 model を未定義のままにします。解決済み provider に CLI または provider 側のデフォルトを使わせたい場合に指定します。明示 model が必須の provider では、model が供給されないため検証エラーになります。
@@ -606,6 +606,10 @@ provider:
         profile: router
       intake-normalizer:
         profile: sol-high
+      findings-manager:
+        profile: sol-high
+      terminal-adjudicator:
+        profile: sol-high
 
   auto_routing:
     strategy: balanced
@@ -659,15 +663,28 @@ defaults
   < steps
 ```
 
-内部 agent（`selector` / `assistant` / `intake-normalizer`）は別のラダーで解決します。`internal_agents` は step 解決後に汎用的に上書きされる target ではありません。
+内部 agent（`selector` / `assistant` / `intake-normalizer` / `findings-manager` /
+`terminal-adjudicator` / `loop-judge` / `escalation-reviewer`）は別のラダーで解決します。
+`internal_agents` は step 解決後に汎用的に上書きされる target ではありません。
 
 ```text
 defaults
   < internal_agents.<agent>
 ```
 
-`intake-normalizer` だけはこの先にも候補が続きます。seat が割り当てられていない場合は
-レビュアーの `escalate` 先 → 通常の既定解決の順で決まります（[workflows.ja.md](workflows.ja.md) 参照）。
+`terminal-adjudicator` は persona facet「supervisor」に対応するロールの runtime 上の名前で、
+両者は意図的に別の名前です。
+
+**seat の指定はすべて任意です。** 未指定の seat は何も変えません。そのロールは従来どおりの
+解決を続けます。Finding Contract の合成ロールでは persona routing（固定キー
+`findings-manager` / `supervisor` / `loop-judge`）→ workflow → project → global →
+provider 既定の順です。`intake-normalizer` はその先にも候補が続き、レビュアー profile の
+`escalate` 先 → 通常の既定解決の順で決まります（[workflows.ja.md](workflows.ja.md) 参照）。
+
+`escalation-reviewer` だけは「そのロールが走るかどうか」を一切変えません。格上げ再レビューは
+レビュアーが解決された profile が `escalate` を宣言している場合にだけ発火し、宣言の無い
+レビュアーは seat の有無にかかわらず最終提示も本人が受け持ちます。seat は
+`escalate` 宣言によって既に発火した格上げの宛先だけを差し替えます。
 
 同じ優先度の target（例えば複数の一致する tag）が異なる provider を割り当てた場合は、暗黙に一方を選ばず fail-fast します。コマンドラインの `--provider` / `--model` は実行時 override であり、legacy と runtime のどちらのモードでも許可されます。
 
@@ -686,9 +703,16 @@ runtime と legacy の provider 設定は混在させられません。各 legac
 | `provider_routing.steps` | `provider.targets.steps` |
 | `persona_providers` | `provider.targets.personas` |
 | `takt_providers.selector` / `takt_providers.assistant` | `provider.targets.internal_agents` |
+| `finding_contract.manager.provider` / `model` | `provider.targets.internal_agents.findings-manager` |
+| `finding_contract.adjudicator.provider` / `model` | `provider.targets.internal_agents.terminal-adjudicator` |
 | `auto_routing` | `provider.auto_routing` |
 | auto routing candidates | `provider.profiles` を参照する pool candidates |
 | workflow 内の provider 指定 | `provider.targets.steps` |
+
+末尾2行は `config.yaml` の設定ではなく workflow YAML のキーで、deprecated ではなく削除済みです。
+`finding_contract` のスキーマは strict なので、`manager` / `adjudicator` に `provider` や `model`
+が残っているとロード時に未知キーとして拒否され、キー名とパスが示されます。値は対応する
+`internal_agents` seat へ移すか、削除して以降のレイヤーへ委ねてください。
 
 ### 混在エラー
 
@@ -823,9 +847,9 @@ provider と model は各レイヤーで個別に解決されます。provider �
 
 「有効な promotion」とは、通常の agent step の `promotion` エントリのうち、実行回数条件（`at: <N>`）または `ai()` 条件が現在の実行にマッチしたものを指します。parallel sub-step では promotion を指定できないため、CLI/環境変数の明示 override の次に sub-step YAML の provider/model が優先されます。[Step レベルのプロバイダープロモーション](./workflows.ja.md#step-レベルのプロバイダープロモーション)を参照してください。
 
-Finding Contract manager では、`finding_contract.manager.provider` と `finding_contract.manager.model` が合成 `findings-manager` step の `step YAML provider/model` 位置に入ります。
+指定された `internal_agents` seat は、そのロールの合成 step の `step YAML provider/model` 位置に入ります。seat の指定はすべて任意で、未指定なら以降のレイヤーへそのまま落ちます。
 
-合成された Finding Contract ロールは、設定した persona 名ではなく固定の persona キーで `provider_routing.personas` を解決します。`findings-manager`（manager）、`supervisor`（conflict / terminal adjudication）、`loop-judge`（loop monitor の judge）です。格上げ再レビューはこの方式では設定しません。owner レビュアーの step をそのまま継承し、モデルはそのレビュアーが解決された profile の `escalate` 先から取ります。reviewer キーは固定文字列 `escalation-reviewer` で、Finding Contract workflow では常に予約 step 名です。
+seat 未指定の場合、合成された Finding Contract ロールは、設定した persona 名ではなく固定の persona キーで `provider_routing.personas` を解決します。`findings-manager`（manager）、`supervisor`（conflict / terminal adjudication）、`loop-judge`（loop monitor の judge）です。格上げ再レビューに persona routing はありません。発火するのはレビュアーが解決された profile が `escalate` を宣言している場合だけで、`escalation-reviewer` seat は発火条件を動かしません。owner レビュアーの step をそのまま継承し、モデルは seat があればそこから、無ければ `escalate` 先から取ります。reviewer キーは固定文字列 `escalation-reviewer` で、Finding Contract workflow では常に予約 step 名です。
 
 ### Auto Routing
 
