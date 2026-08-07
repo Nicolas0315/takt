@@ -140,6 +140,21 @@ function validateReferences(
       assertProfile(assignment.profile, referencedBy);
     } else if (assignment.pool !== undefined) {
       assertPool(assignment.pool, referencedBy);
+    } else if (assignment.ladder !== undefined) {
+      // Every stage of a ladder must resolve to a fully-defined profile up front (CT-LAD-5); an
+      // unresolved or incomplete stage fails fast here, never at the moment a promotion advances.
+      const seenProfiles = new Set<string>();
+      assignment.ladder.forEach((profileName, stage) => {
+        assertProfile(profileName, `${referencedBy} ladder[${stage}]`);
+        // Promotion is a monotonic escalation, so a stage that repeats an earlier profile is a
+        // self-reference / cycle in the ladder — the author asked for "stronger than itself".
+        if (seenProfiles.has(profileName)) {
+          throw new Error(
+            `Profile "${profileName}" is repeated by ${referencedBy} ladder[${stage}]; a ladder must escalate to a different profile at every stage`,
+          );
+        }
+        seenProfiles.add(profileName);
+      });
     }
   };
 

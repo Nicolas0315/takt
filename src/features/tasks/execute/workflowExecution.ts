@@ -411,6 +411,7 @@ async function executeWorkflowInternal(
         providerOptionsOriginResolver: options.providerOptionsOriginResolver,
         personaProviders: bootstrap.personaProviders,
         providerRouting: bootstrap.providerRouting,
+        providerLadders: bootstrap.providerLadders,
         providerEscalation: bootstrap.providerEscalation,
         intakeNormalizerProvider: bootstrap.intakeNormalizerProvider,
         providerRoutingTagConflictPolicy: bootstrap.providerRoutingTagConflictPolicy,

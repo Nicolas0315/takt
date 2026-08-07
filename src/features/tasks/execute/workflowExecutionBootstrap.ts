@@ -4,6 +4,7 @@ import { CapabilityAwareStructuredCaller } from '../../../agents/structured-call
 import type { WorkflowConfig } from '../../../core/models/index.js';
 import type {
   ProviderEscalationTarget,
+  ProviderLadderConfig,
   ProviderRoutingEntry,
   ResolvedObservabilityConfig,
   TagRoutingConflictPolicy,
@@ -74,6 +75,7 @@ import type { WorkflowExecutionOptions } from './types.js';
 import { resolveCompiledProviderEnvironment } from '../../../infra/config/runtime-provider/provider-environment.js';
 import {
   collectLegacyProviderSignals,
+  collectStepPromotionEntries,
   selectConfigTaktProviders,
 } from '../../../infra/config/runtime-provider/legacy-signals.js';
 import type { LegacyProviderEnvironmentInput } from '../../../infra/config/runtime-provider/environment.js';
@@ -113,6 +115,7 @@ export interface WorkflowExecutionBootstrap {
   configuredModelSource: ProviderResolutionSource;
   personaProviders: WorkflowExecutionOptions['personaProviders'];
   providerRouting: WorkflowExecutionOptions['providerRouting'];
+  providerLadders: ProviderLadderConfig | undefined;
   providerEscalation: ProviderEscalationTarget | undefined;
   intakeNormalizerProvider: ProviderRoutingEntry | undefined;
   providerRoutingTagConflictPolicy: TagRoutingConflictPolicy;
@@ -534,6 +537,7 @@ export async function createWorkflowExecutionBootstrap(
         provider: workflowConfig.provider,
         model: workflowConfig.model,
         autoRouting: workflowConfig.autoRouting,
+        promotion: collectStepPromotionEntries(workflowConfig.steps),
       },
       options.providerOptionsSource,
     ),
@@ -554,6 +558,7 @@ export async function createWorkflowExecutionBootstrap(
   const configuredModelSource = providerEnvironment.modelSource;
   const effectivePersonaProviders = providerEnvironment.personaProviders;
   const effectiveProviderRouting = providerEnvironment.providerRouting;
+  const effectiveProviderLadders = providerEnvironment.providerLadders;
   const effectiveProviderOptions = providerEnvironment.providerOptions;
   const providerRoutingTagConflictPolicy = providerEnvironment.tagConflictPolicy;
   const autoRoutingReachTracker = new AutoRoutingReachTracker();
@@ -694,6 +699,7 @@ export async function createWorkflowExecutionBootstrap(
     configuredModelSource,
     personaProviders: effectivePersonaProviders,
     providerRouting: effectiveProviderRouting,
+    providerLadders: effectiveProviderLadders,
     providerEscalation: providerEnvironment.escalation,
     intakeNormalizerProvider: providerEnvironment.internalAgents?.intakeNormalizer,
     providerRoutingTagConflictPolicy,

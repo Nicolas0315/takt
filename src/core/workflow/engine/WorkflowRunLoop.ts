@@ -162,6 +162,8 @@ async function resolveStepPromotionRuntime(
     structuredCaller: deps.options.structuredCaller,
     childProcessEnv: deps.options.childProcessEnv,
     resolveStepProviderModel: deps.resolveStepProviderModelBeforeAutoRouting,
+    providerLadders: deps.options.providerLadders,
+    providerRoutingTagConflictPolicy: deps.options.providerRoutingTagConflictPolicy,
   }, step, stepIteration, runtime);
 }
 
