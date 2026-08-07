@@ -32,8 +32,24 @@ vi.mock('../core/workflow/findings/contract-intake.js', async (importOriginal) =
   };
 });
 
+// slot 本体の反復は finding-fc-restatement-slot.test.ts が持つ。ここで固定するのは
+// 単独ステップ経路が slot へ渡す配線（owner / 提示予算 / 取り込み契約 / terminal 置換）。
+vi.mock('../core/workflow/findings/restatement-slot-runner.js', async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import('../core/workflow/findings/restatement-slot-runner.js')
+  >();
+  return {
+    ...actual,
+    runFindingRestatementSlot: vi.fn().mockResolvedValue(undefined),
+  };
+});
+
 import { executeAgent } from '../agents/agent-usecases.js';
 import { ingestFindingContractResults } from '../core/workflow/findings/contract-intake.js';
+import {
+  runFindingRestatementSlot,
+  type FindingRestatementSlotInput,
+} from '../core/workflow/findings/restatement-slot-runner.js';
 import { createRawFindingsStructuredOutput } from '../core/workflow/findings/manager-agent.js';
 import { RawFindingsOutputValidationJsonSchema } from '../core/models/finding-schemas.js';
 import type { FindingManagerValidationReport } from '../core/workflow/findings/store.js';
@@ -41,6 +57,7 @@ import { createTestFindingLedgerStore } from './helpers/finding-storage.js';
 import { initializeGitFixture } from './helpers/git-fixture.js';
 import { verifiedSourceQuoteFields } from './helpers/finding-evidence.js';
 import { authorizeFindingLedgerFixture } from './helpers/finding-lifecycle-fixture.js';
+import type { CanonicalFindingReviewPublication } from '../core/workflow/findings/review-publication.js';
 import {
   computeRestatementRequestId,
   createFindingReviewPresentationContextV2,
@@ -120,6 +137,8 @@ describe('StepExecutor', () => {
     reviewerOverrides?: {
       readonly agentResponses?: readonly AgentResponse[];
     },
+    /** finding_contract.review_budget。差し戻し slot の提示予算の出所。 */
+    reviewBudgetOverride?: { readonly maxReviewRounds: number },
   ) {
     const reportContent = reportContentOverride ?? [
       '# Architecture Review',
@@ -168,6 +187,7 @@ describe('StepExecutor', () => {
       ],
     });
     const state = makeState();
+    let storedLedger: { findings: unknown[] } = { findings: [] };
     const findingContractContext = {
       ledgerSummary: '{"findings":[]}',
       reportLedgerSummary: '{"ids":[]}',
@@ -237,7 +257,7 @@ describe('StepExecutor', () => {
         buildFindingContractInstructionContext: vi.fn().mockReturnValue(
           findingContractContext,
         ),
-        buildFindingEscalationInstructionContexts: vi.fn().mockReturnValue(new Map()),
+        buildFindingRestatementSlotContexts: vi.fn().mockReturnValue(new Map()),
       },
       getCwd: () => cwd,
       getProjectCwd: () => cwd,
@@ -264,11 +284,21 @@ describe('StepExecutor', () => {
           instruction: 'Reconcile.',
           outputContract: 'Return JSON.',
         },
+        ...(reviewBudgetOverride === undefined ? {} : { reviewBudget: reviewBudgetOverride }),
       },
       findingLedgerStore: {
         ledgerIdentity: 'scope-plain-text',
         workflowName: 'test-workflow',
-        loadLedger: () => ({ findings: [] }),
+        loadLedger: () => storedLedger,
+        // 報告拒否の経路は protocol anomaly を台帳へ書く。読み取りだけの stub だと
+        // その分岐に入った時点で落ちる。
+        updateLedger: async (
+          mutate: (ledger: unknown) => { ledger: unknown; result: unknown },
+        ) => {
+          const { ledger, result } = mutate(storedLedger);
+          storedLedger = ledger as typeof storedLedger;
+          return result;
+        },
       },
       findingManagerAuthority: 'standard',
       refreshFindingsState: vi.fn(),
@@ -447,6 +477,8 @@ describe('StepExecutor', () => {
       reviewer: {
         reviewScopeSnapshotId: requestWithoutId.reviewScopeSnapshotId,
         presentationContext,
+        // mode は呼び出し側が明示する契約。落とすと Phase 2 だけ通常レビュー契約へ化ける。
+        mode: 'restatement-only' as const,
       },
     };
 
@@ -1793,6 +1825,162 @@ describe('StepExecutor', () => {
     expect(ingestFindingContractResults).toHaveBeenCalledOnce();
   });
 
+  /** 単独ステップ経路で slot 呼び出しに渡された input を1件だけ取り出す。 */
+  function singleSlotInput(): FindingRestatementSlotInput {
+    const calls = vi.mocked(runFindingRestatementSlot).mock.calls;
+    expect(calls).toHaveLength(1);
+    return calls[0]![0];
+  }
+
+  it('単独ステップ経路は実行用ステップと設定の提示予算で差し戻し slot を回す', async () => {
+    const harness = createPlainTextPublicationHarness(
+      [{
+        persona: 'default',
+        status: 'done',
+        content: '{"rawFindings":[]}',
+        structuredOutput: { rawFindings: [] },
+        timestamp: new Date('2026-07-31T00:01:00.000Z'),
+      }],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { maxReviewRounds: 3 },
+    );
+    // dynamic facets 適用後の実行用ステップ。設定上の step を owner に渡すと、
+    // その回の owner が実際に使った facet 集合と代打の判断基準がずれる。
+    const executableStep = {
+      ...harness.step,
+      knowledgeContents: [{ name: 'dynamic', content: 'Dynamic knowledge.' }],
+    };
+
+    await harness.executor.runNormalStep(
+      harness.step,
+      harness.state,
+      'test task',
+      5,
+      harness.updatePersonaSession,
+      undefined,
+      undefined,
+      {
+        executableStep,
+        findingContractContext: harness.findingContractContext,
+        phase1Instruction: 'Review.',
+        stepIteration: 1,
+      },
+    );
+
+    const slotInput = singleSlotInput();
+    expect(slotInput.ownerReviewerSteps).toEqual([executableStep]);
+    // 提示予算は finding_contract.review_budget から来る。既定値へ落ちると
+    // 壊れたレビュアーが1ステップで6パス回る。
+    expect(slotInput.presentationLimit).toBe(3);
+    expect(slotInput.parentStepName).toBe(harness.step.name);
+    expect(slotInput.stepIteration).toBe(1);
+
+    // slot のパスはレビューラウンドとして数えない。数えると review_budget を
+    // 1ステップで使い切り、再レビューの機会がゼロになる。
+    vi.mocked(ingestFindingContractResults).mockClear();
+    await slotInput.ingest([{
+      // 取り込みの記帳区分だけを見るので、publication は宛先レビュアーだけ持てば足りる。
+      publication: {
+        reviewerStepName: harness.step.name,
+      } as unknown as CanonicalFindingReviewPublication,
+      reviewEvidence: 'none',
+    }]);
+    expect(ingestFindingContractResults).toHaveBeenCalledOnce();
+    expect(vi.mocked(ingestFindingContractResults).mock.calls[0]![0])
+      .toMatchObject({ budgetAccounting: 'excluded' });
+  });
+
+  it('単独ステップ経路は slot の terminal をそのままステップ結果へ差し替える', async () => {
+    const harness = createPlainTextPublicationHarness([{
+      persona: 'default',
+      status: 'done',
+      content: '{"rawFindings":[]}',
+      structuredOutput: { rawFindings: [] },
+      timestamp: new Date('2026-07-31T00:01:00.000Z'),
+    }]);
+    const terminalResponse: AgentResponse = {
+      persona: 'reviewer',
+      status: 'rate_limited',
+      content: 'Slot call hit the provider limit.',
+      timestamp: new Date('2026-07-31T00:02:00.000Z'),
+    };
+    vi.mocked(runFindingRestatementSlot).mockResolvedValueOnce({
+      kind: 'terminal',
+      step: harness.step,
+      response: terminalResponse,
+      providerInfo: { provider: 'mock', model: 'slot-model' },
+    });
+
+    const result = await harness.executor.runNormalStep(
+      harness.step,
+      harness.state,
+      'test task',
+      5,
+      harness.updatePersonaSession,
+      undefined,
+      undefined,
+      {
+        executableStep: harness.step,
+        findingContractContext: harness.findingContractContext,
+        phase1Instruction: 'Review.',
+        stepIteration: 1,
+      },
+    );
+
+    expect(result.response).toBe(terminalResponse);
+    expect(result.providerInfo).toEqual({ provider: 'mock', model: 'slot-model' });
+    expect(harness.state.lastOutput).toBe(terminalResponse);
+  });
+
+  it('単独ステップ経路は報告拒否でも差し戻し slot を回す', async () => {
+    // 報告拒否は「そのレビュアーの差し戻し対象が1件増えた」状態。取り込みが走らない
+    // このぶんきで slot を飛ばすと、記録した protocol anomaly の差し戻しが次の
+    // ワークフローラウンドまで届かない（resume 経路と parallel 経路は呼んでいる）。
+    const unboundResponse = {
+      persona: 'default',
+      status: 'done' as const,
+      content: '{}',
+      structuredOutput: {
+        rawFindings: [{
+          rawExcerpt: 'This sentence never appears in the report body.',
+          candidate: COMPLETE_CANDIDATE,
+        }],
+      },
+      timestamp: new Date('2026-07-31T00:00:01.000Z'),
+    };
+    const harness = createPlainTextPublicationHarness(
+      [unboundResponse, unboundResponse],
+      PLAIN_TEXT_REPORT_CONTENT,
+    );
+
+    const result = await harness.executor.runNormalStep(
+      harness.step,
+      harness.state,
+      'test task',
+      5,
+      harness.updatePersonaSession,
+      undefined,
+      undefined,
+      {
+        executableStep: harness.step,
+        findingContractContext: harness.findingContractContext,
+        phase1Instruction: 'Review.',
+        stepIteration: 1,
+      },
+    );
+
+    // publication が成立していない経路であることを、取り込みが1度も走っていない
+    // ことで固定する（受理経路と取り違えると、この回帰テストは意味を失う）。
+    expect(ingestFindingContractResults).not.toHaveBeenCalled();
+    const slotInput = singleSlotInput();
+    expect(slotInput.ownerReviewerSteps).toEqual([harness.step]);
+    // ステップの結果は拒否された報告本文のまま返る。
+    expect(result.response.content).toContain(PLAIN_TEXT_REPORT_CONTENT);
+  });
+
   it.each([
     {
       label: 'zero occurrence',
@@ -2204,7 +2392,7 @@ describe('StepExecutor', () => {
           resolveStepProviderModel: () => ({ provider: 'mock', model: 'primary-capability-model' }),
         }),
         buildFindingContractInstructionContext,
-        buildFindingEscalationInstructionContexts: vi.fn().mockReturnValue(new Map()),
+        buildFindingRestatementSlotContexts: vi.fn().mockReturnValue(new Map()),
         resolveStepProviderModel: vi.fn().mockReturnValue({ provider: 'mock', model: 'primary-capability-model' }),
       } as unknown as StepExecutorDeps['optionsBuilder'],
       getCwd: () => cwd,
@@ -2337,21 +2525,9 @@ describe('StepExecutor', () => {
       preparedExecution,
     );
 
-    expect(buildFindingContractInstructionContext)
-      .toHaveBeenCalledWith(
-        step,
-        true,
-        undefined,
-        // owner context と escalation slot が同じ ledger / presentation counts を
-        // 見るための凍結キー。区切りは固定なので分解して検証する。
-        expect.any(String),
-      );
-    const freezeKey = String(buildFindingContractInstructionContext.mock.calls[0]![3]);
-    const freezeKeyParts = freezeKey.split('\u0000');
-    expect(freezeKeyParts).toHaveLength(3);
-    expect(freezeKeyParts[0]).toBe(step.name);
-    expect(Number(freezeKeyParts[1])).toBeGreaterThan(0);
-    expect(Number(freezeKeyParts[2])).toBeGreaterThan(0);
+    // 単独ステップは1レビュアーなので、owner context の凍結キーは要らない。
+    // 言い直しは manager 取り込み後の slot が自前で台帳を読み直す。
+    expect(buildFindingContractInstructionContext).toHaveBeenCalledWith(step, true);
     // レビュアーは markdown レポートしか書かない。raw findings のスキーマも
     // snapshot ID も、レビュアー側のプロンプトと provider options には載らない。
     expect(buildAgentOptions).toHaveBeenCalledWith(
