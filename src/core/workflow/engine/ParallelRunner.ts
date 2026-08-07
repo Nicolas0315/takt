@@ -46,6 +46,10 @@ import type { FindingManagerSubStepResult } from '../findings/manager-runner.js'
 import { runFindingEscalationReviewer } from '../findings/escalation-reviewer-runner.js';
 import type { ReviewerRelationClarification } from '../findings/relation-coherence.js';
 import type { CanonicalFindingReviewPublication } from '../findings/review-publication.js';
+import {
+  recordVerdictClaimsMismatchAnomalies,
+  type VerdictClaimsMismatchObservation,
+} from '../findings/verdict-claims-integrity.js';
 import type { WorkflowCallRunner } from './WorkflowCallRunner.js';
 import {
   getWorkflowCallChildExecutionState,
@@ -1078,7 +1082,7 @@ export class ParallelRunner {
 
     // 全 reviewer の canonical publication が揃った後に一度だけ取り込む。
     // ここより前の失敗では ledger と rules のどちらも動かさない。
-    await this.runFindingContractManager(
+    const managerResult = await this.runFindingContractManager(
       step,
       stepIteration,
       state.iteration,
@@ -1090,12 +1094,15 @@ export class ParallelRunner {
     const postExecutionRuntime = runtime?.fallback === undefined
       ? runtime
       : { ...runtime, fallback: undefined };
-    if (this.deps.findingContract !== undefined) {
+    const findingContract = this.deps.findingContract;
+    if (findingContract !== undefined) {
+      const reviewerObservations: VerdictClaimsMismatchObservation[] = [];
       for (const result of subResults) {
         if (!isAgentParallelSubStep(result.subStep)) {
           continue;
         }
-        if (result.publication === undefined) {
+        const publication = result.publication;
+        if (publication === undefined) {
           throw new Error(
             `Finding contract reviewer "${result.subStep.name}" has no canonical publication`,
           );
@@ -1117,6 +1124,28 @@ export class ParallelRunner {
           subRuntime,
         );
         state.stepOutputs.set(result.subStep.name, result.response);
+        reviewerObservations.push({
+          step: result.subStep,
+          response: result.response,
+          publication,
+        });
+      }
+      // 判定が確定した直後に、非承認判定 + claim ゼロ件を台帳へ残す。親の
+      // 集約ルール（when(findings.*)）より前でなければ、非承認判定が
+      // COMPLETE で上書きされる。取り込みが走らなかったラウンド
+      // （FC レビュアー 0 件）は round marker が無いので記録対象も無い。
+      if (managerResult !== undefined) {
+        await recordVerdictClaimsMismatchAnomalies({
+          ledgerStore: this.deps.findingLedgerStore,
+          findingContract,
+          observations: reviewerObservations,
+          interactive: this.deps.getInteractive(),
+          runId: this.deps.getRunId(),
+          parentStepName: step.name,
+          roundMarker: managerResult.roundMarker,
+          timestamp: new Date().toISOString(),
+          refreshFindingsState: this.deps.refreshFindingsState,
+        });
       }
     }
 
