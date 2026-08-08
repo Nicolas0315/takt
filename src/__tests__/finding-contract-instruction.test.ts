@@ -200,10 +200,10 @@ describe('buildFindingContractInstruction', () => {
       expect(ja).toContain('system finding');
     });
 
-    // relation / targetFindingId は manager-runner / manager-output-validation が
-    // 英語リテラルで照合する raw finding のフィールド名。ja テンプレートでも
-    // 英語のまま出ることを確認する。
-    it('keeps raw finding protocol field names in English for ja', () => {
+    // lifecycle の語は normalizer が報告本文から literal token として拾う契約値。
+    // ja テンプレートでも英語のまま出ること、かつ「同じ文に finding ID を書く」
+    // という抽出条件が併記されることを確認する（離すと新規指摘として読まれる）。
+    it('keeps lifecycle protocol tokens in English for ja and demands one contiguous sentence', () => {
       const rendered = build({
         contract: {
           reviewer: REVIEWER,
@@ -212,8 +212,28 @@ describe('buildFindingContractInstruction', () => {
         },
         language: 'ja',
       });
-      expect(rendered).toContain('relation');
-      expect(rendered).toContain('targetFindingId');
+      expect(rendered).toContain('`persists`');
+      expect(rendered).toContain('`resolution_confirmation`');
+      expect(rendered).toContain('`reopened`');
+      expect(rendered).toContain('途切れのない同じ文');
+    });
+
+    // reviewer は観察専任なので、normalizer 内部の wire フィールドを書かせない。
+    it('never asks the reviewer to fill normalizer wire fields', () => {
+      for (const language of ['en', 'ja'] as const) {
+        const rendered = build({
+          contract: {
+            reviewer: { ...REVIEWER, presentationContext: restatementPresentationContext() },
+            hasOpenFindings: true,
+            hasWaivedFindings: true,
+            hasDismissedFindings: true,
+          },
+          language,
+        });
+        expect(rendered, language).not.toContain('targetFindingId');
+        expect(rendered, language).not.toContain('file_quote');
+        expect(rendered, language).not.toContain('verbatimExcerpt');
+      }
     });
 
     it('instructs reviewers to reopen dismissed findings in both languages', () => {
@@ -232,9 +252,9 @@ describe('buildFindingContractInstruction', () => {
       });
 
       expect(en).toContain('listed as dismissed');
-      expect(en).toContain('relation "reopened"');
+      expect(en).toContain('that dismissed finding ID and `reopened` in the same sentence');
       expect(ja).toContain('dismissed になっている指摘');
-      expect(ja).toContain('relation を "reopened"');
+      expect(ja).toContain('dismissed finding ID と `reopened` を同じ文に');
     });
 
     it('never asks reviewers for structured output or echoes the review scope snapshot', () => {
@@ -271,11 +291,12 @@ describe('buildFindingContractInstruction', () => {
       expect(rendered).not.toContain('Write an ordinary Markdown review report');
       expect(rendered).not.toContain('Each round, verify the open ledger findings');
       expect(rendered).not.toContain('{{');
-      // severity 欠落こそが再提示ループの原因なので、明記要求は再提示ラウンドでも残す。
-      expect(rendered).toContain('State a short title and a severity');
+      // レビュアーは観察専任。分類は正規化係が付けるので、言い直し枠でも severity を
+      // 書かせない（書かせた結果が事務欠落による anomaly 量産だった）。
+      expect(rendered).toContain('Do not state a severity');
     });
 
-    it('keeps the severity requirement in a restatement-only round for ja as well', () => {
+    it('forbids reviewer-side classification in a restatement-only round for ja as well', () => {
       const rendered = build({
         contract: {
           reviewer: { ...REVIEWER, presentationContext: restatementPresentationContext(), mode: 'restatement-only' as const },
@@ -284,7 +305,7 @@ describe('buildFindingContractInstruction', () => {
         language: 'ja',
       });
       expect(rendered).toContain('## Restatement requests');
-      expect(rendered).toContain('severity（`critical` / `high` / `medium` / `low`');
+      expect(rendered).toContain('severity・重大度ラベル・問題系列タグは書かないでください');
       expect(rendered).not.toContain('通常の Markdown レビュー報告を書いてください');
       expect(rendered).not.toContain('{{');
     });

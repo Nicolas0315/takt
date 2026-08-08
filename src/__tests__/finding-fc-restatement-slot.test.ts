@@ -133,7 +133,7 @@ describe('FC restatement slot — presentation phase', () => {
       sourceExcerptDigest: '2'.repeat(64),
       claimedExcerpt: 'A bounded reviewer claim.',
       targetPaths: ['src/example.ts'],
-      missingRequirements: ['title'] as const,
+      missingRequirements: ['target'] as const,
       expectedRelation: 'new' as const,
       expectedTargetFindingId: null,
       expectedTargetPreconditionClass: 'absent' as const,
@@ -614,8 +614,11 @@ describe('FC restatement slot — restatement instruction', () => {
         renderFencedJsonBlock: (value) => `\`\`\`json\n${JSON.stringify(value)}\n\`\`\``,
       });
 
-      expect(instruction).toContain('file_quote');
-      expect(instruction).toContain('verbatimExcerpt');
+      // 引用は現物のファイルから取らせる。ただし観察専任のレビュアーに
+      // normalizer の wire フィールド（file_quote / verbatimExcerpt）は書かせない。
+      expect(instruction).toContain('Evidence');
+      expect(instruction).not.toContain('file_quote');
+      expect(instruction).not.toContain('verbatimExcerpt');
       expect(instruction).toMatch(language === 'en' ? /Read the request's target files/ : /対象ファイルをリポジトリで実際に読/);
     },
   );
@@ -748,7 +751,7 @@ describe('FC restatement slot — per-pass request batches', () => {
           observationClass: 'claim-bearing',
           classificationAuthorityId: 'system/intake_observation_classification_v1',
           reasonCodes: ['product-identity-incomplete'],
-          missingRequirements: ['title'],
+          missingRequirements: ['target'],
           presentationOwnerReviewer: reviewerStep.name,
           presentationLimit,
         },
@@ -900,7 +903,7 @@ describe('FC restatement slot — per-pass request batches', () => {
       sourceExcerptDigest: 'c'.repeat(64),
       claimedExcerpt: 'The reviewer claim must be restated.',
       targetPaths: ['src/example.ts'],
-      missingRequirements: ['title'] as const,
+      missingRequirements: ['target'] as const,
       expectedRelation: 'new' as const,
       expectedTargetFindingId: null,
       expectedTargetPreconditionClass: 'absent' as const,
@@ -1177,7 +1180,7 @@ describe('FC restatement slot — owner 別 batch の枠按分', () => {
         observationClass: 'claim-bearing',
         classificationAuthorityId: 'system/intake_observation_classification_v1',
         reasonCodes: ['product-identity-incomplete'],
-        missingRequirements: ['title'],
+        missingRequirements: ['target'],
         presentationOwnerReviewer: raw.reviewer,
         presentationLimit: 1,
       },

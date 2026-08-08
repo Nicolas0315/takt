@@ -318,9 +318,46 @@ describe('takt-default-localllm composition', () => {
     for (const name of names) {
       const contract = readFileSync(join(dir, name), 'utf-8');
       expect(contract.match(/^## Finding Contract Claims$/gmu)).toHaveLength(1);
-      expect(contract).toContain('structured');
+      // claim の機械形式は1つだけ: 注入された指示のラベル付きフィールド。
+      // レビュアーは観察専任なので、分類欄はこの形に含めない。
+      expect(contract).toContain(locale === 'ja'
+        ? 'ラベル付きフィールド形式（Target files / Description / Evidence）'
+        : 'labelled fields of the injected Finding Contract instructions (Target files / Description / Evidence)');
       expect(contract).not.toMatch(/^## (?:Observed Findings|観測した指摘)$/mu);
     }
+  });
+
+  // レビュアーの観察専任化は36契約すべてで成り立たないと意味がない。分類語彙
+  // （severity / title / familyTag / relation）が「禁止の明記」以外の形で残った
+  // 契約が1つでもあれば、そのレビュアーだけ旧契約の指示を受け取る。
+  it.each(['ja', 'en'] as const)('%s の Finding Contract は分類語彙を禁止文以外に持たない', (locale) => {
+    const dir = join(process.cwd(), 'builtins', locale, 'facets', 'output-contracts');
+    const names = readdirSync(dir).filter((name) => name.endsWith('-finding-contract.md'));
+    const prohibition = locale === 'ja'
+      ? 'claim に分類フィールド（Severity / Title / Family Tag / Relation）を書かない。'
+      : 'Do not add classification fields (Severity / Title / Family Tag / Relation) to a claim;';
+
+    expect(names.length).toBeGreaterThan(0);
+    for (const name of names) {
+      const contract = readFileSync(join(dir, name), 'utf-8');
+      expect(contract, name).toContain(prohibition);
+      const withoutProhibition = contract.split(prohibition).join('');
+      for (const vocabulary of [
+        'family_tag',
+        'familyTag',
+        'severity',
+        'Severity',
+        '重大度',
+        'relation',
+        'Relation',
+      ]) {
+        expect(withoutProhibition, `${name}: ${vocabulary}`).not.toContain(vocabulary);
+      }
+    }
+  });
+
+  it.each(['ja', 'en'] as const)('%s の Finding Contract は解消確認節を保つ', (locale) => {
+    const dir = join(process.cwd(), 'builtins', locale, 'facets', 'output-contracts');
 
     for (const name of REGULAR_CONTRACT_NAMES) {
       const contract = readFileSync(join(dir, `${name}-review-finding-contract.md`), 'utf-8');

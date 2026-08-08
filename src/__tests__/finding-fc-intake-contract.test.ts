@@ -19,6 +19,7 @@ import {
   type ReviewerIntakeResult,
 } from '../core/workflow/findings/manager-admission.js';
 import { intakeReviewerOutputs } from '../core/workflow/findings/manager-intake.js';
+import { intakeContractDefectFor } from '../core/workflow/findings/intake-contract.js';
 import { captureReviewScopeProofSnapshot } from '../core/workflow/findings/snapshot.js';
 import {
   applyReviewerAnomalySpecsToLedger,
@@ -96,6 +97,17 @@ function emptyLedger(): FindingLedger {
   };
 }
 
+/**
+ * review scope snapshot はリポジトリ全体を走査する。この suite の全テストが同じ
+ * `process.cwd()` を対象にするので、1回だけ取って共有する（テストごとに取り直すと
+ * 走査コストで worker が vitest の birpc 期限を越え、無関係なテストがタイムアウトする）。
+ */
+let sharedReviewScopeSnapshot: ReturnType<typeof captureReviewScopeProofSnapshot> | undefined;
+function reviewScopeSnapshot(): ReturnType<typeof captureReviewScopeProofSnapshot> {
+  sharedReviewScopeSnapshot ??= captureReviewScopeProofSnapshot(process.cwd());
+  return sharedReviewScopeSnapshot;
+}
+
 function canonicalItem(raw: RawFinding, ledger = emptyLedger()) {
   const candidate = candidateFromStoredRawFinding(raw, 'reviewer-stable-key');
   const result = canonicalizeReviewerRawFinding(candidate, { ledger });
@@ -136,6 +148,52 @@ function incompleteRaw(rawFindingId: string, overrides: Partial<RawFinding> = {}
 
 
 describe('FC intake contract', () => {
+  // レビュアーは観察専任。分類事務（severity / title / familyTag）は正規化係が
+  // claim 内容から付与し、relation と同一性は台帳を見る manager が裁定する。
+  // これらの欠落を intake 契約違反にすると、中身の正しい観察が事務の書き忘れで
+  // anomaly 化し、言い直し（逐語コピー）では構造的に直らないまま提示枠が枯れる。
+  it('does not treat missing classification bookkeeping as an intake contract defect', () => {
+    const claim = 'The guard is missing on the resume path.';
+
+    expect(intakeContractDefectFor({
+      relation: null,
+      target: { kind: 'code', paths: ['src/example.ts'] },
+      title: null,
+      description: claim,
+      rawExcerpt: claim,
+      evidence: [{
+        kind: 'file_quote',
+        path: 'src/example.ts',
+        startLine: 1,
+        endLine: 1,
+        verbatimExcerpt: 'export const example = 1;',
+        snapshotId: 'a'.repeat(64),
+      }],
+      evidenceCoverageGaps: [],
+      reviewer: 'architecture-review',
+      presentationLimit: 2,
+      lifecycleIntent: false,
+    })).toBeUndefined();
+  });
+
+  it('still demands the observation substance: claim text, target, and offered evidence', () => {
+    expect(intakeContractDefectFor({
+      relation: null,
+      target: { kind: 'review_scope' },
+      title: null,
+      description: null,
+      rawExcerpt: 'The reviewer emitted an unclassified observation.',
+      evidence: [],
+      evidenceCoverageGaps: [],
+      reviewer: 'architecture-review',
+      presentationLimit: 2,
+      lifecycleIntent: false,
+    })).toMatchObject({
+      observationClass: 'claim-bearing',
+      missingRequirements: ['claimEvidence', 'description', 'target'],
+    });
+  });
+
   it('routes an identity-incomplete raw finding to intake-contract-incomplete without provisional landing', () => {
     const raw = incompleteRaw('raw-incomplete');
     const item = canonicalItem(raw);
@@ -146,7 +204,7 @@ describe('FC intake contract', () => {
       scopeIdentity: 'scope-fc-intake',
       previousLedger: emptyLedger(),
       intake: intake(item),
-      reviewScopeSnapshot: captureReviewScopeProofSnapshot(process.cwd()),
+      reviewScopeSnapshot: reviewScopeSnapshot(),
       workflowTask: 'Review the implementation.',
       presentationLimit: 2,
     });
@@ -210,7 +268,7 @@ describe('FC intake contract', () => {
         groupRawFindingIds: [raw.rawFindingId],
         reason: 'No authoritative evidence was available',
       }]])),
-      reviewScopeSnapshot: captureReviewScopeProofSnapshot(process.cwd()),
+      reviewScopeSnapshot: reviewScopeSnapshot(),
       workflowTask: 'Review the implementation.',
       presentationLimit: 2,
     });
@@ -242,7 +300,7 @@ describe('FC intake contract', () => {
       scopeIdentity: 'scope-fc-intake',
       previousLedger: emptyLedger(),
       intake: intake(item),
-      reviewScopeSnapshot: captureReviewScopeProofSnapshot(process.cwd()),
+      reviewScopeSnapshot: reviewScopeSnapshot(),
       workflowTask: 'Review the implementation.',
       presentationLimit: 2,
     }).ladderAnomalySpecs[0]!.intakeContract;
@@ -632,7 +690,7 @@ describe('FC intake contract', () => {
           observationClass: 'claim-bearing' as const,
           classificationAuthorityId: 'system/intake_observation_classification_v1',
           reasonCodes: ['product-identity-incomplete'] as const,
-          missingRequirements: ['title'] as const,
+          missingRequirements: ['target'] as const,
           presentationOwnerReviewer: source.reviewer,
           presentationLimit: 2,
         },
@@ -652,7 +710,7 @@ describe('FC intake contract', () => {
         sourceExcerptDigest: source.sourceBinding.excerptDigest,
         claimedExcerpt: sourceExcerpt,
         targetPaths: ['src/example.ts'] as const,
-        missingRequirements: ['title'] as const,
+        missingRequirements: ['target'] as const,
         expectedRelation: 'new' as const,
         expectedTargetFindingId: null,
         expectedTargetPreconditionClass: 'absent' as const,
@@ -993,7 +1051,7 @@ describe('FC intake contract', () => {
      * 終端処分と同居し、台帳不変条件で run ごと落ちた。
      *
      * 形は実データそのまま: intake-contract-incomplete /
-     * restatement_exhausted_claim_bearing / 旧契約語彙の missingRequirements。
+     * restatement_exhausted_claim_bearing / missingRequirements。
      */
     it('does not promote an anomaly that already carries a terminal disposition', () => {
       const claim = 'The legacy signal setting no longer matches the requested contract.';
@@ -1013,8 +1071,7 @@ describe('FC intake contract', () => {
           ...entry,
           intakeContract: {
             ...entry.intakeContract!,
-            // 実データの旧契約語彙（binary 昇順・重複なし）。
-            missingRequirements: ['relation', 'severity'] as const,
+            missingRequirements: ['description', 'target'] as const,
             terminalDisposition: {
               kind: 'restatement_exhausted_claim_bearing' as const,
               workflowOutcome: 'review_integrity_unresolved' as const,
@@ -1082,8 +1139,7 @@ describe('FC intake contract', () => {
           observationClass: 'claim-bearing',
           classificationAuthorityId: 'system/intake_observation_classification_v1',
           reasonCodes: ['product-identity-incomplete'],
-          // 実データの旧契約語彙（binary 昇順・重複なし）。
-          missingRequirements: ['relation', 'severity'],
+          missingRequirements: ['description', 'target'],
           presentationOwnerReviewer: wire.reviewer,
           presentationLimit: 6,
         },
@@ -1335,7 +1391,7 @@ describe('FC intake contract', () => {
             observationClass: 'claim-bearing',
             classificationAuthorityId: 'system/intake_observation_classification_v1',
             reasonCodes: ['product-identity-incomplete'],
-            missingRequirements: ['relation', 'severity'],
+            missingRequirements: ['description', 'target'],
             presentationOwnerReviewer: raw.reviewer,
             presentationLimit: 6,
           },
@@ -1414,7 +1470,7 @@ describe('FC intake contract', () => {
             observationClass: 'claim-bearing',
             classificationAuthorityId: 'system/intake_observation_classification_v1',
             reasonCodes: ['product-identity-incomplete'],
-            missingRequirements: ['relation', 'severity'],
+            missingRequirements: ['description', 'target'],
             presentationOwnerReviewer: raw.reviewer,
             presentationLimit: 6,
           },
@@ -1461,7 +1517,7 @@ describe('FC intake contract', () => {
           observationClass: 'claim-bearing',
           classificationAuthorityId: 'system/intake_observation_classification_v1',
           reasonCodes: ['product-identity-incomplete'],
-          missingRequirements: ['severity'],
+          missingRequirements: ['target'],
           presentationOwnerReviewer: wire.reviewer,
           presentationLimit: 6,
         },
@@ -1502,9 +1558,173 @@ describe('FC intake contract', () => {
     });
   });
 
+  // 観察専任のレビュアーは severity / title / family tag / relation を1語も書かない。
+  // 分類は正規化係が付けるので、そのままの報告が product finding へ昇格する。
+  it('admits an observation whose report states no severity, title, family tag, or relation', () => {
+    const claim = 'The resume path skips the guard, so a stale lease is reused.';
+    const reportContent = [
+      '# Architecture review',
+      '## Finding Contract Claims',
+      '#### Stale lease is reused on resume',
+      '- **Target files**: `src/core/workflow/findings/intake-contract.ts`',
+      `- **Description**: ${claim}`,
+      '- **Evidence**: `src/core/workflow/findings/intake-contract.ts` lines 1-1',
+    ].join('\n');
+    for (const bookkeeping of ['severity', 'family', 'relation', 'critical', 'high']) {
+      expect(reportContent.toLowerCase()).not.toContain(bookkeeping);
+    }
+    const snapshot = reviewScopeSnapshot();
+    const publication = createFindingReviewPublication({
+      identity: {
+        scopeIdentity: 'scope-fc-observation-only',
+        callNamespace: '',
+        parentStepName: 'reviewers',
+        stepIteration: 1,
+        reviewerStepName: 'architecture-review',
+        reportName: 'architecture-review-1.md',
+      },
+      protocol: PLAIN_TEXT_NORMALIZED_FINDING_REVIEW_PUBLICATION_PROTOCOL,
+      reportContent,
+      // 正規化係の出力: claim 本文は報告からの逐語、分類は正規化係の付与。
+      rawFindings: [reviewerRawExtractionFixture({
+        rawFindingId: 'observation-only',
+        familyTag: 'lease-lifecycle',
+        severity: 'high',
+        title: 'Stale lease is reused on resume',
+        description: claim,
+        suggestion: null,
+        relation: 'new',
+        targetFindingId: null,
+        target: { kind: 'code', paths: ['src/core/workflow/findings/intake-contract.ts'] },
+        evidenceRequests: [{
+          kind: 'file_quote',
+          path: 'src/core/workflow/findings/intake-contract.ts',
+          startLine: 1,
+          endLine: 1,
+        }],
+        rawExcerpt: claim,
+      })],
+    });
+    const intakeResult = intakeReviewerOutputs({
+      subResults: [{ subStep: { name: 'architecture-review' } as never, publication }],
+      previousLedger: emptyLedger(),
+      workflowName: 'peer-review',
+      callNamespace: '',
+      parentStepName: 'reviewers',
+      stepIteration: 1,
+      runId: observedAt.runId,
+      workflowTask: 'Review the implementation.',
+      cwd: process.cwd(),
+      scopeIdentity: 'scope-fc-observation-only',
+      issuedAt: observedAt.timestamp,
+      reviewScopeSnapshot: snapshot,
+    });
+    const admission = evaluateRawAdmission({
+      cwd: process.cwd(),
+      reviewScopeSnapshotId: snapshot.reviewScopeSnapshotId,
+      runId: observedAt.runId,
+      scopeIdentity: 'scope-fc-observation-only',
+      previousLedger: emptyLedger(),
+      intake: intakeResult,
+      reviewScopeSnapshot: snapshot,
+      workflowTask: 'Review the implementation.',
+      presentationLimit: 2,
+    });
+
+    expect(admission.ladderAnomalySpecs).toHaveLength(0);
+    expect(admission.admissionAnomalySpecs).toHaveLength(0);
+    expect(admission.admissionProvisionalSpecs).toHaveLength(0);
+    expect(admission.cleanAdmitted).toHaveLength(1);
+    expect(admission.cleanAdmitted[0]!.wire).toMatchObject({
+      severity: 'high',
+      title: 'Stale lease is reused on resume',
+      familyTag: 'lease-lifecycle',
+      description: claim,
+    });
+
+    // 正規化係が分類を落としても、そこはレビュアーへ差し戻す理由にならない。
+    // 分類欠落は言い直しでは直らないため、言い直し要求（intake-contract-incomplete）
+    // ではなく曖昧 raw の既存経路へ落ちる。
+    const unclassified = intakeReviewerOutputs({
+      subResults: [{
+        subStep: { name: 'architecture-review' } as never,
+        publication: createFindingReviewPublication({
+          identity: {
+            scopeIdentity: 'scope-fc-observation-only',
+            callNamespace: '',
+            parentStepName: 'reviewers',
+            stepIteration: 2,
+            reviewerStepName: 'architecture-review',
+            reportName: 'architecture-review-2.md',
+          },
+          protocol: PLAIN_TEXT_NORMALIZED_FINDING_REVIEW_PUBLICATION_PROTOCOL,
+          reportContent,
+          rawFindings: [reviewerRawExtractionFixture({
+            rawFindingId: 'observation-unclassified',
+            familyTag: null,
+            severity: null,
+            title: null,
+            description: claim,
+            suggestion: null,
+            relation: 'new',
+            targetFindingId: null,
+            target: { kind: 'code', paths: ['src/core/workflow/findings/intake-contract.ts'] },
+            evidenceRequests: [{
+              kind: 'file_quote',
+              path: 'src/core/workflow/findings/intake-contract.ts',
+              startLine: 1,
+              endLine: 1,
+            }],
+            rawExcerpt: claim,
+          })],
+        }),
+      }],
+      previousLedger: emptyLedger(),
+      workflowName: 'peer-review',
+      callNamespace: '',
+      parentStepName: 'reviewers',
+      stepIteration: 2,
+      runId: observedAt.runId,
+      workflowTask: 'Review the implementation.',
+      cwd: process.cwd(),
+      scopeIdentity: 'scope-fc-observation-only',
+      issuedAt: observedAt.timestamp,
+      reviewScopeSnapshot: snapshot,
+    });
+    const unclassifiedAdmission = evaluateRawAdmission({
+      cwd: process.cwd(),
+      reviewScopeSnapshotId: snapshot.reviewScopeSnapshotId,
+      runId: observedAt.runId,
+      scopeIdentity: 'scope-fc-observation-only',
+      previousLedger: emptyLedger(),
+      intake: unclassified,
+      reviewScopeSnapshot: snapshot,
+      workflowTask: 'Review the implementation.',
+      presentationLimit: 2,
+    });
+
+    expect([
+      ...unclassifiedAdmission.ladderAnomalySpecs,
+      ...unclassifiedAdmission.admissionAnomalySpecs,
+    ]).toHaveLength(0);
+    // 分類が無い claim は product finding にはできない。落ちる先は既存の曖昧 raw
+    // 経路（tainted → provisional）であって、破棄でも clean admission でもない。
+    expect(unclassifiedAdmission.cleanAdmitted).toHaveLength(0);
+    expect(unclassifiedAdmission.tainted).toHaveLength(1);
+    expect(unclassifiedAdmission.tainted[0]!.canonical.provenance.ambiguityCodes)
+      .toContain('missing-required-field');
+    expect(unclassifiedAdmission.taintedAdmitted).toHaveLength(1);
+    expect(unclassifiedAdmission.admissionRejections).toHaveLength(0);
+  });
+
+  it('records the classification authority on the publication protocol', () => {
+    expect(PLAIN_TEXT_NORMALIZED_FINDING_REVIEW_PUBLICATION_PROTOCOL)
+      .toMatchObject({ classificationAuthority: 'intake-normalizer' });
+  });
+
   it('promotes through reviewer output, normalizer, normalization, and admission without source-binding copying', () => {
     const claim = 'The same defect remains observable.';
-    const snapshot = captureReviewScopeProofSnapshot(process.cwd());
+    const snapshot = reviewScopeSnapshot();
     const firstPublication = createFindingReviewPublication({
       identity: {
         scopeIdentity: 'scope-fc-real-path',
@@ -2015,7 +2235,12 @@ describe('FC intake contract', () => {
       );
       const stored = JSON.parse(readFileSync(path, 'utf8')) as {
         publication: {
-          protocol: { protocolRevision: number; format: string; generationMode: string };
+          protocol: {
+            protocolRevision: number;
+            format: string;
+            generationMode: string;
+            classificationAuthority?: string;
+          };
         };
       };
 
@@ -2025,9 +2250,29 @@ describe('FC intake contract', () => {
       expect(() => loadFindingReviewPublication(reportDir, identity))
         .toThrow(/unsupported protocol descriptor/u);
 
+      // revision 2 の記録は resume の入口で止める。互換 decode は置かない代わりに、
+      // 何が合わないかと「新しい run を始めよ」を message で言い切る。
+      stored.publication.protocol.protocolRevision = 2;
+      writeFileSync(path, JSON.stringify(stored));
+      expect(() => loadFindingReviewPublication(reportDir, identity))
+        .toThrow(/revision 2.*cannot be \n?resumed|revision 2[\s\S]*cannot be resumed/u);
+
       stored.publication.protocol.protocolRevision = 2;
       stored.publication.protocol.generationMode = 'structured';
       stored.publication.protocol.format = 'structured-output';
+      writeFileSync(path, JSON.stringify(stored));
+      expect(() => loadFindingReviewPublication(reportDir, identity))
+        .toThrow(/unsupported protocol descriptor/u);
+
+      // 分類の帰属が欠けた記録も受け付けない。台帳の severity / title / familyTag を
+      // 誰が付けたのか説明できない publication は監査上そのまま読めない。
+      const { classificationAuthority: _dropped, ...withoutAuthority } = {
+        ...stored.publication.protocol,
+        protocolRevision: 3,
+        generationMode: 'freeform',
+        format: 'normalized-plain-text',
+      };
+      stored.publication.protocol = withoutAuthority as typeof stored.publication.protocol;
       writeFileSync(path, JSON.stringify(stored));
       expect(() => loadFindingReviewPublication(reportDir, identity))
         .toThrow(/unsupported protocol descriptor/u);
