@@ -35,6 +35,7 @@ import { compareBinaryStrings } from '../../../shared/utils/binary-string-compar
 
 const PRIVATE_FILE_MODE = 0o600;
 const STORED_PUBLICATION_FILE_PATTERN = /^([a-f0-9]{64})\.json$/;
+const EVIDENCE_SEARCH_ATTEMPTS_DIRECTORY = 'evidence-search-attempts';
 
 /**
  * publication の生成プロトコルは1種類しかない。FC レビュアーは常に markdown
@@ -90,6 +91,18 @@ export interface CanonicalFindingReviewPublication extends FindingReviewPublicat
   readonly rawFindings: readonly unknown[];
   readonly presentationContext: FindingReviewPresentationContext;
   readonly reviewerOutputOverflow?: FindingReviewPublicationOverflow;
+  readonly repairOrigin?: 'evidence-search';
+}
+
+interface FindingEvidenceSearchAttemptReservation {
+  readonly kind: 'evidence-search-attempt';
+  readonly attemptId: string;
+  readonly scopeIdentity: string;
+  readonly callNamespace: string;
+  readonly reviewerStepName: string;
+  readonly anomalyId: string;
+  readonly restatementRequestId: string;
+  readonly reportDigest: string;
 }
 
 export interface RestatementRequestV1 {
@@ -111,6 +124,7 @@ export interface RestatementRequestBinding {
   readonly request: RestatementRequestV1;
   readonly publicationId: string;
   readonly reportDigest: string;
+  readonly repairOrigin?: 'evidence-search';
 }
 
 export interface FindingReviewPresentationContextV1 {
@@ -290,7 +304,7 @@ export function collectRestatementRequests(
 }
 
 export function collectRestatementRequestBindings(
-  publications: readonly Pick<CanonicalFindingReviewPublication, 'presentationContext' | 'publicationId' | 'reportDigest'>[],
+  publications: readonly Pick<CanonicalFindingReviewPublication, 'presentationContext' | 'publicationId' | 'reportDigest' | 'repairOrigin'>[],
 ): RestatementRequestBinding[] {
   const bindingsById = new Map<string, RestatementRequestBinding>();
   for (const publication of publications) {
@@ -302,6 +316,7 @@ export function collectRestatementRequestBindings(
         request,
         publicationId: publication.publicationId,
         reportDigest: publication.reportDigest,
+        ...(publication.repairOrigin === undefined ? {} : { repairOrigin: publication.repairOrigin }),
       };
       const existing = bindingsById.get(request.restatementRequestId);
       if (existing !== undefined) {
@@ -394,6 +409,139 @@ export function computeFindingReviewPublicationId(
     identity.reviewerStepName,
     identity.reportName,
   ]));
+}
+
+function computeFindingEvidenceSearchAttemptId(input: {
+  scopeIdentity: string;
+  callNamespace: string;
+  reviewerStepName: string;
+  anomalyId: string;
+}): string {
+  return sha256(JSON.stringify([
+    'finding-evidence-search-attempt',
+    input.scopeIdentity,
+    input.callNamespace,
+    input.reviewerStepName,
+    input.anomalyId,
+  ]));
+}
+
+function evidenceSearchAttemptPath(reportDir: string, attemptId: string): string {
+  return resolve(
+    reportDir,
+    REPORT_INTERNAL_NAMESPACE,
+    FINDING_REVIEW_PUBLICATIONS_INTERNAL_DIRECTORY,
+    EVIDENCE_SEARCH_ATTEMPTS_DIRECTORY,
+    `${attemptId}.json`,
+  );
+}
+
+function parseFindingEvidenceSearchAttempt(
+  content: Buffer,
+  expectedAttemptId: string,
+): FindingEvidenceSearchAttemptReservation {
+  const parsed: unknown = JSON.parse(content.toString('utf8'));
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`Evidence-search attempt reservation "${expectedAttemptId}" is not an object`);
+  }
+  const record = parsed as Record<string, unknown>;
+  const nonEmptyStringFields = [
+    'attemptId',
+    'scopeIdentity',
+    'reviewerStepName',
+    'anomalyId',
+    'restatementRequestId',
+    'reportDigest',
+  ];
+  if (record.kind !== 'evidence-search-attempt'
+    || typeof record.callNamespace !== 'string'
+    || nonEmptyStringFields.some((field) => typeof record[field] !== 'string' || record[field] === '')) {
+    throw new Error(`Evidence-search attempt reservation "${expectedAttemptId}" is invalid`);
+  }
+  const reservation = record as unknown as FindingEvidenceSearchAttemptReservation;
+  if (reservation.attemptId !== expectedAttemptId) {
+    throw new Error(`Evidence-search attempt reservation identity mismatch for "${expectedAttemptId}"`);
+  }
+  return reservation;
+}
+
+function findingEvidenceSearchAttemptInput(input: {
+  identity: FindingReviewPublicationIdentity;
+  anomalyId: string;
+  restatementRequestId: string;
+  reportContent: string;
+}): FindingEvidenceSearchAttemptReservation {
+  const attemptId = computeFindingEvidenceSearchAttemptId({
+    scopeIdentity: input.identity.scopeIdentity,
+    callNamespace: input.identity.callNamespace,
+    reviewerStepName: input.identity.reviewerStepName,
+    anomalyId: input.anomalyId,
+  });
+  return {
+    kind: 'evidence-search-attempt',
+    attemptId,
+    scopeIdentity: input.identity.scopeIdentity,
+    callNamespace: input.identity.callNamespace,
+    reviewerStepName: input.identity.reviewerStepName,
+    anomalyId: input.anomalyId,
+    restatementRequestId: input.restatementRequestId,
+    reportDigest: sha256(Buffer.from(input.reportContent, 'utf8')),
+  };
+}
+
+/** provider 呼び出し直前に、生涯1回の evidence-search attempt を予約する。 */
+export function reserveFindingEvidenceSearchAttempt(input: {
+  reportDir: string;
+  identity: FindingReviewPublicationIdentity;
+  anomalyId: string;
+  restatementRequestId: string;
+  reportContent: string;
+}): boolean {
+  const reservation = findingEvidenceSearchAttemptInput(input);
+  const path = evidenceSearchAttemptPath(input.reportDir, reservation.attemptId);
+  ensurePrivateDirectory(dirname(path));
+  return runPrivateFileExclusive(`${path}.lock`, () => {
+    const snapshot = readPrivateFileState(path);
+    if (snapshot.state.exists) {
+      if (!('content' in snapshot)) {
+        throw new Error(`Evidence-search attempt reservation content is missing: ${path}`);
+      }
+      const existing = parseFindingEvidenceSearchAttempt(snapshot.content, reservation.attemptId);
+      if (JSON.stringify(existing) !== JSON.stringify(reservation)) {
+        throw new Error(`Evidence-search attempt reservation conflict for "${reservation.attemptId}"`);
+      }
+      return false;
+    }
+    writeNewPrivateFileWithMode(path, JSON.stringify(reservation), PRIVATE_FILE_MODE);
+    return true;
+  });
+}
+
+/** 成功 publication または既知の provider 失敗後に attempt 予約を解放する。 */
+export function releaseFindingEvidenceSearchAttempt(input: {
+  reportDir: string;
+  identity: FindingReviewPublicationIdentity;
+  anomalyId: string;
+}): void {
+  const attemptId = computeFindingEvidenceSearchAttemptId({
+    scopeIdentity: input.identity.scopeIdentity,
+    callNamespace: input.identity.callNamespace,
+    reviewerStepName: input.identity.reviewerStepName,
+    anomalyId: input.anomalyId,
+  });
+  const path = evidenceSearchAttemptPath(input.reportDir, attemptId);
+  ensurePrivateDirectory(dirname(path));
+  runPrivateFileExclusive(`${path}.lock`, () => {
+    const snapshot = readPrivateFileState(path);
+    if (!snapshot.state.exists) {
+      return;
+    }
+    if (!('content' in snapshot)) {
+      throw new Error(`Evidence-search attempt reservation content is missing: ${path}`);
+    }
+    parseFindingEvidenceSearchAttempt(snapshot.content, attemptId);
+    rmSync(path, { force: true });
+  });
 }
 
 function publicationRecordPath(
@@ -530,6 +678,9 @@ function rebindInheritedFindingReviewPublication(
       ...(first.publication.reviewerOutputOverflow === undefined
         ? {}
         : { reviewerOutputOverflow: first.publication.reviewerOutputOverflow }),
+      ...(first.publication.repairOrigin === undefined
+        ? {}
+        : { repairOrigin: first.publication.repairOrigin }),
     }),
     ...(first.relationClarification === undefined
       ? {}
@@ -881,6 +1032,11 @@ function parseStoredPreparation(
             publicationRecord.reviewerOutputOverflow,
           )!,
         }),
+    ...(publicationRecord.repairOrigin === undefined
+      ? {}
+      : publicationRecord.repairOrigin === 'evidence-search'
+        ? { repairOrigin: 'evidence-search' as const }
+        : (() => { throw new Error(`Finding review publication "${expectedPublicationId}" has an unknown repairOrigin`); })()),
   };
   assertCanonicalFindingReviewPublication(publication);
   if (publication.publicationId !== expectedPublicationId) {
@@ -1239,6 +1395,7 @@ export function createFindingReviewPublication(input: {
   readonly presentationContext?: FindingReviewPresentationContext;
   readonly reviewerRawResourceEnvelope?: ReviewerRawResourceEnvelope;
   readonly reviewerOutputOverflow?: FindingReviewPublicationOverflow;
+  readonly repairOrigin?: 'evidence-search';
 }): CanonicalFindingReviewPublication {
   const sourceEnvelope = input.reviewerRawResourceEnvelope
     ?? projectReviewerRawStructuredOutputWithEnvelope({
@@ -1268,6 +1425,7 @@ export function createFindingReviewPublication(input: {
     ...(reviewerOutputOverflow === undefined
       ? {}
       : { reviewerOutputOverflow }),
+    ...(input.repairOrigin === undefined ? {} : { repairOrigin: input.repairOrigin }),
   };
   assertPublicationRawFindings(
     publication.reportContent,
@@ -1445,6 +1603,7 @@ export function persistFindingReviewPublication(
           !== JSON.stringify(preparation.reviewerExecutionIdentity ?? null)
         || JSON.stringify(existing.publication.presentationContext)
           !== JSON.stringify(publication.presentationContext)
+        || existing.publication.repairOrigin !== publication.repairOrigin
       ) {
         throw new Error(
           `Finding review publication conflict for "${publication.publicationId}"`,

@@ -127,6 +127,7 @@ import {
 import type { RunAgentOptions } from '../../../agents/types.js';
 import {
   createFindingReviewPublication,
+  createFindingReviewPresentationContextV2,
   createPendingFindingReviewNormalization,
   discardPendingFindingReviewNormalization,
   FindingReviewPublicationSourceBindingError,
@@ -135,12 +136,18 @@ import {
   persistFindingReviewPublication,
   persistPendingFindingReviewNormalization,
   publishFindingReviewPublication,
+  releaseFindingEvidenceSearchAttempt,
+  reserveFindingEvidenceSearchAttempt,
   PLAIN_TEXT_NORMALIZED_FINDING_REVIEW_PUBLICATION_PROTOCOL,
   type CanonicalFindingReviewPublication,
   type FindingReviewPresentationContext,
   type FindingReviewPublicationIdentity,
   type ReviewerExecutionIdentity,
 } from '../findings/review-publication.js';
+import {
+  findingEvidenceSearchReportName,
+  type FindingEvidenceSearchRequest,
+} from '../findings/evidence-search.js';
 import { recordVerdictClaimsMismatchAnomalies } from '../findings/verdict-claims-integrity.js';
 import {
   recordReviewReportProtocolAnomalies,
@@ -331,6 +338,9 @@ interface FindingIntakeNormalizerCandidate {
 type FindingIntakeNormalizationResult = StructuredOutputNormalizationResult & {
   readonly providerInfo: StepProviderInfo;
   readonly publication?: CanonicalFindingReviewPublication;
+  readonly terminal?: true;
+  /** 全候補が provider 未実行の明示応答だった場合だけ付与する。 */
+  readonly providerNotExecuted?: true;
   /**
    * 失敗の原因がレビュアーの報告側にある（rawExcerpt が報告本文に byte-exact で
    * 束縛できない）。正規化係を乗り換えても解消しない種類の失敗。
@@ -355,6 +365,16 @@ type FindingIntakeNormalizerAttempt =
       readonly engineFault: boolean;
       readonly result: FindingIntakeNormalizationResult;
     };
+
+export type FindingEvidenceSearchRunResult =
+  | { readonly kind: 'published'; readonly result: FindingManagerSubStepResult }
+  | {
+      readonly kind: 'terminal';
+      readonly response: AgentResponse;
+      readonly providerInfo: StepProviderInfo;
+      readonly terminalOperation: NonNullable<StepRunResult['terminalOperation']>;
+    }
+  | { readonly kind: 'already-attempted' };
 
 /** 報告側原因で publication が成立しなかった1レビュアー分の結果。 */
 export interface FindingReviewPublicationReportRejection {
@@ -463,7 +483,10 @@ export class StepExecutor {
       buildSlotContexts: (contextInput) => (
         this.deps.optionsBuilder.buildFindingRestatementSlotContexts(contextInput)
       ),
-      ingest: async (results) => {
+      buildEvidenceSearchRequests: (contextInput) => (
+        this.deps.optionsBuilder.buildFindingEvidenceSearchRequests?.(contextInput) ?? []
+      ),
+      ingest: async (results, ingestOptions) => {
         await this.ingestFindingContractSubResults({
           step: input.ownerReviewerStep,
           stepIteration: input.stepIteration,
@@ -471,6 +494,12 @@ export class StepExecutor {
           subResults: results,
           priorStepResponseText: input.priorStepResponseText,
           budgetAccounting: 'excluded',
+          ...(ingestOptions?.deferClaimBearingTerminalDispositions === undefined
+            ? {}
+            : {
+                deferClaimBearingTerminalDispositions:
+                  ingestOptions.deferClaimBearingTerminalDispositions,
+              }),
         });
       },
       reviewScopeSnapshotId: ownerReviewer.reviewScopeSnapshotId,
@@ -584,6 +613,7 @@ export class StepExecutor {
     subResults: readonly FindingManagerSubStepResult[];
     priorStepResponseText: string | undefined;
     budgetAccounting?: 'round' | 'excluded';
+    deferClaimBearingTerminalDispositions?: boolean;
   }): Promise<FindingManagerRunResult> {
     if (!this.deps.findingLedgerStore) {
       throw new Error('Finding contract is configured but finding ledger store is not available');
@@ -602,6 +632,9 @@ export class StepExecutor {
       iteration: input.iteration,
       subResults: [...input.subResults],
       ...(input.budgetAccounting === undefined ? {} : { budgetAccounting: input.budgetAccounting }),
+      ...(input.deferClaimBearingTerminalDispositions === undefined
+        ? {}
+        : { deferClaimBearingTerminalDispositions: input.deferClaimBearingTerminalDispositions }),
       // 台帳の workflowName スタンプは店（ledgerStore）が束縛する正準名を使う。
       // workflow_call の子が親の台帳を継承した場合、この engine 自身の
       // getWorkflowName()（子のワークフロー名）を使うと reconcile 後の
@@ -849,6 +882,164 @@ export class StepExecutor {
     );
   }
 
+  /**
+   * 言い直し枯渇直前の単発 evidence-search。attempt 予約を provider 呼び出し
+   * より先に作り、通常の intake-normalizer 候補チェーンへ通す。
+   */
+  async runFindingEvidenceSearch(input: {
+    ownerStep: AgentWorkflowStep;
+    parentStepName: string;
+    stepIteration: number;
+    state: WorkflowState;
+    reviewScopeSnapshotId: string;
+    request: FindingEvidenceSearchRequest;
+    runtime?: RuntimeStepResolution;
+  }): Promise<FindingEvidenceSearchRunResult> {
+    const identity = this.findingReviewPublicationIdentity({
+      parentStepName: input.parentStepName,
+      stepIteration: input.stepIteration,
+      reviewerStepName: input.ownerStep.name,
+      reportName: findingEvidenceSearchReportName(
+        input.ownerStep.name,
+        input.request.request.anomalyId,
+      ),
+    });
+    const presentationContext = createFindingReviewPresentationContextV2({
+      reviewScopeSnapshotId: input.reviewScopeSnapshotId,
+      restatementRequests: [input.request.request],
+    });
+    const reportDir = this.deps.getRunPaths().reportsAbs;
+    const stored = loadFindingReviewPublication(reportDir, identity);
+    if (stored !== undefined) {
+      publishFindingReviewPublication(reportDir, stored.publication);
+      releaseFindingEvidenceSearchAttempt({
+        reportDir,
+        identity,
+        anomalyId: input.request.request.anomalyId,
+      });
+      return {
+        kind: 'published',
+        result: {
+          subStep: input.ownerStep,
+          publication: stored.publication,
+          reviewEvidence: 'none',
+          ...(stored.publication.repairOrigin === undefined
+            ? { repairOrigin: 'evidence-search' as const }
+            : { repairOrigin: stored.publication.repairOrigin }),
+        },
+      };
+    }
+
+    const candidates = this.resolveFindingIntakeNormalizerCandidates(
+      input.ownerStep,
+      input.runtime,
+    );
+    const primaryProviderInfo = candidates[0]!.providerInfo;
+    assertFindingIntakeNormalizerProvider(primaryProviderInfo.provider, input.ownerStep.name);
+    const reserved = reserveFindingEvidenceSearchAttempt({
+      reportDir,
+      identity,
+      anomalyId: input.request.request.anomalyId,
+      restatementRequestId: input.request.request.restatementRequestId,
+      reportContent: input.request.reportContent,
+    });
+    if (!reserved) {
+      return { kind: 'already-attempted' };
+    }
+
+    try {
+      const normalized = await this.normalizePlainTextFindingReview({
+        reviewerStep: input.ownerStep,
+        reportResponse: {
+          persona: input.ownerStep.name,
+          status: 'done',
+          content: input.request.reportContent,
+          timestamp: new Date(),
+        },
+        reportContent: input.request.reportContent,
+        state: input.state,
+        identity,
+        runtime: input.runtime,
+        presentationContext,
+        initialMode: 'evidence-search',
+        repairOrigin: 'evidence-search',
+      });
+      if (normalized.terminal === true || normalized.response.status !== 'done') {
+        // blocked/rate_limited は provider が実行されなかった明示応答なので再試行用に
+        // 解放できる。error は provider 応答を受け取ったか判定できないため、予約を
+        // 消費済みのまま残して 1 anomaly 1 回の保証を守る。
+        if (normalized.terminal === true || normalized.providerNotExecuted === true) {
+          releaseFindingEvidenceSearchAttempt({
+            reportDir,
+            identity,
+            anomalyId: input.request.request.anomalyId,
+          });
+        }
+        return {
+          kind: 'terminal',
+          response: normalized.response,
+          providerInfo: normalized.providerInfo,
+          terminalOperation: {
+            origin: findingIntakeNormalizerOperationOrigin(input.ownerStep.name),
+            providerInfo: normalized.providerInfo,
+          },
+        };
+      }
+      const publication = normalized.publication ?? createFindingReviewPublication({
+        identity,
+        protocol: PLAIN_TEXT_NORMALIZED_FINDING_REVIEW_PUBLICATION_PROTOCOL,
+        reportContent: input.request.reportContent,
+        rawFindings: [],
+        presentationContext,
+        repairOrigin: 'evidence-search',
+      });
+      const persisted = persistFindingReviewPublication(reportDir, {
+        publication,
+        reviewerExecutionIdentity: reviewerExecutionIdentity(normalized.providerInfo),
+        reviewerCallMode: 'restatement-only',
+      });
+      publishFindingReviewPublication(reportDir, persisted.publication);
+      releaseFindingEvidenceSearchAttempt({
+        reportDir,
+        identity,
+        anomalyId: input.request.request.anomalyId,
+      });
+      return {
+        kind: 'published',
+        result: {
+          subStep: input.ownerStep,
+          publication: persisted.publication,
+          reviewEvidence: 'none',
+          repairOrigin: 'evidence-search',
+        },
+      };
+    } catch (error) {
+      // 例外は provider 応答を受け取れたか不明であり、予約を消費済みのまま残す。
+      // blocked/rate_limited の明示応答だけが未実行と確定できるため、上の terminal
+      // 分岐で予約を解放して再試行可能にする。error は解放しない。
+      log.warn('Evidence-search normalizer attempt ended without a settled response', {
+        reviewer: input.ownerStep.name,
+        anomalyId: input.request.request.anomalyId,
+        reason: getErrorMessage(error),
+      });
+      return {
+        kind: 'terminal',
+        response: {
+          persona: input.ownerStep.name,
+          status: 'error',
+          content: input.request.reportContent,
+          timestamp: new Date(),
+          error: getErrorMessage(error),
+        },
+        providerInfo: primaryProviderInfo,
+        terminalOperation: {
+          origin: findingIntakeNormalizerOperationOrigin(input.ownerStep.name),
+          providerInfo: primaryProviderInfo,
+        },
+      };
+    }
+  }
+
   private findingReviewPublicationIdentity(input: {
     readonly parentStepName: string;
     readonly stepIteration: number;
@@ -1031,6 +1222,8 @@ export class StepExecutor {
     readonly state: WorkflowState;
     readonly identity: FindingReviewPublicationIdentity;
     readonly presentationContext?: FindingReviewPresentationContext;
+    readonly initialMode?: 'initial' | 'evidence-search';
+    readonly repairOrigin?: 'evidence-search';
     readonly candidate: FindingIntakeNormalizerCandidate;
   }): Promise<FindingIntakeNormalizerAttempt> {
     const structuredCaller = this.requireStructuredCaller();
@@ -1052,7 +1245,7 @@ export class StepExecutor {
           providerOptions: providerInfo.providerOptions,
           language: this.deps.getLanguage(),
           abortSignal: this.deps.abortSignal,
-          mode,
+          mode: mode === 'initial' ? input.initialMode ?? 'initial' : 'correction',
           extractionFidelityCorrection,
           onPromptResolved: (resolved) => {
             promptParts = resolved;
@@ -1120,6 +1313,7 @@ export class StepExecutor {
               normalized.response,
             ),
             reviewerRawResourceEnvelope: normalized.reviewerRawResourceEnvelope,
+            ...(input.repairOrigin === undefined ? {} : { repairOrigin: input.repairOrigin }),
             ...(input.presentationContext === undefined
               ? {}
               : { presentationContext: input.presentationContext }),
@@ -1141,8 +1335,16 @@ export class StepExecutor {
     };
 
     const initial = await execute('initial');
+    if (input.initialMode === 'evidence-search' && initial.response.status !== 'done') {
+      return {
+        kind: 'failed',
+        reason: StepExecutor.describeNormalizerAttemptFailure(initial) ?? 'normalizer returned a non-done response',
+        engineFault: false,
+        result: initial,
+      };
+    }
     if (StepExecutor.isTerminalNormalizerResponse(initial.response)) {
-      return { kind: 'terminal', result: initial };
+      return { kind: 'terminal', result: { ...initial, terminal: true } };
     }
     const initialFailure = StepExecutor.describeNormalizerAttemptFailure(initial);
     if (initialFailure === undefined) {
@@ -1154,8 +1356,16 @@ export class StepExecutor {
     const extractionFidelityCorrection = initial.invalidDetail === undefined
       && initial.response.status === 'done';
     const corrected = await execute('correction', extractionFidelityCorrection);
+    if (input.initialMode === 'evidence-search' && corrected.response.status !== 'done') {
+      return {
+        kind: 'failed',
+        reason: StepExecutor.describeNormalizerAttemptFailure(corrected) ?? 'normalizer returned a non-done response',
+        engineFault: false,
+        result: corrected,
+      };
+    }
     if (StepExecutor.isTerminalNormalizerResponse(corrected.response)) {
-      return { kind: 'terminal', result: corrected };
+      return { kind: 'terminal', result: { ...corrected, terminal: true } };
     }
     const correctedFailure = StepExecutor.describeNormalizerAttemptFailure(corrected);
     if (correctedFailure === undefined) {
@@ -1191,6 +1401,8 @@ export class StepExecutor {
     readonly identity: FindingReviewPublicationIdentity;
     readonly runtime?: RuntimeStepResolution;
     readonly presentationContext?: FindingReviewPresentationContext;
+    readonly initialMode?: 'initial' | 'evidence-search';
+    readonly repairOrigin?: 'evidence-search';
   }): Promise<FindingIntakeNormalizationResult> {
     const candidates = this.resolveFindingIntakeNormalizerCandidates(
       input.reviewerStep,
@@ -1198,6 +1410,7 @@ export class StepExecutor {
     );
     const failures: string[] = [];
     let lastResult: FindingIntakeNormalizationResult | undefined;
+    let allAttemptsProviderNotExecuted = true;
     for (const candidate of candidates) {
       const attempt = await this.runFindingIntakeNormalizerCandidate({
         reviewerStep: input.reviewerStep,
@@ -1207,9 +1420,17 @@ export class StepExecutor {
         ...(input.presentationContext === undefined
           ? {}
           : { presentationContext: input.presentationContext }),
+        ...(input.initialMode === undefined ? {} : { initialMode: input.initialMode }),
+        ...(input.repairOrigin === undefined ? {} : { repairOrigin: input.repairOrigin }),
         candidate,
       });
       lastResult = attempt.result;
+      if (
+        attempt.result.response.status !== 'blocked'
+        && attempt.result.response.status !== 'rate_limited'
+      ) {
+        allAttemptsProviderNotExecuted = false;
+      }
       if (attempt.kind === 'terminal') {
         // 終端メタデータ（status / error / errorKind / rateLimitInfo / timestamp）は
         // 正規化係の応答から取るが、本文はレビュアーのレポートを正本のまま残す。
@@ -1276,6 +1497,7 @@ export class StepExecutor {
       },
       providerInfo: lastResult.providerInfo,
       reviewerRawResourceEnvelope: lastResult.reviewerRawResourceEnvelope,
+      ...(allAttemptsProviderNotExecuted ? { providerNotExecuted: true as const } : {}),
     };
   }
 

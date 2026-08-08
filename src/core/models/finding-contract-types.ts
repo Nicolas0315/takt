@@ -260,6 +260,8 @@ interface FindingManagerProviderCallBase {
   ownerAttemptKind: FindingManagerAttemptKind;
   ownerAttemptId: string;
   attemptIds: string[];
+  /** provider dispatch 後の crash resume で、同一 request を再実行するための原文。 */
+  requestBytes?: string;
   requestDigest: string;
   requestByteLength: number;
   measuredAdapterVisibleInputTokens: number;
@@ -272,6 +274,10 @@ interface FindingManagerProviderCallBase {
 export type FindingManagerProviderCall =
   | FindingManagerProviderCallBase & {
       state: 'reserved';
+    }
+  | FindingManagerProviderCallBase & {
+      state: 'released';
+      releasedAt: FindingObservation;
     }
   | FindingManagerProviderCallBase & {
       state: 'dispatched';
@@ -415,7 +421,7 @@ export type TerminalAdjudicationAttempt =
       stage: 'interrupted';
       startedAt: FindingObservation;
       interruptedAt: FindingObservation;
-      reason: 'provider_result_unknown';
+      reason: 'provider_result_unknown' | 'reservation_released';
     }
   | TerminalAttemptBase & {
       stage: 'proposed';
@@ -686,7 +692,7 @@ export type ConflictAdjudicationAttempt =
       stage: 'interrupted';
       startedAt: FindingObservation;
       interruptedAt: FindingObservation;
-      reason: 'provider_result_unknown';
+      reason: 'provider_result_unknown' | 'reservation_released';
     }
   | ConflictAttemptBase & {
       stage: 'proposed';

@@ -678,7 +678,8 @@ function collectProviderAndAttemptViolations(
     if (
       call !== undefined
       && (
-        (call.state !== 'settled' && attempt.stage !== 'started')
+        (call.state !== 'settled' && call.state !== 'released' && attempt.stage !== 'started')
+        || (call.state === 'released' && attempt.stage !== 'interrupted')
         || (call.state === 'settled'
           && call.resultKind === 'interrupted_unknown'
           && attempt.stage !== 'interrupted'
@@ -1454,6 +1455,13 @@ function collectReviewerAnomalyViolations(
         );
       }
     });
+    if (anomaly.promotionOrigin !== undefined && anomaly.promotedFindingId === undefined) {
+      addViolation(
+        violations,
+        ['reviewerAnomalies', index, 'promotionOrigin'],
+        `Reviewer anomaly "${anomaly.id}" has a promotion origin without a promoted finding`,
+      );
+    }
     if (anomaly.kind === 'intake-contract-incomplete') {
       const defect = anomaly.intakeContract;
       if (defect === undefined) {

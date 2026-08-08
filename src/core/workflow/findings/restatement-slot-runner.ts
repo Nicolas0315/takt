@@ -42,6 +42,8 @@ import {
 import type { InternalAgentSeats } from '../../models/config-types.js';
 import type { FindingManagerSubStepResult } from './manager-intake.js';
 import type { RunAgentOptions } from '../../../agents/runner.js';
+import type { FindingEvidenceSearchRequest } from './evidence-search.js';
+import type { FindingEvidenceSearchRunResult } from '../engine/StepExecutor.js';
 
 const log = createLogger('finding-restatement-slot');
 
@@ -128,7 +130,15 @@ export interface FindingRestatementSlotInput {
     readonly reviewScopeSnapshotId: string;
   }) => ReadonlyMap<string, FindingRestatementSlotOwnerContexts>;
   /** 1パス分の publication を findings-manager へ取り込む。 */
-  readonly ingest: (results: readonly FindingManagerSubStepResult[]) => Promise<void>;
+  readonly ingest: (
+    results: readonly FindingManagerSubStepResult[],
+    options?: { deferClaimBearingTerminalDispositions?: boolean },
+  ) => Promise<void>;
+  /** 言い直し予算を使い切った anomaly ごとの、engine-owned evidence-search 入力。 */
+  readonly buildEvidenceSearchRequests?: (input: {
+    ownerReviewerSteps: readonly AgentWorkflowStep[];
+    reviewScopeSnapshotId: string;
+  }) => readonly FindingEvidenceSearchRequest[];
   readonly reviewScopeSnapshotId: string;
   readonly parentStepName: string;
   readonly stepIteration: number;
@@ -198,8 +208,12 @@ export async function runRestatementSlotAttempt(input: {
  *   2. 提示予算（presentationLimit）に達した
  *   3. どれかの呼び出しが terminal（provider error / blocked / rate limited）
  *
- * terminal は即座に返し、その時点までの publication は manager へ渡さない
- * （親ステップが terminal になるため取り込み自体が走らない）。
+ * presentationLimit 到達後の claim-bearing anomaly には、終端処分へ進む前に
+ * evidence-search を1 anomaly 1回だけ挿入する。これは slot の budget-excluded
+ * 取り込みとして通常 admission へ渡される。
+ *
+ * terminal はその時点までの publication を manager へ渡してから返す
+ * （親ステップが terminal になっても、永続化済みの成功分は失わない）。
  */
 export async function runFindingRestatementSlot(
   input: FindingRestatementSlotInput,
@@ -211,6 +225,58 @@ export async function runFindingRestatementSlot(
   // レビュアーごと1回までに制限する。1回で決着しなかった分は次ラウンドの slot へ
   // 回り、全体の有限性は review_budget が保つ。
   const fullReviewIssued = new Set<string>();
+  const runEvidenceSearch = async (): Promise<FindingRestatementSlotTerminalOutcome | undefined> => {
+    const requests = input.buildEvidenceSearchRequests?.({
+      ownerReviewerSteps: input.ownerReviewerSteps,
+      reviewScopeSnapshotId: input.reviewScopeSnapshotId,
+    }) ?? [];
+    if (requests.length === 0) {
+      return;
+    }
+    const ownerStepsByName = new Map(input.ownerReviewerSteps.map((step) => [step.name, step] as const));
+    const results: FindingManagerSubStepResult[] = [];
+    for (const request of requests) {
+      const ownerStep = ownerStepsByName.get(request.ownerReviewerStepName);
+      if (ownerStep === undefined) {
+        log.warn('Dropping an evidence-search request whose owner step is not in the active review set', {
+          ownerReviewerStepName: request.ownerReviewerStepName,
+          anomalyId: request.request.anomalyId,
+          restatementRequestId: request.request.restatementRequestId,
+        });
+        continue;
+      }
+      const outcome: FindingEvidenceSearchRunResult = await input.stepExecutor.runFindingEvidenceSearch({
+        ownerStep,
+        parentStepName: input.parentStepName,
+        stepIteration: input.stepIteration,
+        state: input.state,
+        reviewScopeSnapshotId: input.reviewScopeSnapshotId,
+        request,
+        runtime: input.runtime,
+      });
+      if (outcome.kind === 'terminal') {
+        if (results.length > 0) {
+          await input.ingest(results, { deferClaimBearingTerminalDispositions: false });
+        }
+        return {
+          kind: 'terminal',
+          step: ownerStep,
+          response: outcome.response,
+          providerInfo: outcome.providerInfo,
+          ...(outcome.terminalOperation === undefined
+            ? {}
+            : { terminalOperation: outcome.terminalOperation }),
+        };
+      }
+      if (outcome.kind === 'published') {
+        results.push(outcome.result);
+      }
+    }
+    if (results.length > 0) {
+      await input.ingest(results, { deferClaimBearingTerminalDispositions: false });
+    }
+    return undefined;
+  };
   for (let pass = 1; pass <= input.presentationLimit; pass += 1) {
     const contexts = input.buildSlotContexts({
       ownerReviewerSteps: input.ownerReviewerSteps,
@@ -241,6 +307,9 @@ export async function runFindingRestatementSlot(
         ...(ownerContext === undefined ? {} : { context: ownerContext }),
       });
       if (ownerOutcome?.kind === 'terminal') {
+        if (passResults.length > 0) {
+          await input.ingest(passResults, { deferClaimBearingTerminalDispositions: true });
+        }
         return ownerOutcome;
       }
       if (ownerOutcome !== undefined) {
@@ -262,6 +331,9 @@ export async function runFindingRestatementSlot(
         ...(escalationContext === undefined ? {} : { context: escalationContext }),
       });
       if (escalationOutcome?.kind === 'terminal') {
+        if (passResults.length > 0) {
+          await input.ingest(passResults, { deferClaimBearingTerminalDispositions: true });
+        }
         return escalationOutcome;
       }
       if (escalationOutcome !== undefined) {
@@ -273,11 +345,11 @@ export async function runFindingRestatementSlot(
     // 残った publication が恒久的に孤児化する（提示予算は消費済みなのに証拠が
     // 台帳へ届かない）。
     if (passResults.length === 0) {
-      return undefined;
+      return await runEvidenceSearch();
     }
-    await input.ingest(passResults);
+    await input.ingest(passResults, { deferClaimBearingTerminalDispositions: true });
   }
-  return undefined;
+  return await runEvidenceSearch();
 }
 
 /** その context が実際に載せている言い直し request の件数。 */

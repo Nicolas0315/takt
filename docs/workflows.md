@@ -654,6 +654,25 @@ If a ledger references a raw finding that is no longer present, its id is expose
 
 Invalid or missing Finding Manager decisions land as provisional findings and the run continues. Add a rule such as `when(findings.provisional.count > 0 && findings.conflicts.count == 0)` routed to your replan step *before* the `COMPLETE` rule (see the builtin `takt-default-high` workflow for the reference wiring). `takt workflow doctor` warns when a `finding_contract` workflow has no rule referencing `findings.provisional`.
 
+### Conflict adjudication and grounded re-adjudication
+
+An active conflict first enters the engine-synthesized `finding-conflict-adjudication` step. If its
+verification is `verification_undetermined`, the engine makes one grounded re-adjudication attempt
+for that conflict in that round through the same `terminal-adjudicator` seat, persona resolution,
+provider budget, and lease path. It does not add a workflow step or role.
+
+The re-adjudication prompt contains bounded windows from the immutable review-scope snapshot. The
+windows are built from the disputed finding's `target.paths` and the line anchors in its file-quote
+evidence, using the same digest-bound window mechanism as `evidence-search`. The adjudicator must
+use only those windows; it never gets a live working-tree fallback. The reservation is persisted
+before the provider call, so a crash or replay resumes the exact attempt rather than issuing a
+duplicate one. A second `verification_undetermined` settles that round and returns to the originating
+review step.
+
+Conflict ladders must keep an active conflict in the fix/review loop while
+`findings.rounds.budgetExhausted == false`. The final `when(findings.conflicts.count > 0)` → `ABORT`
+arm is only the exhausted-budget exit; it must follow the budget-aware loop arm.
+
 ### Arpeggio Step (data-driven batch)
 
 Iterate over a data source (CSV, JSON, etc.) and apply the same step template to each row with bounded concurrency:
@@ -989,6 +1008,21 @@ appears in workflow YAML; it is not a step.
   review that withdraws such an anomaly — a restatement-only call never does.
 - A claim that declares it restates a given anomaly but fails the correspondence gate no
   longer mints a new product finding; it is recorded as a retry of that anomaly.
+- When a claim-bearing anomaly reaches `presentationLimit`, the engine inserts one
+  **evidence-search attempt per anomaly for the lifetime of that anomaly** immediately
+  before terminal disposition. The engine reads the real files in `target.paths`; for a
+  large file it supplies a simple window around the claimed line range. It passes that
+  content, the original claim, and the presentation history to the existing isolated
+  structured intake-normalizer resolution chain (`intake-normalizer` seat → `escalate` →
+  default). The normalizer receives no tools.
+- Evidence-search is not a workflow step. Its output is still an ordinary `evidenceRequests`
+  candidate: the existing evidence issuer and byte-exact gate are the final authority. A
+  verified candidate follows the existing promotion path and the ledger records
+  `promotionOrigin: evidence-search`. A null candidate, a mismatch, or a target mismatch
+  keeps the existing `restatement_exhausted_claim_bearing` terminal disposition.
+- The evidence-search call and its manager ingest use the slot's `budget-excluded` accounting;
+  they do not extend the presentation budget. The publication is persisted before ingest, so
+  interruption and resume cannot fire a second attempt for the same anomaly.
 
 `withdrawn_by_subsequent_review` settles an anomaly because the reviewer that raised it
 produced a later complete review, not because the underlying observation was judged sound

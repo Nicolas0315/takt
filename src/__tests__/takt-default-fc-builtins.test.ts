@@ -1,12 +1,15 @@
 import {
   mkdirSync,
+  readdirSync,
   readFileSync,
   writeFileSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { getAllParallelSubSteps } from '../core/models/index.js';
 import type {
+  AgentResponse,
   FindingsRuleContext,
   WorkflowConfig,
   WorkflowState,
@@ -15,6 +18,10 @@ import type {
 import { RuleEvaluator } from '../core/workflow/evaluation/RuleEvaluator.js';
 import { RuleDetectionExhaustedError } from '../core/workflow/evaluation/RuleDetectionExhaustedError.js';
 import { determineRuleTransition } from '../core/workflow/engine/transitions.js';
+import {
+  hasFindingsReference,
+  type WorkflowRuleCondition,
+} from '../core/models/workflow-rule-condition.js';
 import {
   invalidateAllResolvedConfigCache,
   invalidateGlobalConfigCache,
@@ -96,6 +103,25 @@ interface ExpectedRuleMatch {
 }
 
 const LANGUAGES = ['en', 'ja'] as const;
+const EXPECTED_FC_LADDER_STEPS = [
+  ['finding-contract-boundary-review', 'boundary-reviewers'],
+  ['finding-contract-local-review', 'reviewers'],
+  ['merge-readiness-finding-contract-final-gate', 'merge-readiness-review'],
+  ['merge-readiness-finding-contract-final-gate', 'supervise'],
+  ['peer-review-suite-finding-contract-base', 'reviewers'],
+  ['review-fix-takt-default-high', 'reviewers'],
+  ['takt-default-high', 'reviewers'],
+  ['takt-default-team-high', 'reviewers'],
+] as const;
+const EXPECTED_RESTATEMENT_LADDER_STEPS = [
+  ['merge-readiness-finding-contract-final-gate', 'merge-readiness-review'],
+  ['merge-readiness-finding-contract-final-gate', 'supervise'],
+  ['peer-review-suite-finding-contract-base', 'reviewers'],
+] as const;
+const RESTATEMENT_COUNT_KEYS = [
+  'requiresGuaranteedPresentationCount',
+  'restatementReadyCount',
+] as const;
 const REVIEWERS = [
   ['arch-review', 'architecture-review-finding-contract'],
   ['security-review', 'security-review-finding-contract'],
@@ -176,6 +202,65 @@ function loadedStep(workflow: WorkflowConfig, name: string): WorkflowStep {
   return step;
 }
 
+interface BuiltinFindingLadderStep {
+  workflow: string;
+  step: WorkflowStep;
+}
+
+function collectBuiltinFindingLadderSteps(language: Language): BuiltinFindingLadderStep[] {
+  return readdirSync(builtinPath(language, 'workflows'))
+    .filter((file) => file.endsWith('.yaml'))
+    .flatMap((file) => {
+      const workflowName = file.replace(/\.yaml$/u, '');
+      const raw = readWorkflow(language, workflowName);
+      if (raw.finding_contract === undefined && raw.subworkflow?.requires_finding_contract !== true) {
+        return [];
+      }
+      const workflow = loadWorkflow(language, workflowName);
+      return workflow.steps
+        .filter((candidate) => candidate.rules?.some((rule) => hasFindingsReference(rule.condition)))
+        .map((step) => ({ workflow: workflowName, step }));
+    });
+}
+
+function conditionShape(condition: WorkflowRuleCondition): string {
+  switch (condition.kind) {
+    case 'semantic':
+      return 'semantic';
+    case 'when':
+      return `when(${condition.expression})`;
+    case 'aggregate':
+      return `${condition.aggregate}(${condition.targetConditions.map(conditionShape).join(',')})`;
+    case 'and':
+      return `${conditionShape(condition.left)}&&${conditionShape(condition.right)}`;
+  }
+}
+
+function ladderSignature(step: WorkflowStep): Array<{
+  condition: string;
+  transition: ReturnType<typeof determineRuleTransition>;
+}> {
+  return (step.rules ?? []).map((rule, index) => ({
+    condition: conditionShape(rule.condition),
+    transition: determineRuleTransition(step, index),
+  }));
+}
+
+function findBuiltinLadderStep(
+  targets: readonly BuiltinFindingLadderStep[],
+  workflow: string,
+  stepName: string,
+  language: Language,
+): WorkflowStep {
+  const target = targets.find((candidate) => (
+    candidate.workflow === workflow && candidate.step.name === stepName
+  ));
+  if (target === undefined) {
+    throw new Error(`Missing ${language} finding ladder step: ${workflow}:${stepName}`);
+  }
+  return target.step;
+}
+
 function resolveInstruction(language: Language, name: string): string {
   const projectDir = join(testRoot, `project-${language}`);
   const content = resolveRefToContent(name, undefined, projectDir, 'instructions', {
@@ -246,45 +331,64 @@ function workflowState(step: WorkflowStep, counts: FindingCounts): WorkflowState
   };
 }
 
+function ladderWorkflowState(step: WorkflowStep, counts: FindingCounts): WorkflowState {
+  const state = workflowState(step, counts);
+  if (step.parallel !== undefined) {
+    for (const subStep of getAllParallelSubSteps(step.parallel)) {
+      state.stepOutputs.set(subStep.name, {
+          persona: subStep.personaDisplayName,
+          status: 'done',
+          content: '',
+          timestamp: new Date(0),
+          matchedRuleIndex: 0,
+        } satisfies AgentResponse);
+    }
+  }
+  return state;
+}
+
 function expectedRuleMatch(counts: FindingCounts): ExpectedRuleMatch {
   if (counts.conflicts > 0 && counts.unadjudicated > 0) {
     return { index: 0, nextStep: 'finding-conflict-adjudication' };
   }
-  if (counts.conflicts > 0) return { index: 1, nextStep: 'ABORT' };
+  if (counts.conflicts > 0 && !counts.roundBudgetExhausted) {
+    return { index: 1, returnValue: 'needs_review' };
+  }
+  if (counts.conflicts > 0) return { index: 2, nextStep: 'ABORT' };
   if (counts.claimBearingTerminalCount > 0) {
     // 言い直し予算を使い切った claim-bearing anomaly は再計画では直せない
     // （レビュアーの protocol 違反であってプロダクト側の欠陥ではない）ため、
     // final gate 経由で review_integrity_unresolved の可視的失敗へ送る。
-    return { index: 2, returnValue: 'needs_terminal_adjudication' };
+    return { index: 3, returnValue: 'needs_terminal_adjudication' };
   }
   // 言い直しは slot 内で消化されるため、レビュー step 終了時に言い直し待ちが
   // 残るのは予算枯渇系だけ。修正可能な open finding があるならそちらを先に回す。
   if (counts.open > 0 && counts.provisional === 0) {
-    return { index: 3, returnValue: 'needs_fix' };
+    return { index: 4, returnValue: 'needs_fix' };
   }
   if (counts.requiresGuaranteedPresentationCount > 0) {
-    return { index: 4, returnValue: 'needs_review' };
-  }
-  if (counts.restatementReadyCount > 0) {
     return { index: 5, returnValue: 'needs_review' };
   }
+  if (counts.restatementReadyCount > 0) {
+    return { index: 6, returnValue: 'needs_review' };
+  }
   if (counts.dismissEligible > 0) {
-    return { index: 6, returnValue: 'needs_terminal_adjudication' };
+    return { index: 7, returnValue: 'needs_terminal_adjudication' };
   }
-  if (counts.provisionalFixpoint) return { index: 7, returnValue: 'need_replan' };
+  if (counts.provisionalFixpoint) return { index: 8, returnValue: 'need_replan' };
   if (counts.roundBudgetExhausted && counts.provisional > 0) {
-    return { index: 8, returnValue: 'need_replan' };
+    return { index: 9, returnValue: 'need_replan' };
   }
-  if (counts.provisional > 0) return { index: 9, returnValue: 'need_replan' };
+  if (counts.provisional > 0) return { index: 10, returnValue: 'need_replan' };
   // 予算枯渇の出口は open の有無で塞がない。open が残っている状態は上の
   // needs_fix / need_replan がすでに拾っているので、ここへ来る時点で open は 0。
   if (counts.anomalies > 0 && counts.anomalyBudgetExhausted) {
-    return { index: 10, returnValue: 'need_replan' };
+    return { index: 11, returnValue: 'need_replan' };
   }
   if (counts.anomalies > 0) {
-    return { index: 11, returnValue: 'needs_review' };
+    return { index: 12, returnValue: 'needs_review' };
   }
-  return { index: 12, nextStep: 'COMPLETE' };
+  return { index: 13, nextStep: 'COMPLETE' };
 }
 
 /**
@@ -587,7 +691,7 @@ describe('takt-default-fc builtins', () => {
     expect(states).toHaveLength(38880);
     const rules = reviewers.rules;
     if (rules === undefined) throw new Error('Missing suite self rules');
-    expect(rules).toHaveLength(13);
+    expect(rules).toHaveLength(14);
 
     for (const counts of states) {
       const match = new RuleEvaluator(reviewers, { state: workflowState(reviewers, counts) })
@@ -604,6 +708,28 @@ describe('takt-default-fc builtins', () => {
     expect([...reached].sort((left, right) => left - right)).toEqual(
       rules.map((_, index) => index),
     );
+  });
+
+  it.each(LANGUAGES)('%s keeps unresolved conflicts in review while stop budget remains', (language) => {
+    const reviewers = loadedStep(
+      loadWorkflow(language, 'peer-review-suite-finding-contract-base'),
+      'reviewers',
+    );
+    for (const [roundBudgetExhausted, expected] of [
+      [false, { returnValue: 'needs_review' }],
+      [true, { nextStep: 'ABORT' }],
+    ] as const) {
+      const counts = {
+        ...EMPTY_FINDING_COUNTS,
+        conflicts: 1,
+        unadjudicated: 0,
+        roundBudgetExhausted,
+      };
+      const match = new RuleEvaluator(reviewers, { state: workflowState(reviewers, counts) })
+        .evaluate(undefined);
+      if (match === undefined) throw new Error(`Missing rule match: ${JSON.stringify(counts)}`);
+      expect(determineRuleTransition(reviewers, match.index)).toEqual(expected);
+    }
   });
 
   it.each(LANGUAGES)('%s suite ladder is total over the finding state product', (language) => {
@@ -642,6 +768,119 @@ describe('takt-default-fc builtins', () => {
       if (match === undefined) throw new Error(`Missing rule match: ${JSON.stringify(counts)}`);
       const transition = determineRuleTransition(reviewers, match.index);
       expect(transition, JSON.stringify(counts)).not.toEqual({ nextStep: 'COMPLETE' });
+    }
+  });
+
+  it('en/ja all builtin FC control ladders keep condition and transition symmetry', () => {
+    const targetsByLanguage = Object.fromEntries(
+      LANGUAGES.map((language) => [language, collectBuiltinFindingLadderSteps(language)]),
+    ) as Record<Language, BuiltinFindingLadderStep[]>;
+
+    for (const [workflow, stepName] of EXPECTED_FC_LADDER_STEPS) {
+      const enStep = findBuiltinLadderStep(targetsByLanguage.en, workflow, stepName, 'en');
+      const jaStep = findBuiltinLadderStep(targetsByLanguage.ja, workflow, stepName, 'ja');
+      expect(ladderSignature(jaStep), `${workflow}:${stepName}`).toEqual(ladderSignature(enStep));
+    }
+  });
+
+  it.each(LANGUAGES)('%s all builtin FC control ladders are total over the finding state product', (language) => {
+    const states = enumerateFindingCountProduct();
+    const targets = collectBuiltinFindingLadderSteps(language);
+    expect(targets.map(({ workflow, step }) => `${workflow}:${step.name}`).sort()).toEqual(
+      EXPECTED_FC_LADDER_STEPS.map(([workflow, step]) => `${workflow}:${step}`).sort(),
+    );
+
+    for (const { workflow, step } of targets) {
+      const unmatched = states.filter((counts) => {
+        const selections = [
+          undefined,
+          { label: 'approved', method: 'auto_select' as const },
+        ];
+        for (const selection of selections) {
+          try {
+            if (new RuleEvaluator(step, { state: ladderWorkflowState(step, counts) })
+              .evaluate(selection) !== undefined) {
+              return false;
+            }
+          } catch (error) {
+            if (!(error instanceof RuleDetectionExhaustedError)) {
+              throw error;
+            }
+          }
+        }
+        return true;
+      });
+      expect(unmatched.slice(0, 3).map((counts) => JSON.stringify(counts)), workflow)
+        .toEqual([]);
+    }
+  });
+
+  it.each(LANGUAGES)('%s restatement conditions return needs_review on every applicable ladder', (language) => {
+    const targets = collectBuiltinFindingLadderSteps(language);
+
+    for (const [workflow, stepName] of EXPECTED_RESTATEMENT_LADDER_STEPS) {
+      const step = findBuiltinLadderStep(targets, workflow, stepName, language);
+      const matchingRuleIndexes = RESTATEMENT_COUNT_KEYS.map((countKey) => {
+        const indexes = (step.rules ?? []).flatMap((rule, index) => (
+          rule.condition.kind === 'when'
+            && rule.condition.expression.includes(`findings.reviewerAnomalies.${countKey} > 0`)
+            && rule.returnValue === 'needs_review'
+            ? [index]
+            : []
+        ));
+        expect(indexes, `${language}:${workflow}:${stepName}:${countKey}`).toHaveLength(1);
+        return { countKey, ruleIndex: indexes[0]! };
+      });
+      const openRuleIndex = (step.rules ?? []).findIndex((rule) => (
+        rule.condition.kind === 'when'
+        && rule.condition.expression.includes('findings.open.count > 0')
+        && rule.returnValue === 'needs_fix'
+      ));
+      expect(openRuleIndex, `${language}:${workflow}:${stepName}`).toBeGreaterThanOrEqual(0);
+      for (const { countKey, ruleIndex } of matchingRuleIndexes) {
+        const condition = step.rules?.[ruleIndex]?.condition;
+        if (condition?.kind !== 'when') {
+          throw new Error(`Missing restatement condition: ${language}:${workflow}:${stepName}:${countKey}`);
+        }
+        if (workflow === 'merge-readiness-finding-contract-final-gate') {
+          expect(condition.expression).toContain('findings.reviewerAnomalies.budgetExhausted == false');
+          expect(ruleIndex).toBeGreaterThan(openRuleIndex);
+        }
+        expect(determineRuleTransition(step, ruleIndex)).toEqual({ returnValue: 'needs_review' });
+
+        const counts: FindingCounts = {
+          ...EMPTY_FINDING_COUNTS,
+          [countKey]: 1,
+        };
+        const match = new RuleEvaluator(step, { state: ladderWorkflowState(step, counts) })
+          .evaluate(undefined);
+        expect(match?.index, `${language}:${workflow}:${stepName}:${countKey}`).toBe(ruleIndex);
+        if (match === undefined) {
+          throw new Error(`Missing restatement match: ${language}:${workflow}:${stepName}:${countKey}`);
+        }
+        expect(determineRuleTransition(step, match.index)).toEqual({ returnValue: 'needs_review' });
+
+        if (workflow === 'merge-readiness-finding-contract-final-gate') {
+          const openMatch = new RuleEvaluator(step, {
+            state: ladderWorkflowState(step, {
+              ...EMPTY_FINDING_COUNTS,
+              open: 1,
+              anomalies: 1,
+              [countKey]: 1,
+            }),
+          }).evaluate(undefined);
+          expect(openMatch?.index, `${language}:${workflow}:${stepName}:open-precedence`).toBe(openRuleIndex);
+          const exhaustedMatch = new RuleEvaluator(step, {
+            state: ladderWorkflowState(step, {
+              ...EMPTY_FINDING_COUNTS,
+              anomalies: 1,
+              anomalyBudgetExhausted: true,
+              [countKey]: 1,
+            }),
+          }).evaluate(undefined);
+          expect(exhaustedMatch?.index, `${language}:${workflow}:${stepName}:budget-guard`).not.toBe(ruleIndex);
+        }
+      }
     }
   });
 

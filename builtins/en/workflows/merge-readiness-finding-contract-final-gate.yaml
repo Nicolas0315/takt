@@ -31,6 +31,8 @@ steps:
     rules:
       - condition: when(findings.conflicts.count > 0 && findings.conflicts.unadjudicated.count > 0)
         return: needs_conflict_adjudication
+      - condition: when(findings.conflicts.count > 0 && findings.rounds.budgetExhausted == false)
+        return: needs_review
       - condition: when(findings.conflicts.count > 0)
         next: ABORT
       - condition: when(findings.provisional.fixpoint == true)
@@ -60,6 +62,10 @@ steps:
         return: needs_fix
       - condition: when(findings.open.count > 0)
         return: needs_fix
+      - condition: when(findings.reviewerAnomalies.requiresGuaranteedPresentationCount > 0 && findings.reviewerAnomalies.budgetExhausted == false)
+        return: needs_review
+      - condition: when(findings.reviewerAnomalies.restatementReadyCount > 0 && findings.reviewerAnomalies.budgetExhausted == false)
+        return: needs_review
       - condition: approved && when(findings.open.count == 0 && findings.provisional.count == 0 && findings.conflicts.count == 0)
         next: supervise
     output_contracts:
@@ -75,6 +81,8 @@ steps:
     rules:
       - condition: when(findings.conflicts.count > 0 && findings.conflicts.unadjudicated.count > 0)
         return: needs_conflict_adjudication
+      - condition: when(findings.conflicts.count > 0 && findings.rounds.budgetExhausted == false)
+        return: needs_review
       - condition: when(findings.conflicts.count > 0)
         next: ABORT
       - condition: when(findings.provisional.fixpoint == true)
@@ -106,5 +114,9 @@ steps:
         return: need_replan
       - condition: when(findings.open.count > 0)
         return: needs_fix
+      - condition: when(findings.reviewerAnomalies.requiresGuaranteedPresentationCount > 0 && findings.reviewerAnomalies.budgetExhausted == false)
+        return: needs_review
+      - condition: when(findings.reviewerAnomalies.restatementReadyCount > 0 && findings.reviewerAnomalies.budgetExhausted == false)
+        return: needs_review
       - condition: approved && when(findings.open.count == 0 && findings.provisional.count == 0 && findings.conflicts.count == 0)
         next: COMPLETE
