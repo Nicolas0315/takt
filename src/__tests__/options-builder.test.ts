@@ -644,6 +644,51 @@ describe('OptionsBuilder.buildResumeOptions', () => {
     expect(options.workflowMeta?.processSafety).toBeUndefined();
   });
 
+  it('never requests the step structured output on report/status phases', () => {
+    // Given: structured_output は Phase 1 の遷移判定用。Phase 2 で要求すると provider が
+    // スキーマどおりの JSON を返し、それが report file になる（issue #1242）
+    // report fallback は primary が opencode のときだけ成立するので、fallback 分岐まで
+    // 到達させるために step provider を opencode にする
+    const step = createStep({
+      provider: 'opencode',
+      model: 'opencode/qwen3-coder-next',
+      structuredOutput: {
+        schemaRef: 'researcher-status',
+        schema: {
+          type: 'object',
+          properties: { status: { type: 'string' } },
+          required: ['status'],
+          additionalProperties: false,
+        },
+      },
+    });
+    const builder = createBuilder(step, {
+      reportFallbackProvider: { provider: 'mock', model: 'mock-report-model' },
+    });
+
+    // When
+    const resumeOptions = builder.buildResumeOptions(step, 'session-123', { maxTurns: 3 });
+    const newSessionOptions = builder.buildNewSessionReportOptions(step, {
+      allowedTools: [],
+      maxTurns: 3,
+    });
+    const fallbackOptions = builder.buildFallbackReportOptions(step, newSessionOptions, {
+      allowedTools: [],
+      maxTurns: 3,
+    });
+
+    // Then
+    // fallback 分岐が実際に実行されたことを先に固定する。optional chaining のままだと
+    // buildFallbackReportOptions が undefined を返しても outputSchema の検証が通ってしまう。
+    if (fallbackOptions === undefined) {
+      throw new Error('Expected fallback report options');
+    }
+    expect(fallbackOptions.resolvedProvider).toBe('mock');
+    expect(resumeOptions.outputSchema).toBeUndefined();
+    expect(newSessionOptions.outputSchema).toBeUndefined();
+    expect(fallbackOptions.outputSchema).toBeUndefined();
+  });
+
   it('removes report/status phase maxTurns when provider does not support it', () => {
     const step = createStep({ provider: 'claude-terminal' });
     const builder = createBuilder(step);
