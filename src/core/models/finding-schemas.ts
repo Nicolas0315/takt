@@ -777,6 +777,16 @@ export const ReviewerAnomalyEntrySchema = z.object({
         )),
       decidedAt: FindingObservationSchema,
     }).strict(),
+    z.object({
+      kind: z.literal('dismissed_by_terminal_adjudication'),
+      basis: z.literal('outside_task_scope'),
+      taskQuote: nonEmptyString,
+      workflowTaskDigest: Sha256Schema,
+      claimQuote: nonEmptyString,
+      adjudicationTaskId: Sha256Schema,
+      reason: nonEmptyString,
+      decidedAt: FindingObservationSchema,
+    }).strict(),
   ]).optional(),
 }).strict().superRefine((value, ctx) => {
   if (value.kind === 'intake-contract-incomplete' && value.intakeContract === undefined) {
@@ -2266,6 +2276,7 @@ const FindingManagerValidationReportSchema = z.object({
         'invalidate',
         'duplicate',
         'dismiss',
+        'reviewer_anomaly',
       ]),
       ownedIds: z.array(rawFindingIdString),
       status: z.literal('succeeded'),
@@ -2283,6 +2294,7 @@ const FindingManagerValidationReportSchema = z.object({
         'invalidate',
         'duplicate',
         'dismiss',
+        'reviewer_anomaly',
       ]),
       ownedIds: z.array(rawFindingIdString),
       status: z.enum(['failed', 'input_overflow']),

@@ -1388,6 +1388,7 @@ export function buildFindingManagerCommitMutation(
     baseAnomalySpecs: prepared.anomalySpecs,
     pendingRejectedObservations: admission.pendingRejectedObservations,
     verifiedEvidenceCandidates: admission.verifiedEvidenceCandidates,
+    anomalyAdjudications: params.managerDecision.anomalyAdjudications,
   });
   const finalizedLedger = appendRawFindingsWithCanonicalSnapshots({
     ledger: finalized.ledger,
@@ -1411,7 +1412,11 @@ export function buildFindingManagerCommitMutation(
         cwd: input.cwd,
       }), interpretationPrepared),
       lifecycleManagerOutput: reconcilePlan.managerOutput,
-      staleRejections: [...staleRejections, ...reconcilePlan.normalizationRejections],
+      staleRejections: [
+        ...staleRejections,
+        ...reconcilePlan.normalizationRejections,
+        ...finalized.adjudicationRejections,
+      ],
       unsupportedRawFindingReports: revalidated.unsupportedRawFindingReports,
       admissionRejections: admission.admissionRejections,
       provisionalLandings,

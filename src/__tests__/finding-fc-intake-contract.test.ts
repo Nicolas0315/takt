@@ -67,6 +67,13 @@ import {
 import { createProvisionalClaimBindingAuthorizationReference } from '../core/models/finding-provisional-claim-authorization.js';
 import { createEngineProofRecord } from '../core/models/finding-evidence-record.js';
 import { parseFindingLedger } from '../core/models/finding-schemas.js';
+import {
+  classifyIntakeReviewIntegrityFailure,
+} from '../core/workflow/findings/review-integrity.js';
+import {
+  reviewerAnomalySettlementEligibilityViolation,
+} from '../core/models/finding-reviewer-anomaly-settlement-policy.js';
+import { computeWorkflowTaskDigest } from '../core/workflow/findings/task-scope-adjudication.js';
 
 const observedAt: FindingObservation = {
   runId: 'run-fc-intake',
@@ -389,6 +396,7 @@ describe('FC intake contract', () => {
       baseAnomalySpecs: [],
       pendingRejectedObservations: [],
       verifiedEvidenceCandidates: [],
+      anomalyAdjudications: [],
     });
 
     const terminal = committed.ledger.reviewerAnomalies![0]!.intakeContract!.terminalDisposition;
@@ -1160,6 +1168,272 @@ describe('FC intake contract', () => {
       expect(context.claimBearingTerminalCount).toBe(1);
       expect(context.count).toBe(1);
     });
+
+    /**
+     * 完了ゲートの診断が原因を指すこと。決着済みを「提示されていない（配線漏れ）」と
+     * 報告すると、実際の原因（終端処分が未決着のまま残っている）が隠れる。
+     */
+    describe('completion gate diagnosis', () => {
+      it('reports the exhausted cause for a terminally disposed anomaly instead of an unpresented one', () => {
+        const { ledger } = disposedLedger('raw-closed-diagnosis');
+        const classification = classifyIntakeReviewIntegrityFailure({
+          anomalies: ledger.reviewerAnomalies!,
+          // 提示は別の workflow_call 名前空間で行われたため、このゲートからは0件に見える。
+          presentationCounts: new Map(),
+        });
+
+        expect(classification?.code).toBe('restatement_exhausted_claim_bearing');
+        expect(classification?.unpresentedIds).toEqual([]);
+        expect(classification?.reason).toContain('restatement limit was exhausted');
+        expect(classification?.anomalyIds).toEqual([ledger.reviewerAnomalies![0]!.id]);
+      });
+
+      it('reports the exhausted cause for a terminal that never demanded a presentation', () => {
+        // undemandable_claim_atom は提示を1回も行わずに終端する正規の kind。
+        // 提示回数をどう数え直しても「提示済み」にはならないので、決着済みを
+        // unpresented から外すことでしか正しく診断できない。
+        const { ledger } = disposedLedger('raw-closed-undemandable');
+        const undemandable = {
+          ...ledger,
+          reviewerAnomalies: ledger.reviewerAnomalies!.map((entry) => ({
+            ...entry,
+            intakeContract: {
+              ...entry.intakeContract!,
+              terminalDisposition: {
+                kind: 'undemandable_claim_atom' as const,
+                workflowOutcome: 'review_integrity_unresolved' as const,
+                decidedAt: observedAt,
+                reason: 'The recorded observation carries no claim body that a restatement request could ask back',
+              },
+            },
+          })),
+        };
+
+        expect(classifyIntakeReviewIntegrityFailure({
+          anomalies: undemandable.reviewerAnomalies,
+          presentationCounts: new Map(),
+        })?.code).toBe('restatement_exhausted_claim_bearing');
+      });
+
+      /**
+       * 救済経路の全体像。終端処分済みは自動では決着せず、terminal adjudication の
+       * 裁定却下だけが決着させる。決着したら完了ゲートは通る。
+       */
+      it('lets the completion gate pass once terminal adjudication dismissed the anomaly', () => {
+        const { wire, ledger } = disposedLedger('raw-closed-adjudicated');
+        const anomaly = ledger.reviewerAnomalies![0]!;
+        const workflowTask = 'Rename the legacy signal fields under src/infra/config/runtime-provider/.';
+        const settlement = {
+          kind: 'dismissed_by_terminal_adjudication' as const,
+          basis: 'outside_task_scope' as const,
+          // workflow task の byte-exact 部分文字列。
+          taskQuote: 'Rename the legacy signal fields',
+          workflowTaskDigest: computeWorkflowTaskDigest(workflowTask),
+          // anomaly が記録した claim 本文の byte-exact 部分文字列。
+          claimQuote: wire.rawExcerpt!.slice(0, 20),
+          adjudicationTaskId: 'd'.repeat(64),
+          reason: 'The claim targets a module the task never asked to change',
+          decidedAt: observedAt,
+        };
+
+        expect(reviewerAnomalySettlementEligibilityViolation({
+          projection: ledger,
+          anomaly,
+          settlement,
+          sourceHead: { kind: 'projection' },
+          workflowTaskDigest: computeWorkflowTaskDigest(workflowTask),
+        })).toBeUndefined();
+
+        const settled = {
+          ...ledger,
+          reviewerAnomalies: [{ ...anomaly, settlement }],
+        };
+        // 台帳不変条件（成立条件つき）を通り、未決着でなくなり、完了ゲートも通る。
+        expect(collectFindingLedgerProjectionInvariantViolations(settled)
+          .filter((violation) => violation.path[0] === 'reviewerAnomalies'))
+          .toEqual([]);
+        expect(isOutstandingReviewerAnomaly(settled.reviewerAnomalies[0]!)).toBe(false);
+        expect(classifyIntakeReviewIntegrityFailure({
+          anomalies: settled.reviewerAnomalies.filter(isOutstandingReviewerAnomaly),
+          presentationCounts: new Map(),
+        })).toBeUndefined();
+      });
+
+      it.each([
+        ['a claim quote that is not in the recorded claim', {
+          claimQuote: 'a paraphrase the reviewer never wrote',
+        }],
+        ['a workflow task binding from another task', {
+          workflowTaskDigest: 'e'.repeat(64),
+        }],
+      ] as const)('refuses an adjudication with %s', (_label, override) => {
+        const { wire, ledger } = disposedLedger('raw-closed-refused');
+        const workflowTask = 'Rename the legacy signal fields under src/infra/config/runtime-provider/.';
+
+        expect(reviewerAnomalySettlementEligibilityViolation({
+          projection: ledger,
+          anomaly: ledger.reviewerAnomalies![0]!,
+          settlement: {
+            kind: 'dismissed_by_terminal_adjudication',
+            basis: 'outside_task_scope',
+            taskQuote: 'Rename the legacy signal fields',
+            workflowTaskDigest: computeWorkflowTaskDigest(workflowTask),
+            claimQuote: wire.rawExcerpt!.slice(0, 20),
+            adjudicationTaskId: 'd'.repeat(64),
+            reason: 'The claim targets a module the task never asked to change',
+            decidedAt: observedAt,
+            ...override,
+          },
+          sourceHead: { kind: 'projection' },
+          workflowTaskDigest: computeWorkflowTaskDigest(workflowTask),
+        })).toBeDefined();
+      });
+
+      it('keeps forbidding a non-adjudication settlement on a terminally disposed anomaly', () => {
+        // 裁定却下だけが終端処分と同居できる。他の決着が同居できると、提示が
+        // 止まらず昇格や取り下げが後付けされる実事故を捕まえた検査が緩む。
+        const { ledger } = disposedLedger('raw-closed-forbidden');
+        const anomaly = ledger.reviewerAnomalies![0]!;
+
+        const withSettlement = (settlement: NonNullable<typeof anomaly.settlement>) => (
+          collectFindingLedgerProjectionInvariantViolations({
+            ...ledger,
+            reviewerAnomalies: [{ ...anomaly, settlement }],
+          }).filter((violation) => violation.path.at(-1) === 'terminalDisposition')
+        );
+
+        expect(withSettlement({
+          kind: 'withdrawn_by_subsequent_review',
+          supersedingPublications: [{ reviewer: anomaly.reviewers[0]!, publicationId: 'a'.repeat(64) }],
+          decidedAt: observedAt,
+        })).toHaveLength(1);
+        expect(withSettlement({
+          kind: 'target_resolved_by_verified_evidence',
+          findingId: 'F-0001',
+          lifecycleEventId: 'event-1',
+        })).toHaveLength(1);
+        expect(withSettlement({
+          kind: 'target_dismissed_by_terminal_adjudication',
+          findingId: 'F-0001',
+          lifecycleEventId: 'event-1',
+        })).toHaveLength(1);
+      });
+
+      it('refuses to adjudicate an anomaly whose restatement ladder is still open', () => {
+        // 対象は終端処分済みだけ。ラダーの途中で裁定却下できると、言い直しの機会を
+        // 奪ったうえに可視的失敗も消える。
+        const raw = incompleteRaw('raw-open-adjudication', {
+          rawExcerpt: 'The open defect remains observable.',
+        });
+        const workflowTask = 'Rename the legacy signal fields.';
+        const openLedger = applyReviewerAnomalySpecsToLedger(emptyLedger(), [createReviewerAnomalySpec({
+          wire: raw,
+          canonical: canonicalItem(raw).canonical,
+          anomalyKind: 'intake-contract-incomplete',
+          reason: 'Independent reviewer observation does not satisfy the product admission contract',
+          intakeContract: {
+            observationClass: 'claim-bearing',
+            classificationAuthorityId: 'system/intake_observation_classification_v1',
+            reasonCodes: ['product-identity-incomplete'],
+            missingRequirements: ['relation', 'severity'],
+            presentationOwnerReviewer: raw.reviewer,
+            presentationLimit: 6,
+          },
+        })], {
+          workflowName: 'peer-review',
+          stepName: observedAt.stepName,
+          runId: observedAt.runId,
+          timestamp: observedAt.timestamp,
+        }, new Set());
+
+        expect(reviewerAnomalySettlementEligibilityViolation({
+          projection: { ...openLedger, rawFindings: [raw] },
+          anomaly: openLedger.reviewerAnomalies![0]!,
+          settlement: {
+            kind: 'dismissed_by_terminal_adjudication',
+            basis: 'outside_task_scope',
+            taskQuote: 'Rename the legacy signal fields',
+            workflowTaskDigest: computeWorkflowTaskDigest(workflowTask),
+            claimQuote: 'The open defect',
+            adjudicationTaskId: 'd'.repeat(64),
+            reason: 'out of scope',
+            decidedAt: observedAt,
+          },
+          sourceHead: { kind: 'projection' },
+          workflowTaskDigest: computeWorkflowTaskDigest(workflowTask),
+        })).toBe('terminal adjudication may only dismiss a claim-bearing anomaly whose restatement ladder terminated unresolved');
+      });
+
+      it('refuses to settle an anomaly that is already settled', () => {
+        // 二重決着の禁止。決着済みの上書きは監査記録を壊す。
+        const { wire, ledger } = disposedLedger('raw-closed-twice');
+        const workflowTask = 'Rename the legacy signal fields under src/infra/config/runtime-provider/.';
+        const settled = {
+          ...ledger.reviewerAnomalies![0]!,
+          settlement: {
+            kind: 'dismissed_by_terminal_adjudication' as const,
+            basis: 'outside_task_scope' as const,
+            taskQuote: 'Rename the legacy signal fields',
+            workflowTaskDigest: computeWorkflowTaskDigest(workflowTask),
+            claimQuote: wire.rawExcerpt!.slice(0, 20),
+            adjudicationTaskId: 'd'.repeat(64),
+            reason: 'already decided',
+            decidedAt: observedAt,
+          },
+        };
+
+        expect(reviewerAnomalySettlementEligibilityViolation({
+          projection: ledger,
+          anomaly: settled,
+          settlement: {
+            kind: 'dismissed_by_terminal_adjudication',
+            basis: 'outside_task_scope',
+            taskQuote: 'Rename the legacy signal fields',
+            workflowTaskDigest: computeWorkflowTaskDigest(workflowTask),
+            claimQuote: wire.rawExcerpt!.slice(0, 20),
+            adjudicationTaskId: 'e'.repeat(64),
+            reason: 'a second decision',
+            decidedAt: observedAt,
+          },
+          sourceHead: { kind: 'projection' },
+          workflowTaskDigest: computeWorkflowTaskDigest(workflowTask),
+        })).toBe('already settled anomalies cannot be settled again');
+      });
+
+      it('still reports the unpresented cause while the anomaly is open', () => {
+        // 正の対照: 終端処分が無い anomaly は「提示されていない」＝配線漏れのまま。
+        const raw = incompleteRaw('raw-open-diagnosis', {
+          rawExcerpt: 'The open defect remains observable.',
+        });
+        const ledger = applyReviewerAnomalySpecsToLedger(emptyLedger(), [createReviewerAnomalySpec({
+          wire: raw,
+          canonical: canonicalItem(raw).canonical,
+          anomalyKind: 'intake-contract-incomplete',
+          reason: 'Independent reviewer observation does not satisfy the product admission contract',
+          intakeContract: {
+            observationClass: 'claim-bearing',
+            classificationAuthorityId: 'system/intake_observation_classification_v1',
+            reasonCodes: ['product-identity-incomplete'],
+            missingRequirements: ['relation', 'severity'],
+            presentationOwnerReviewer: raw.reviewer,
+            presentationLimit: 6,
+          },
+        })], {
+          workflowName: 'peer-review',
+          stepName: observedAt.stepName,
+          runId: observedAt.runId,
+          timestamp: observedAt.timestamp,
+        }, new Set());
+
+        const classification = classifyIntakeReviewIntegrityFailure({
+          anomalies: ledger.reviewerAnomalies!,
+          presentationCounts: new Map(),
+        });
+
+        expect(classification?.code).toBe('review_integrity_unresolved_unpresented');
+        expect(classification?.unpresentedIds).toEqual([ledger.reviewerAnomalies![0]!.id]);
+      });
+    });
   });
 
   /**
@@ -1545,6 +1819,7 @@ describe('FC intake contract', () => {
           reportDigest: admitted.sourceBinding.reportDigest,
         }],
       }],
+      anomalyAdjudications: [],
     });
 
     expect(committed.ledger.reviewerAnomalies?.[0]?.promotedFindingId).toBe('F-0001');
@@ -1626,6 +1901,7 @@ describe('FC intake contract', () => {
       baseAnomalySpecs: [spec],
       pendingRejectedObservations: [],
       verifiedEvidenceCandidates: [],
+      anomalyAdjudications: [],
     });
 
     expect(committed.ledger.reviewerAnomalies?.[0]?.intakeContract?.terminalDisposition)

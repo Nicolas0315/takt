@@ -19,6 +19,10 @@ import {
 } from './manager-agent.js';
 import { buildFindingManagerControlTaskStep } from './manager-step.js';
 import {
+  isAdjudicableReviewerAnomaly,
+  reviewerAnomalyAdjudicationClaimTexts,
+} from '../../models/finding-reviewer-anomaly-settlement-policy.js';
+import {
   MAIN_MANAGER_INPUT_MAX_BYTES,
   MAIN_MANAGER_RAW_TASK_MAX_ITEMS,
   parseMainManagerControlTaskOutput,
@@ -29,6 +33,7 @@ import {
   type MainManagerControlTaskOutput,
   type MainManagerRawTask,
   type MainManagerRawTaskDecision,
+  type ReviewerAnomalyAdjudicationDecision,
 } from './manager-task-contracts.js';
 import {
   collectTaskScopeReportExcerpts,
@@ -54,6 +59,7 @@ import type {
   FindingProvisionalKind,
   FindingManagerTaskAudit,
   RawFinding,
+  ReviewerAnomalyEntry,
 } from './types.js';
 
 const CONTEXT_CANDIDATE_LIMITS = [16, 8, 4, 0] as const;
@@ -67,6 +73,8 @@ export interface MainManagerRawFailure {
 
 export interface MainManagerTaskExecution {
   decisions: FindingManagerDecisions;
+  /** 終端処分済み anomaly の裁定却下。product finding の決定とは別系統。 */
+  anomalyAdjudications: ReviewerAnomalyAdjudicationDecision[];
   conflictTargetHeads: Map<string, CapturedManagerConflictHead>;
   rawFailures: Map<string, MainManagerRawFailure>;
   invalidAttemptMessages: string[];
@@ -816,6 +824,25 @@ function boundedPriorTextForFinding(
   return priorStepResponseText.slice(start, start + CONTROL_PRIOR_TEXT_LIMIT);
 }
 
+/**
+ * このラウンドで裁定へ出す anomaly。権限の判定込みの唯一の入口で、
+ * manifest（task を作るか）と needsAgent（そもそも provider を呼ぶか）が共有する。
+ * 片方だけが条件を持つと、権限があるのに task が作られないラウンドが生まれる。
+ *
+ * 適格性そのものは台帳側の成立条件と同じ述語（isAdjudicableReviewerAnomaly）を使う。
+ */
+export function adjudicableReviewerAnomalies(input: {
+  ledger: FindingLedger;
+  managerAuthority: RunFindingManagerForStepInput['managerAuthority'];
+}): ReviewerAnomalyEntry[] {
+  if (input.managerAuthority !== 'terminal_adjudication') {
+    return [];
+  }
+  return (input.ledger.reviewerAnomalies ?? [])
+    .filter(isAdjudicableReviewerAnomaly)
+    .sort((left, right) => compareBinaryStrings(left.id, right.id));
+}
+
 function controlTask(
   previousLedger: FindingLedger,
   reviewScopeSnapshotId: string,
@@ -828,13 +855,16 @@ function controlTask(
   const sortedIntents = [...candidateIntents].sort((left, right) => (
     compareBinaryStrings(left.intentId, right.intentId)
   ));
+  // reviewer anomaly は lifecycle を持たない別系統のレコードなので head は常に null。
   const targetHeads = new Map(sortedIds.map((entityId) => [
     entityId,
-    captureFindingLifecycleHead(
-      previousLedger,
-      kind === 'conflict' ? 'conflict' : 'finding',
-      entityId,
-    ) ?? null,
+    kind === 'reviewer_anomaly'
+      ? null
+      : captureFindingLifecycleHead(
+        previousLedger,
+        kind === 'conflict' ? 'conflict' : 'finding',
+        entityId,
+      ) ?? null,
   ]));
   const conflictEvidenceSetHashes = new Map(
     kind === 'conflict'
@@ -978,6 +1008,33 @@ export function createMainManagerControlTaskManifest(input: {
       taskScopeContext,
     ));
   }
+  // 終端処分済み claim-bearing anomaly の裁定枠。terminal adjudication 権限が
+  // 無いラウンドでは task 自体を作らない — 権限の無い呼び出しに「却下してよいか」を
+  // 問うと、返せない答えを毎ラウンド要求することになる。
+  {
+    for (const anomaly of adjudicableReviewerAnomalies({
+      ledger: input.previousLedger,
+      managerAuthority: input.managerAuthority,
+    })) {
+      tasks.push(controlTask(
+        input.previousLedger,
+        input.reviewScopeSnapshotId,
+        'reviewer_anomaly',
+        [anomaly.id],
+        [controlIntent(
+          'adjudicate_anomaly',
+          anomaly.id,
+          `Restatement ladder terminated unresolved: ${anomaly.intakeContract!.terminalDisposition!.reason}`,
+        )],
+        {
+          managerAuthority: 'terminal_adjudication',
+          workflowTaskDigest: computeWorkflowTaskDigest(input.workflowTask),
+          workflowTask: input.workflowTask,
+          reportExcerpts: [],
+        },
+      ));
+    }
+  }
   for (const conflict of [...input.previousLedger.conflicts]
     .filter((candidate) => candidate.status === 'active')
     .sort((left, right) => compareBinaryStrings(left.id, right.id))) {
@@ -1010,7 +1067,11 @@ function controlContextLedger(
       ? previousLedger.conflicts
         .filter((conflict) => task.ownedEntityIds.includes(conflict.id))
         .flatMap((conflict) => conflict.findingIds)
-      : task.ownedEntityIds,
+      // reviewer anomaly は product finding ではないので finding 射影は空にする。
+      // 対象の本文は「Recorded reviewer anomaly claims」で別途渡す。
+      : task.kind === 'reviewer_anomaly'
+        ? []
+        : task.ownedEntityIds,
   );
   const selectedConflicts = previousLedger.conflicts
     .filter((conflict) => (
@@ -1041,6 +1102,11 @@ function buildControlTaskInstruction(input: {
       ? ['Dismissal is applied only through verified terminal adjudication. Return no_action here and leave the claim open.']
       : ['Dismissal is not authorized in this control task. Return no_action and leave the claim open.'];
   const taskScopeContext = input.task.taskScopeContext;
+  const adjudicatedAnomalies = input.task.kind === 'reviewer_anomaly'
+    ? (input.previousLedger.reviewerAnomalies ?? []).filter(
+      (anomaly) => input.task.ownedEntityIds.includes(anomaly.id),
+    )
+    : [];
   return [
     input.contract.manager.instruction,
     '',
@@ -1048,7 +1114,28 @@ function buildControlTaskInstruction(input: {
     'The Finding Manager instruction above may describe a legacy rawDecisions/dismissDecisions envelope. That envelope is disabled for this control task.',
     'Return exactly one object whose only top-level fields are taskId, evaluations, and selectedIntentId. Do not return rawDecisions, dismissDecisions, or any other legacy envelope field.',
     'Each evaluations entry must contain exactly intentId and result. Exact-cover every candidate intent.',
-    'An outside_task_scope result has exactly this shape: {"kind":"dismiss","findingId":"<intent entityId>","basis":"outside_task_scope","reason":"<separate reason>","taskQuote":"<non-empty byte-exact workflow task substring>"}. It has no evidence field.',
+    // findingId 形式の却下は product finding 用。reviewer anomaly の task で併記すると
+    // 必ず validation で落ちる形状を同時に提示することになるので出さない。
+    ...(input.task.kind === 'reviewer_anomaly' ? [] : [
+      'An outside_task_scope result has exactly this shape: {"kind":"dismiss","findingId":"<intent entityId>","basis":"outside_task_scope","reason":"<separate reason>","taskQuote":"<non-empty byte-exact workflow task substring>"}. It has no evidence field.',
+    ]),
+    ...(input.task.kind !== 'reviewer_anomaly' ? [] : [
+      '',
+      '## Reviewer anomaly adjudication',
+      'This task adjudicates a reviewer anomaly, not a product finding. A reviewer anomaly is a claim a reviewer raised that never became a machine-verifiable product finding; its restatement ladder is over, so it now blocks completion as a visible review-integrity failure.',
+      'Dismiss it only when the claim is outside the scope of the original workflow task. If the claim is in scope, return no_action and let the run fail visibly — an in-scope claim that could not be substantiated is a real review-integrity failure, not something to wave through.',
+      'A reviewer anomaly dismissal has exactly this shape: {"kind":"dismiss","anomalyId":"<intent entityId>","basis":"outside_task_scope","reason":"<separate reason>","taskQuote":"<non-empty byte-exact workflow task substring>","claimQuote":"<non-empty byte-exact substring of the recorded claim below>"}. It has no findingId and no evidence field.',
+      'Both quotes are verified byte-exact by the engine. Copy them verbatim; a paraphrase or a summary is rejected.',
+      '',
+      '### Recorded reviewer anomaly claims',
+      renderFencedJsonBlock(adjudicatedAnomalies.map((anomaly) => ({
+        anomalyId: anomaly.id,
+        reviewers: anomaly.reviewers,
+        title: anomaly.title,
+        recordedClaim: reviewerAnomalyAdjudicationClaimTexts(input.previousLedger, anomaly),
+        terminalDisposition: anomaly.intakeContract?.terminalDisposition,
+      }))),
+    ]),
     '',
     'This is one engine-owned control task. Return the exact taskId and exact-cover evaluations for every candidate intent.',
     'Set selectedIntentId to null when every evaluation is no_action. Otherwise select exactly one intent, return its matching action, and return no_action for every other intent.',
@@ -1100,7 +1187,11 @@ function buildControlTaskInstruction(input: {
 function validateControlTaskOutput(
   task: MainManagerControlTask,
   output: MainManagerControlTaskOutput,
+  previousLedger: FindingLedger,
 ): MainManagerControlTaskOutput['evaluations'] {
+  const anomalyById = new Map(
+    (previousLedger.reviewerAnomalies ?? []).map((anomaly) => [anomaly.id, anomaly] as const),
+  );
   if (output.taskId !== task.taskId) {
     throw new Error(`Control task "${task.taskId}" returned mismatched taskId "${output.taskId}"`);
   }
@@ -1132,7 +1223,8 @@ function validateControlTaskOutput(
     const kindMatches = (
       (intent.kind === 'dispute' && (result.kind === 'waive' || result.kind === 'note'))
       || (intent.kind === 'conflict' && (result.kind === 'resolve' || result.kind === 'keep'))
-      || intent.kind === result.kind
+      || (intent.kind === 'adjudicate_anomaly' && result.kind === 'dismiss' && 'anomalyId' in result)
+      || (intent.kind === result.kind && !('anomalyId' in result))
     );
     if (!kindMatches) {
       throw new Error(
@@ -1148,6 +1240,25 @@ function validateControlTaskOutput(
       throw new Error(
         `Control intent "${intent.intentId}" returned out-of-scope conflict "${result.conflictId}"`,
       );
+    }
+    if ('anomalyId' in result) {
+      if (result.anomalyId !== intent.entityId) {
+        throw new Error(
+          `Control intent "${intent.intentId}" returned out-of-scope reviewer anomaly "${result.anomalyId}"`,
+        );
+      }
+      // 記録済みの claim 本文に対する byte-exact 部分文字列であること。裁定が実在の
+      // 主張を読んだ証跡で、要約や言い換えは根拠にならない。
+      const anomaly = anomalyById.get(result.anomalyId);
+      if (
+        anomaly === undefined
+        || !reviewerAnomalyAdjudicationClaimTexts(previousLedger, anomaly)
+          .some((text) => text.includes(result.claimQuote))
+      ) {
+        throw new Error(
+          `Control intent "${intent.intentId}" returned a claimQuote that is not a byte-exact quote of the recorded claim`,
+        );
+      }
     }
     if (
       result.kind === 'dismiss'
@@ -1170,6 +1281,7 @@ function validateControlTaskOutput(
 
 function appendControlResult(
   decisions: FindingManagerDecisions,
+  anomalyAdjudications: ReviewerAnomalyAdjudicationDecision[],
   result: MainManagerControlTaskOutput['evaluations'][number]['result'],
   task: MainManagerControlTask,
 ): void {
@@ -1200,6 +1312,23 @@ function appendControlResult(
       });
       return;
     case 'dismiss':
+      if ('anomalyId' in result) {
+        if (task.taskScopeContext === undefined) {
+          throw new Error(
+            `Control task "${task.taskId}" lacks an outside_task_scope binding`,
+          );
+        }
+        anomalyAdjudications.push({
+          anomalyId: result.anomalyId,
+          basis: result.basis,
+          reason: result.reason,
+          taskQuote: result.taskQuote,
+          claimQuote: result.claimQuote,
+          workflowTaskDigest: task.taskScopeContext.workflowTaskDigest,
+          adjudicationTaskId: task.taskId,
+        });
+        return;
+      }
       if (result.basis === 'outside_task_scope') {
         if (task.taskScopeContext === undefined) {
           throw new Error(
@@ -1239,11 +1368,13 @@ async function executeControlTasks(input: {
   subResults: RunFindingManagerForStepInput['subResults'];
 }): Promise<{
   decisions: FindingManagerDecisions;
+  anomalyAdjudications: ReviewerAnomalyAdjudicationDecision[];
   conflictTargetHeads: Map<string, CapturedManagerConflictHead>;
   invalidAttemptMessages: string[];
   audits: FindingManagerTaskAudit[];
 }> {
   const decisions = emptyDecisions();
+  const anomalyAdjudications: ReviewerAnomalyAdjudicationDecision[] = [];
   const conflictTargetHeads = new Map<string, CapturedManagerConflictHead>();
   const invalidAttemptMessages: string[] = [];
   const audits: FindingManagerTaskAudit[] = [];
@@ -1287,9 +1418,9 @@ async function executeControlTasks(input: {
       const output = parseMainManagerControlTaskOutput(
         responseStructuredOutput(response, `Control task "${item.task.taskId}"`),
       );
-      const evaluations = validateControlTaskOutput(item.task, output);
+      const evaluations = validateControlTaskOutput(item.task, output, input.previousLedger);
       for (const evaluation of evaluations) {
-        appendControlResult(decisions, evaluation.result, item.task);
+        appendControlResult(decisions, anomalyAdjudications, evaluation.result, item.task);
         if (
           evaluation.result.kind === 'resolve'
           || evaluation.result.kind === 'keep'
@@ -1328,7 +1459,7 @@ async function executeControlTasks(input: {
       });
     }
   }
-  return { decisions, conflictTargetHeads, invalidAttemptMessages, audits };
+  return { decisions, anomalyAdjudications, conflictTargetHeads, invalidAttemptMessages, audits };
 }
 
 function assertFixedPrefixFits(input: {
@@ -1421,6 +1552,7 @@ export async function runMainManagerTasks(input: {
       duplicateDecisions: control.decisions.duplicateDecisions,
       dismissDecisions: control.decisions.dismissDecisions,
     },
+    anomalyAdjudications: control.anomalyAdjudications,
     conflictTargetHeads: control.conflictTargetHeads,
     rawFailures: raw.failures,
     invalidAttemptMessages: [

@@ -12,6 +12,7 @@ import type {
   FindingLifecycleReservation,
   FindingMutationPrecondition,
   RawFinding,
+  ReviewerAnomalyAdjudicationSettlement,
   ReviewerAnomalyEntry,
   ReviewerAnomalyReviewWithdrawalSettlement,
   ReviewerAnomalySettlement,
@@ -322,6 +323,85 @@ function reviewWithdrawalEligibilityViolation(
     : 'withdrawal must record a superseding review for every reviewer that observed the anomaly';
 }
 
+/**
+ * 裁定が読んだと主張する claim 本文。台帳だけで再検証できる範囲に限る
+ * （anomaly の記録済み claim と、その出所 raw の本文）。
+ */
+export function reviewerAnomalyAdjudicationClaimTexts(
+  projection: Pick<ReviewerAnomalySettlementProjection, 'rawFindings'>,
+  anomaly: ReviewerAnomalyEntry,
+): string[] {
+  const sourceTexts = anomaly.sourceRawFindingIds.flatMap((rawFindingId) => {
+    const raw = projection.rawFindings.find(
+      (candidate) => candidate.rawFindingId === rawFindingId,
+    );
+    return raw === undefined
+      ? []
+      : [raw.description, raw.rawExcerpt].flatMap((text) => (
+        typeof text === 'string' && text.length > 0 ? [text] : []
+      ));
+  });
+  return [
+    ...(anomaly.claimedExcerpt === undefined ? [] : [anomaly.claimedExcerpt]),
+    ...sourceTexts,
+  ];
+}
+
+/**
+ * 裁定にかけられる anomaly か。「言い直しラダーを使い切った claim-bearing」だけで、
+ * 決着済み（昇格・settlement）は含めない。
+ *
+ * 候補選定（どの anomaly を裁定へ出すか）と成立条件（どの settlement を受理するか）が
+ * 同じ集合を指すよう、両者がこの1つの述語を共有する。片方だけ広いと「出したのに
+ * 受理されない」または「出していないのに書ける」が生まれる。
+ */
+export function isAdjudicableReviewerAnomaly(anomaly: ReviewerAnomalyEntry): boolean {
+  return anomaly.kind === 'intake-contract-incomplete'
+    && anomaly.intakeContract?.terminalDisposition?.workflowOutcome === 'review_integrity_unresolved'
+    && anomaly.promotedFindingId === undefined
+    && anomaly.settlement === undefined;
+}
+
+/**
+ * 終端処分済み anomaly の裁定却下が成立する条件。
+ *
+ * 対象は「言い直しラダーを使い切った claim-bearing」だけ。可視的失敗が既定で、
+ * 救済はこの裁定に限る建付けなので、対象外へ広げない。
+ */
+function adjudicationEligibilityViolation(input: {
+  projection: ReviewerAnomalySettlementProjection;
+  anomaly: ReviewerAnomalyEntry;
+  settlement: ReviewerAnomalyAdjudicationSettlement;
+  workflowTaskDigest: string | null;
+}): string | undefined {
+  const anomaly = input.anomaly;
+  if (anomaly.promotedFindingId !== undefined) {
+    return 'promoted anomalies cannot be settled';
+  }
+  // 二重決着の明示拒否。現在の呼び出し側は書き込み前に決着済みを外すため到達しないが、
+  // 到達不能性に寄りかからず構造で保証する（決着済みの上書きは監査記録を壊す）。
+  if (anomaly.settlement !== undefined && anomaly.settlement !== input.settlement) {
+    return 'already settled anomalies cannot be settled again';
+  }
+  // 既に settlement を持つ anomaly はここへ来ない（呼び出し側が書き込み前に判定する）
+  // ため、候補述語からは settlement 条件だけ外して評価する。
+  if (!isAdjudicableReviewerAnomaly({ ...anomaly, settlement: undefined })) {
+    return 'terminal adjudication may only dismiss a claim-bearing anomaly whose restatement ladder terminated unresolved';
+  }
+  if (
+    input.workflowTaskDigest !== null
+    && input.settlement.workflowTaskDigest !== input.workflowTaskDigest
+  ) {
+    return 'adjudication is bound to a different workflow task';
+  }
+  // 記録済みの claim 本文に対する byte-exact 部分文字列であること。裁定が実在の
+  // 主張を読んだ証跡で、台帳だけで再検証できる唯一の根拠。
+  return reviewerAnomalyAdjudicationClaimTexts(input.projection, anomaly)
+    .some((text) => text.includes(input.settlement.claimQuote))
+    ? undefined
+    : 'adjudication claimQuote is not a byte-exact quote of the recorded claim';
+}
+
 export function reviewerAnomalySettlementEligibilityViolation(input: {
   projection: ReviewerAnomalySettlementProjection;
   anomaly: ReviewerAnomalyEntry;
@@ -332,6 +412,14 @@ export function reviewerAnomalySettlementEligibilityViolation(input: {
   const settlement = input.settlement;
   if (settlement.kind === 'withdrawn_by_subsequent_review') {
     return reviewWithdrawalEligibilityViolation(input.anomaly, settlement);
+  }
+  if (settlement.kind === 'dismissed_by_terminal_adjudication') {
+    return adjudicationEligibilityViolation({
+      projection: input.projection,
+      anomaly: input.anomaly,
+      settlement,
+      workflowTaskDigest: input.workflowTaskDigest,
+    });
   }
   if (input.anomaly.kind === 'protocol-anomaly') {
     return 'protocol anomalies cannot be settled';
