@@ -302,10 +302,28 @@ each higher-priority `model_profiles` value replaces the complete lower-priority
 map.
 
 Each OpenCode call has a 3,600,000 ms (60 minute) wall-clock limit. A call that
-may run longer than 60 minutes must explicitly set `call_timeout_ms` from 60,000
-through 86,400,000. `event_limit` defaults to 500,000 and can be overridden by
+may run longer than 60 minutes — a step that runs a full test suite, for
+example — must explicitly set `call_timeout_ms` from 60,000 through 86,400,000.
+`event_limit` defaults to 500,000 and can be overridden by
 `TAKT_OPENCODE_STREAM_EVENT_LIMIT`. `text_byte_limit` defaults to 1 MiB and
 `reasoning_byte_limit` to 4 MiB.
+
+Stream silence counts as an idle timeout after 10 minutes
+(`TAKT_OPENCODE_STREAM_IDLE_TIMEOUT_MS` overrides it), but the clock is not
+running while a tool call is in flight. OpenCode emits no events between
+tool_use and tool_result, so treating a long-running tool — a test suite run,
+for example — as inactivity would cut a healthy execution. A tool that never
+returns is handled by the `call_timeout_ms` wall-clock limit. The operational
+consequence: while a tool is in flight, a genuinely stuck run is detected after
+`call_timeout_ms` (60 minutes by default, longer if you raise it) rather than
+after 10 minutes. A dropped tool-result event does not disable detection either
+— an in-flight call is discarded as stale once six times the idle timeout has
+passed since it was registered. The converse also holds: if a single tool call
+can stay silent for longer than six idle timeouts — for example when you raise
+`call_timeout_ms` to allow long-running tools — raise
+`TAKT_OPENCODE_STREAM_IDLE_TIMEOUT_MS` as well. Staleness is measured against
+the idle timeout, so raising only one of the two makes a healthy tool run count
+as stale.
 
 Invalid numeric limits are treated differently per input path. Values written
 under `guards.*` (including those from `TAKT_PROVIDER_OPTIONS_*`) are declared
