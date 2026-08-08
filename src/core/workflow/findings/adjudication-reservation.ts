@@ -13,8 +13,8 @@ import {
   isConflictSnapshotAdjudicated,
 } from './conflict-adjudication-model.js';
 import {
+  releaseFindingManagerProviderCall,
   reserveFindingManagerProviderCall,
-  settleFindingManagerProviderCall,
 } from './finding-manager-provider-call.js';
 import { MANAGER_INTERPRETATION_LIMITS } from './raw-finding-limits.js';
 import type { FindingAdjudicationStore, FindingLedgerMutation } from './store.js';
@@ -62,6 +62,7 @@ export async function reserveFindingConflictAdjudication(input: {
   scopeIdentity: string;
   workflowName: string;
   roundMarker: string;
+  allowGroundingRetry?: boolean;
 }): Promise<FindingLedgerMutation<AdjudicationAttemptReservation>> {
   return input.ledgerStore.updateLedger<AdjudicationAttemptReservation>((fresh) => {
     const conflict = fresh.conflicts.find((candidate) => candidate.id === input.conflictId);
@@ -69,6 +70,87 @@ export async function reserveFindingConflictAdjudication(input: {
       return { ledger: fresh, result: { started: false } };
     }
     const snapshot = freshConflictAdjudicationSnapshot(fresh, conflict.id);
+    const started = fresh.conflictAdjudicationAttempts.find((attempt) => (
+      attempt.conflictId === conflict.id && attempt.stage === 'started'
+    ));
+    if (started?.stage === 'started') {
+      const call = fresh.findingManagerProviderCalls.find(
+        (candidate) => candidate.providerCallId === started.providerCallId,
+      );
+      if (call === undefined) {
+        throw new Error(`Started conflict attempt "${started.attemptId}" has no provider call`);
+      }
+      if (call.state === 'dispatched') {
+        const replaySnapshot = fresh.conflictAdjudicationSnapshots.find(
+          (candidate) => candidate.conflictSnapshotId === started.conflictSnapshotId,
+        );
+        const replayEpisode = fresh.conflictAdjudicationEpisodes.find(
+          (candidate) => candidate.episodeId === started.episodeId,
+        );
+        if (replaySnapshot === undefined || replayEpisode === undefined) {
+          throw new Error(`Started conflict attempt "${started.attemptId}" cannot be replayed without its snapshot`);
+        }
+        if (call.requestBytes === undefined) {
+          throw new Error(`Dispatched conflict provider call "${call.providerCallId}" has no saved request`);
+        }
+        return {
+          ledger: fresh,
+          result: {
+            started: true,
+            snapshot: replaySnapshot,
+            episode: replayEpisode,
+            attempt: started,
+            providerCall: call,
+            originStep: started.originStep ?? undefined,
+          },
+        };
+      }
+      if (call.state === 'reserved') {
+        if (started.conflictSnapshotId !== snapshot.conflictSnapshotId) {
+          const released = releaseFindingManagerProviderCall({
+            calls: fresh.findingManagerProviderCalls,
+            providerCallId: call.providerCallId,
+            releasedAt: input.observation,
+          });
+          fresh = {
+            ...fresh,
+            findingManagerProviderCalls: released.calls,
+            conflictAdjudicationAttempts: fresh.conflictAdjudicationAttempts.map((attempt) => (
+              attempt.attemptId === started.attemptId
+                ? {
+                    ...started,
+                    stage: 'interrupted' as const,
+                    interruptedAt: structuredClone(input.observation),
+                    reason: 'reservation_released' as const,
+                  }
+                : attempt
+            )),
+          };
+        } else {
+          if (snapshot.conflictSnapshotId !== input.expectedSnapshotId) {
+            return { ledger: fresh, result: { started: false } };
+          }
+          const ensured = exactEpisode(
+            fresh.conflictAdjudicationEpisodes,
+            snapshot,
+            input.observation,
+          );
+          return {
+            ledger: fresh,
+            result: {
+              started: true,
+              snapshot,
+              episode: ensured.episode,
+              attempt: started,
+              providerCall: call,
+              originStep: started.originStep ?? undefined,
+            },
+          };
+        }
+      } else if (call.state !== 'released') {
+        throw new Error(`Started conflict attempt "${started.attemptId}" has no live provider call`);
+      }
+    }
     if (snapshot.conflictSnapshotId !== input.expectedSnapshotId) {
       return { ledger: fresh, result: { started: false } };
     }
@@ -80,50 +162,25 @@ export async function reserveFindingConflictAdjudication(input: {
     const episodeAttempts = fresh.conflictAdjudicationAttempts.filter(
       (attempt) => attempt.episodeId === ensured.episode.episodeId,
     );
-    const started = episodeAttempts.find((attempt) => attempt.stage === 'started');
-    if (started?.stage === 'started') {
-      const call = fresh.findingManagerProviderCalls.find(
-        (candidate) => candidate.providerCallId === started.providerCallId,
-      );
-      if (call?.state === 'reserved') {
-        return {
-          ledger: fresh,
-          result: {
-            started: true,
-            snapshot,
-            episode: ensured.episode,
-            attempt: started,
-            providerCall: call,
-            originStep: started.originStep ?? undefined,
-          },
-        };
-      }
-      if (call?.state !== 'dispatched') {
-        throw new Error(`Started conflict attempt "${started.attemptId}" has no live provider call`);
-      }
-      const settled = settleFindingManagerProviderCall({
-        calls: fresh.findingManagerProviderCalls,
-        providerCallId: call.providerCallId,
-        settledAt: input.observation,
-        resultKind: 'interrupted_unknown',
-        failurePhase: 'provider_result_unknown',
-      });
-      fresh = {
-        ...fresh,
-        findingManagerProviderCalls: settled.calls,
-        conflictAdjudicationAttempts: fresh.conflictAdjudicationAttempts.map((attempt) => (
-          attempt.attemptId === started.attemptId
-            ? {
-                ...started,
-                stage: 'interrupted' as const,
-                interruptedAt: structuredClone(input.observation),
-                reason: 'provider_result_unknown' as const,
-              }
-            : attempt
-        )),
-      };
-    }
-    if (isConflictSnapshotAdjudicated(fresh, snapshot)) {
+    const groundingRetryAlreadyUsed = episodeAttempts.some((attempt) => (
+      attempt.attemptOrdinal === 2
+      && fresh.findingManagerProviderCalls
+        .filter((call) => call.providerCallId === attempt.providerCallId)
+        .some((call) => (
+          fresh.findingManagerProviderBudgetScopes.some((scope) => (
+            scope.budgetScopeId === call.budgetScopeId
+            && scope.roundMarker === input.roundMarker
+          ))
+        ))
+    ));
+    const groundingRetryAllowed = input.allowGroundingRetry === true
+      && !groundingRetryAlreadyUsed
+      && episodeAttempts.some((attempt) => (
+        attempt.stage === 'completed'
+        && attempt.attemptOrdinal === 1
+        && attempt.result.kind === 'verification_undetermined'
+      ));
+    if (isConflictSnapshotAdjudicated(fresh, snapshot) && !groundingRetryAllowed) {
       return { ledger: fresh, result: { started: false } };
     }
     const used = fresh.conflictAdjudicationAttempts.filter(

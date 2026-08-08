@@ -641,6 +641,24 @@ ledger が既に存在しない raw finding を参照している場合、その
 
 invalid・欠落した Finding Manager の判断は provisional finding として台帳へ着地し、run は継続します。`COMPLETE` の rule より*前*に `when(findings.provisional.count > 0 && findings.conflicts.count == 0)` を再計画ステップへ向ける rule を追加してください（配線の参考は builtin の `takt-default-high` workflow）。`finding_contract` を使う workflow が `findings.provisional` を一切参照していない場合、`takt workflow doctor` が警告します。
 
+### conflict の裁定と接地再裁定
+
+active conflict はまずエンジン合成の `finding-conflict-adjudication` step へ入ります。裁定結果が
+`verification_undetermined` のとき、エンジンはその conflict についてそのラウンドに1回だけ、同じ
+`terminal-adjudicator` seat、persona 解決、provider 予算、lease 経路で接地再裁定を行います。
+workflow の step や新しい role は追加しません。
+
+再裁定の prompt には immutable な review-scope snapshot から作った bounded window を添付します。
+window は争点の finding の `target.paths` と file-quote evidence の行アンカーから構成し、
+`evidence-search` と同じ digest 束縛の窓機構を使います。裁定者はその窓だけを根拠にし、live な作業
+ツリーへ戻る fallback はありません。provider call の予約は呼び出し前に永続化するため、crash / replay
+時も同じ attempt を再開し、重複呼び出しを発行しません。2回目も `verification_undetermined` なら
+そのラウンドを未確定として確定し、元のレビューステップへ戻ります。
+
+conflict の ladder は `findings.rounds.budgetExhausted == false` の間、active conflict を fix / 再レビュー
+ループへ戻さなければなりません。最後の `when(findings.conflicts.count > 0)` → `ABORT` は予算枯渇後だけの
+出口であり、予算付きのループ rule より後ろに置きます。
+
 ### Arpeggio Step（データ駆動バッチ）
 
 CSV / JSON などのデータソースを反復し、同じ step テンプレートを各行に適用します。並列度には上限があります。
@@ -971,6 +989,20 @@ workflow YAML には何も現れません（step ではありません）。
   取り下げの根拠になるのは完全な再レビューだけで、言い直し専用の呼び出しは根拠になりません。
 - 「この anomaly を言い直した」と申告した主張が照合ゲートを通らなかった場合、新規の
   product finding は作りません。当該 anomaly への再試行として記録します。
+- 言い直し提示数が `presentationLimit` に達した claim-bearing anomaly は、終端処分の
+  直前に **evidence-search を1 anomaly につき生涯1回だけ**実行します。エンジンが
+  `target.paths` の実ファイルを読み、ファイルが大きい場合は主張された行範囲の周辺窓に
+  絞り、元の claim・提示履歴とともに既存の isolated structured 正規化係へ渡します。
+  正規化係にはツールを与えず、解決順も `intake-normalizer` seat → `escalate` → 既定値の
+  既存チェーンを使います。
+- evidence-search は新しい workflow step ではありません。正規化係が返す候補は既存の
+  `evidenceRequests` として通常の evidence issuer / byte-exact 照合を通り、成立したとき
+  だけ既存の昇格経路へ入り、anomaly の台帳へ `promotionOrigin: evidence-search` を記録
+  します。候補なし、照合不一致、対象不一致は従来どおり
+  `restatement_exhausted_claim_bearing` です。
+- evidence-search の呼び出しと manager 取り込みは slot と同じく `budget-excluded` で、
+  提示予算を増やしません。publication を先に永続化するため、中断・再開でも同じ anomaly
+  に2回目を発火しません。
 
 `withdrawn_by_subsequent_review` は「その anomaly を出したレビュアーが後続の完全な
 レビューを成立させた」ことによる決着であって、元の観測の当否を判定したものではありません。

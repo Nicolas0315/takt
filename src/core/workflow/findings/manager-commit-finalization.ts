@@ -66,6 +66,7 @@ function applyIntakeContractTerminalDispositions(input: {
   ledger: FindingLedger;
   publications: readonly CanonicalFindingReviewPublication[];
   observation: FindingObservation;
+  deferClaimBearingTerminalDispositions?: boolean;
 }): FindingLedger {
   const publicationsByAnomalyId = new Map<string, CanonicalFindingReviewPublication[]>();
   for (const publication of input.publications) {
@@ -119,6 +120,15 @@ function applyIntakeContractTerminalDispositions(input: {
           },
         },
       };
+    }
+    if (
+      input.deferClaimBearingTerminalDispositions === true
+      && defect.observationClass === 'claim-bearing'
+    ) {
+      // 除外扱いの restatement slot では、この時点の未成立 publication を終端化しない。
+      // slot の evidence-search 結果を同じ manager commit に取り込んでから、通常の
+      // presentation limit / terminal disposition 判定へ進める必要がある。
+      return anomaly;
     }
     const publications = publicationsByAnomalyId.get(anomaly.id) ?? [];
     if (
@@ -557,6 +567,7 @@ export function applyCommitLedgerStates(input: {
       ...input.runInput.subResults.map(({ publication }) => publication),
     ],
     observation,
+    deferClaimBearingTerminalDispositions: input.runInput.deferClaimBearingTerminalDispositions,
   });
   // 昇格（promotedFindingId）が成立しなかった古い anomaly は、そのレビュアーの
   // 後続レビューが登録された時点で取り下げとして決着する。linkPromotedReviewerAnomalies

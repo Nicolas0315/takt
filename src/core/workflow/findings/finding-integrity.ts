@@ -244,6 +244,12 @@ function assertReviewerAnomalyAppendOnlyUpdate(
   ) {
     throw new Error(`Reviewer anomaly "${current.id}" promotion cannot be removed or replaced`);
   }
+  if (
+    current.promotionOrigin !== undefined
+    && current.promotionOrigin !== next.promotionOrigin
+  ) {
+    throw new Error(`Reviewer anomaly "${current.id}" promotion origin cannot be removed or replaced`);
+  }
   if (current.settlement !== undefined) {
     const currentEpisode = { ...current, settlement: undefined };
     const nextEpisode = { ...next, settlement: undefined };
@@ -452,6 +458,7 @@ function assertContractRegistryTransitions(
     identityOf: (call) => stateIdentity(call, [
       'state',
       'dispatchedAt',
+      'releasedAt',
       'settledAt',
       'resultKind',
       'failurePhase',
@@ -460,6 +467,7 @@ function assertContractRegistryTransitions(
     ]),
     canTransition: (from, to) => from === to
       || (from === 'reserved' && to === 'dispatched')
+      || (from === 'reserved' && to === 'released')
       || (from === 'dispatched' && to === 'settled'),
     initialState: 'reserved',
     label: 'Finding manager provider call',
@@ -478,6 +486,9 @@ function assertContractRegistryTransitions(
     'claimSettlementIds',
     'lifecycleEventIds',
   ] as const;
+  // provider_result_unknown と reservation_released は、どちらも provider の
+  // terminal result を確定できないまま終わった attempt の着地点であり、started
+  // から interrupted への同じ一方向遷移として扱う。
   const canAttemptTransition = (from: string, to: string): boolean => from === to
     || (from === 'started' && ['interrupted', 'proposed', 'applied', 'completed'].includes(to))
     || (from === 'proposed' && ['applied', 'completed'].includes(to));

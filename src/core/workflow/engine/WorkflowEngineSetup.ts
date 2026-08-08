@@ -48,7 +48,11 @@ import {
   renderFindingLedgerReportSummary,
 } from '../findings/context.js';
 import { renderLoopMonitorFindingsSummary } from '../findings/loop-monitor-summary.js';
-import { computeReviewScopeSnapshotId } from '../findings/snapshot.js';
+import {
+  captureReviewScopeProofSnapshot,
+  computeReviewScopeSnapshotId,
+  type ReviewScopeProofSnapshot,
+} from '../findings/snapshot.js';
 import { createTaskReviewScopeResolver } from '../review-scope.js';
 import {
   computeRestatementRequestId,
@@ -62,6 +66,10 @@ import {
   type RestatementPresentationPhase,
 } from '../findings/restatement-presentation-phase.js';
 import type { FindingRestatementSlotOwnerContexts } from '../findings/restatement-slot-runner.js';
+import {
+  buildFindingEvidenceSearchRequest,
+  type FindingEvidenceSearchRequest,
+} from '../findings/evidence-search.js';
 import { resolveFindingEscalationTarget } from '../findings/restatement-slot-step.js';
 import {
   isOutstandingReviewerAnomaly,
@@ -669,6 +677,139 @@ export function createWorkflowEngineServices(params: WorkflowEngineSetupParams):
     return contexts;
   };
 
+  /**
+   * 言い直し提示数を使い切った claim-bearing anomaly の evidence-search 入力を
+   * 作る。evidence-search publication 自体も提示履歴へ保存するため、保存済みの
+   * 試行は先に除外する（manager 取り込み前の crash/resume でも二重呼び出しに
+   * ならない）。
+   */
+  const buildFindingEvidenceSearchRequests = (input: {
+    ownerReviewerSteps: readonly AgentWorkflowStep[];
+    reviewScopeSnapshotId: string;
+  }): readonly FindingEvidenceSearchRequest[] => {
+    if (!params.findingContract || !params.findingLedgerStore) {
+      return [];
+    }
+    let evidenceSnapshot: ReviewScopeProofSnapshot;
+    try {
+      const captured = captureReviewScopeProofSnapshot(params.getCwd());
+      evidenceSnapshot = captured.reviewScopeSnapshotId === input.reviewScopeSnapshotId
+        ? captured
+        : {
+            reviewScopeSnapshotId: input.reviewScopeSnapshotId,
+            trackedDiff: undefined,
+            untrackedEvidence: [],
+            queryInventory: [],
+            changedPaths: [],
+          };
+    } catch {
+      evidenceSnapshot = {
+        reviewScopeSnapshotId: input.reviewScopeSnapshotId,
+        trackedDiff: undefined,
+        untrackedEvidence: [],
+        queryInventory: [],
+        changedPaths: [],
+      };
+    }
+    const ledger = params.findingLedgerStore.loadLedger();
+    const publications = listFindingReviewPublications(params.runPaths.reportsAbs);
+    const presentationCounts = collectFindingReviewPresentationCounts(params.runPaths.reportsAbs);
+    const rawFindingsById = new Map(ledger.rawFindings.map((raw) => [raw.rawFindingId, raw]));
+    const presentationHistoryByAnomalyId = new Map<string, string[]>();
+    for (const publication of publications) {
+      if (publication.presentationContext.revision !== 2) {
+        continue;
+      }
+      for (const request of publication.presentationContext.restatementRequests) {
+        const history = presentationHistoryByAnomalyId.get(request.anomalyId) ?? [];
+        history.push(
+          `publication=${publication.publicationId} reviewer=${publication.reviewerStepName} ordinal=${request.presentationOrdinal} digest=${publication.reportDigest}`,
+        );
+        presentationHistoryByAnomalyId.set(request.anomalyId, history);
+      }
+    }
+    const appliedRoundMarkers = [
+      ...(ledger.stopBudget?.roundMarkers ?? []),
+      ...(ledger.pendingManagerCommit?.completed.stopBudget?.roundMarkers ?? []),
+    ];
+    const appliedPublicationIds = new Set(
+      appliedRoundMarkers.flatMap((marker) => marker.split('\0').filter((token) => token.length > 0)),
+    );
+    const isPublicationApplied = (publicationId: string): boolean => appliedPublicationIds.has(publicationId);
+    const evidencePublications = publications.filter((publication) => (
+      publication.repairOrigin === 'evidence-search'
+      && publication.presentationContext.revision === 2
+    ));
+    const attempted = new Set(
+      evidencePublications
+        .filter((publication) => isPublicationApplied(publication.publicationId))
+        .flatMap((publication) => publication.presentationContext.presentedReviewerAnomalyIds),
+    );
+    const requests: FindingEvidenceSearchRequest[] = [];
+    for (const ownerStep of input.ownerReviewerSteps) {
+      const pendingPublications = evidencePublications.filter((publication) => (
+        publication.reviewerStepName === ownerStep.name
+        && !isPublicationApplied(publication.publicationId)
+      ));
+      const pendingRecoveryAnomalyIds = new Set(
+        pendingPublications.flatMap((publication) => (
+          publication.presentationContext.restatementRequests.map((request) => request.anomalyId)
+        )),
+      );
+      for (const publication of pendingPublications) {
+        for (const request of publication.presentationContext.restatementRequests) {
+          requests.push({
+            ownerReviewerStepName: ownerStep.name,
+            request,
+            reportContent: publication.reportContent,
+          });
+        }
+      }
+      const entries = (ledger.reviewerAnomalies ?? [])
+        .filter(hasIntakeContract)
+        .filter((anomaly) => (
+          anomaly.intakeContract.observationClass === 'claim-bearing'
+          && anomaly.intakeContract.presentationOwnerReviewer === ownerStep.name
+          && !isConcludedReviewerAnomaly(anomaly)
+          && !attempted.has(anomaly.id)
+          && !pendingRecoveryAnomalyIds.has(anomaly.id)
+          && (presentationCounts.get(anomaly.id) ?? 0) >= anomaly.intakeContract.presentationLimit
+        ))
+        .map((anomaly) => ({
+          anomaly,
+          presentedCount: presentationCounts.get(anomaly.id) ?? 0,
+        }));
+      const restatementRequests = buildRestatementRequests({
+        ledger,
+        entries,
+        reviewer: ownerStep.name,
+        reviewScopeSnapshotId: input.reviewScopeSnapshotId,
+      });
+      for (const request of restatementRequests) {
+        const anomaly = entries.find(({ anomaly: entry }) => entry.id === request.anomalyId)?.anomaly;
+        const sourceRaw = anomaly?.sourceRawFindingIds
+          .map((rawId) => rawFindingsById.get(rawId))
+          .find((candidate) => candidate !== undefined);
+        if (anomaly === undefined || sourceRaw === undefined) {
+          continue;
+        }
+        const searchRequest = buildFindingEvidenceSearchRequest({
+          snapshot: evidenceSnapshot,
+          anomaly,
+          sourceRaw,
+          request,
+          presentationCount: presentationCounts.get(anomaly.id) ?? 0,
+          ownerReviewerStepName: ownerStep.name,
+          presentationHistory: presentationHistoryByAnomalyId.get(anomaly.id) ?? [],
+        });
+        if (searchRequest !== undefined) {
+          requests.push(searchRequest);
+        }
+      }
+    }
+    return requests;
+  };
+
   // base の解決は ref 走査を伴うため、ラン境界で一度だけ解決して保持する。
   const getReviewScope = createTaskReviewScopeResolver({
     getCwd: params.getCwd,
@@ -690,6 +831,7 @@ export function createWorkflowEngineServices(params: WorkflowEngineSetupParams):
     () => params.task,
     buildFindingRestatementSlotContexts,
     getReviewScope,
+    buildFindingEvidenceSearchRequests,
   );
 
   const dynamicFacetSelector = new DynamicFacetSelectorCoordinator({

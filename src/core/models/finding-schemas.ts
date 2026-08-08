@@ -749,6 +749,7 @@ export const ReviewerAnomalyEntrySchema = z.object({
   lastObserved: FindingObservationSchema,
   occurrences: z.number().int().positive(),
   promotedFindingId: nonEmptyString.optional(),
+  promotionOrigin: z.literal('evidence-search').optional(),
   settlement: z.discriminatedUnion('kind', [
     z.object({
       kind: z.literal('target_resolved_by_verified_evidence'),
@@ -789,6 +790,13 @@ export const ReviewerAnomalyEntrySchema = z.object({
     }).strict(),
   ]).optional(),
 }).strict().superRefine((value, ctx) => {
+  if (value.promotionOrigin !== undefined && value.promotedFindingId === undefined) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['promotionOrigin'],
+      message: 'promotionOrigin requires promotedFindingId',
+    });
+  }
   if (value.kind === 'intake-contract-incomplete' && value.intakeContract === undefined) {
     ctx.addIssue({ code: 'custom', path: ['intakeContract'], message: 'intake-contract-incomplete requires intakeContract' });
   }
@@ -1544,6 +1552,7 @@ const FindingManagerProviderCallBaseSchema = z.object({
   ownerAttemptKind: FindingManagerAttemptKindSchema,
   ownerAttemptId: Sha256Schema,
   attemptIds: BinarySortedUniqueStringSetSchema,
+  requestBytes: z.string().optional(),
   requestDigest: Sha256Schema,
   requestByteLength: z.number().int().nonnegative(),
   measuredAdapterVisibleInputTokens: z.number().int().nonnegative(),
@@ -1555,6 +1564,10 @@ const FindingManagerProviderCallBaseSchema = z.object({
 
 export const FindingManagerProviderCallSchema = z.discriminatedUnion('state', [
   FindingManagerProviderCallBaseSchema.extend({ state: z.literal('reserved') }).strict(),
+  FindingManagerProviderCallBaseSchema.extend({
+    state: z.literal('released'),
+    releasedAt: FindingObservationSchema,
+  }).strict(),
   FindingManagerProviderCallBaseSchema.extend({
     state: z.literal('dispatched'),
     dispatchedAt: FindingObservationSchema,
@@ -1895,7 +1908,7 @@ export const TerminalAdjudicationAttemptSchema = z.discriminatedUnion('stage', [
     stage: z.literal('interrupted'),
     startedAt: FindingObservationSchema,
     interruptedAt: FindingObservationSchema,
-    reason: z.literal('provider_result_unknown'),
+    reason: z.enum(['provider_result_unknown', 'reservation_released']),
   }).strict(),
   TerminalAttemptBaseSchema.extend({
     stage: z.literal('proposed'),
@@ -2090,7 +2103,7 @@ export const ConflictAdjudicationAttemptSchema = z.discriminatedUnion('stage', [
     stage: z.literal('interrupted'),
     startedAt: FindingObservationSchema,
     interruptedAt: FindingObservationSchema,
-    reason: z.literal('provider_result_unknown'),
+    reason: z.enum(['provider_result_unknown', 'reservation_released']),
   }).strict(),
   ConflictAttemptBaseSchema.extend({
     stage: z.literal('proposed'),
