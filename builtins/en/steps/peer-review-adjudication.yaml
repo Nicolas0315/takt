@@ -12,8 +12,8 @@ tags:
 edit: false
 persona: review-adjudicator
 policy:
+  - review-adjudication
   - contract-change
-  - review
   - $param: review_policy_additions
 knowledge:
   - architecture
