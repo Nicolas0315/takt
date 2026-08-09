@@ -45,6 +45,7 @@ import { normalizeLoopMonitors } from './workflowLoopMonitorNormalizer.js';
 import { normalizeProviderReference, normalizeStepFromRaw, type WorkflowLevelDefinitions } from './workflowStepNormalizer.js';
 import { resolveCapabilitySets } from './capabilitySetResolver.js';
 import { compileFacetPool, type FacetPoolCompilationInput } from './facetPoolCompiler.js';
+import { hasOwnFacetPool } from './workflowFacetPoolLookup.js';
 import type { ResolvedFacetPool } from '../../../core/models/index.js';
 import {
   expandCallableSubworkflowRaw,
@@ -77,7 +78,7 @@ function normalizeSubworkflowConfig(
       ? Object.fromEntries(
         Object.entries(raw.params).map(([name, param]) => [
           name,
-          param.type === 'workflow_ref'
+          param.type === 'workflow_ref' || param.type === 'facet_pool_ref'
             ? {
                 type: param.type,
                 default: param.default,
@@ -568,13 +569,19 @@ function validateDynamicFacetsReferences(
   for (const [index, step] of steps.entries()) {
     if (step.dynamic_facets === undefined) continue;
     const poolName = step.dynamic_facets.pool;
-    const pool = facetPools?.[poolName];
-    if (pool === undefined) {
+    if (typeof poolName !== 'string') {
+      throw withWorkflowStepErrorPath(
+        new Error(`Configuration error: step "${step.name}" has an unresolved facet pool parameter`),
+        ['steps', index, 'dynamic_facets', 'pool'],
+      );
+    }
+    if (!hasOwnFacetPool(facetPools, poolName)) {
       throw withWorkflowStepErrorPath(
         new Error(`Configuration error: step "${step.name}" references unknown facet pool "${poolName}"`),
         ['steps', index, 'dynamic_facets', 'pool'],
       );
     }
+    const pool = facetPools![poolName]!;
     const candidateCount = pool.candidates.length;
     if (
       step.dynamic_facets.max_selected !== undefined

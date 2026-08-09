@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { WorkflowConfigRawSchema, WorkflowStepRawSchema } from '../core/models/index.js';
+import { getWorkflowConfigErrorPath } from '../core/workflow/workflow-config-error.js';
+import { prepareCallableSubworkflowDiscoveryArgs } from '../infra/config/loaders/workflowCallableDiscoveryArgs.js';
 import { normalizeWorkflowConfig } from '../infra/config/loaders/workflowParser.js';
 
 function createWorkflowCallStep(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -14,6 +16,66 @@ function createWorkflowCallStep(overrides: Record<string, unknown> = {}): Record
       },
     ],
     ...overrides,
+  };
+}
+
+function createDynamicPoolWorkflow(pool: unknown): Record<string, unknown> {
+  return {
+    name: 'invalid-dynamic-pool',
+    steps: [{
+      name: 'implement',
+      persona: 'coder',
+      instruction: 'Implement',
+      dynamic_facets: { pool },
+      rules: [{ condition: 'done', next: 'COMPLETE' }],
+    }],
+  };
+}
+
+function createRootDynamicFacetPoolWorkflow(poolName: string): Record<string, unknown> {
+  return {
+    ...createDynamicPoolWorkflow(poolName),
+    policies: { policy: 'Policy' },
+    facet_pools: {
+      available: {
+        candidates: [{
+          id: 'candidate',
+          description: 'Candidate',
+          policy: 'policy',
+        }],
+      },
+    },
+  };
+}
+
+function createCallableFacetPoolWorkflow(): Record<string, unknown> {
+  return {
+    name: 'invalid-callable-pool',
+    subworkflow: {
+      callable: true,
+      params: {
+        implementation_pool: { type: 'facet_pool_ref' },
+      },
+    },
+    policies: { policy: 'Policy' },
+    facet_pools: {
+      available: {
+        candidates: [{
+          id: 'candidate',
+          description: 'Candidate',
+          policy: 'policy',
+        }],
+      },
+    },
+    steps: [{
+      name: 'implement',
+      persona: 'coder',
+      instruction: 'Implement',
+      dynamic_facets: {
+        pool: { $param: 'implementation_pool' },
+      },
+      rules: [{ condition: 'done', next: 'COMPLETE' }],
+    }],
   };
 }
 
@@ -171,6 +233,260 @@ describe('workflow_call schema', () => {
 
     expect(workflow.maxSteps).toBe(10);
   });
+
+  it('should use a suffixed synthetic discovery pool when the default pool name collides', () => {
+    const syntheticPoolName = '__takt_discovery_pool__implementation_pool';
+    const raw = WorkflowConfigRawSchema.parse({
+      name: 'pool-discovery',
+      subworkflow: {
+        callable: true,
+        params: {
+          implementation_pool: {
+            type: 'facet_pool_ref',
+          },
+        },
+      },
+      policies: {
+        policy: 'Discovery policy',
+      },
+      knowledge: {
+        knowledge: 'Discovery knowledge',
+      },
+      facet_pools: {
+        [syntheticPoolName]: {
+          candidates: [{
+            id: 'existing-candidate',
+            description: 'Existing pool candidate',
+            policy: 'policy',
+          }],
+        },
+        first: {
+          candidates: [{
+            id: 'first-candidate',
+            description: 'First candidate',
+            policy: 'policy',
+          }],
+        },
+        second: {
+          candidates: [{
+            id: 'second-candidate',
+            description: 'Second candidate',
+            knowledge: 'knowledge',
+          }],
+        },
+      },
+      steps: [{
+        name: 'implement',
+        persona: 'reviewer',
+        instruction: 'Review',
+        dynamic_facets: {
+          pool: {
+            $param: 'implementation_pool',
+          },
+        },
+        rules: [{ condition: 'done', next: 'COMPLETE' }],
+      }],
+    });
+
+    const prepared = prepareCallableSubworkflowDiscoveryArgs(raw);
+    const suffixedPoolName = `${syntheticPoolName}_1`;
+    expect(prepared.callableArgs).toEqual({ implementation_pool: suffixedPoolName });
+    expect(prepared.raw.facet_pools?.[syntheticPoolName]).toEqual({
+      candidates: [{
+        id: 'existing-candidate',
+        description: 'Existing pool candidate',
+        policy: 'policy',
+      }],
+    });
+    expect(prepared.raw.facet_pools?.first).toBeDefined();
+    expect(prepared.raw.facet_pools?.second).toBeDefined();
+    expect(prepared.raw.facet_pools?.[suffixedPoolName]).toEqual({
+      candidates: [{
+        id: suffixedPoolName + '-candidate',
+        description: '[discovery placeholder candidate for facet pool param "implementation_pool"]',
+        policy: '__takt_discovery_param___policy_implementation_pool',
+        knowledge: '__takt_discovery_param___knowledge_implementation_pool',
+      }],
+    });
+    expect(prepared.raw.policies?.['__takt_discovery_param___policy_implementation_pool']).toBeDefined();
+    expect(prepared.raw.knowledge?.['__takt_discovery_param___knowledge_implementation_pool']).toBeDefined();
+  });
+
+  it('should use the base synthetic pool name when the default name is inherited', () => {
+    const poolName = '__takt_discovery_pool__implementation_pool';
+    const raw = WorkflowConfigRawSchema.parse({
+      name: 'inherited-pool-discovery',
+      subworkflow: {
+        callable: true,
+        params: {
+          implementation_pool: { type: 'facet_pool_ref' },
+        },
+      },
+      policies: { policy: 'Discovery policy' },
+      knowledge: { knowledge: 'Discovery knowledge' },
+      steps: [{
+        name: 'implement',
+        persona: 'reviewer',
+        instruction: 'Review',
+        dynamic_facets: { pool: { $param: 'implementation_pool' } },
+        rules: [{ condition: 'done', next: 'COMPLETE' }],
+      }],
+    });
+    const previousDescriptor = Object.getOwnPropertyDescriptor(Object.prototype, poolName);
+
+    try {
+      Object.defineProperty(Object.prototype, poolName, {
+        configurable: true,
+        enumerable: false,
+        value: { inherited: true },
+        writable: true,
+      });
+
+      const prepared = prepareCallableSubworkflowDiscoveryArgs(raw);
+      expect(prepared.callableArgs).toEqual({ implementation_pool: poolName });
+      expect(Object.hasOwn(prepared.raw.facet_pools ?? {}, poolName)).toBe(true);
+      expect(prepared.raw.facet_pools?.[poolName]?.candidates).toHaveLength(1);
+    } finally {
+      if (previousDescriptor === undefined) {
+        delete Object.prototype[poolName];
+      } else {
+        Object.defineProperty(Object.prototype, poolName, previousDescriptor);
+      }
+    }
+  });
+
+  it('should report the dynamic pool field path when a non-string pool reaches normalization', () => {
+    let thrown: unknown;
+    try {
+      normalizeWorkflowConfig({
+        name: 'invalid-dynamic-pool',
+        steps: [{
+          name: 'implement',
+          persona: 'coder',
+          instruction: 'Implement',
+          dynamic_facets: {
+            pool: { $param: 'implementation_pool' },
+          },
+          rules: [{ condition: 'done', next: 'COMPLETE' }],
+        }],
+      }, '/tmp');
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    expect(getWorkflowConfigErrorPath(thrown)).toEqual([
+      'steps',
+      0,
+      'dynamic_facets',
+      'pool',
+    ]);
+    expect((thrown as Error).message).toContain('dynamic_facets.pool has an unresolved parameter reference');
+  });
+
+  it.each([
+    { label: 'an array', value: ['available'] },
+    { label: 'null', value: null },
+  ])('should report the dynamic pool path when $label is supplied', ({ value }) => {
+    let thrown: unknown;
+    try {
+      normalizeWorkflowConfig(createDynamicPoolWorkflow(value), '/tmp');
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeDefined();
+    expect(getWorkflowConfigErrorPath(thrown)).toEqual([
+      'steps',
+      0,
+      'dynamic_facets',
+      'pool',
+    ]);
+    expect((thrown as { message: string }).message).toContain(
+      `Invalid input: expected string, received ${value === null ? 'null' : 'array'}`,
+    );
+  });
+
+  it.each([
+    { label: 'an array', value: ['available'], expectedMessage: 'must be a scalar facet_pool_ref' },
+    { label: 'null', value: null, expectedMessage: 'references unknown facet pool "null"' },
+  ])('should report the callable argument path when $label is supplied', ({ value, expectedMessage }) => {
+    let thrown: unknown;
+    try {
+      normalizeWorkflowConfig(
+        createCallableFacetPoolWorkflow(),
+        '/tmp',
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        {
+          callableArgs: {
+            implementation_pool: value as unknown as string | string[],
+          },
+        },
+      );
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    expect(getWorkflowConfigErrorPath(thrown)).toEqual(['callableArgs', 'implementation_pool']);
+    expect((thrown as Error).message).toContain(expectedMessage);
+  });
+
+  it.each(['constructor', 'toString', '__proto__'])(
+    'should reject an undeclared facet pool when a callable arg uses the inherited key %s',
+    (poolName) => {
+      let thrown: unknown;
+      try {
+        normalizeWorkflowConfig(
+          createCallableFacetPoolWorkflow(),
+          '/tmp',
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          { callableArgs: { implementation_pool: poolName } },
+        );
+      } catch (error) {
+        thrown = error;
+      }
+
+      expect(thrown).toBeInstanceOf(Error);
+      expect((thrown as Error).message).toContain(
+        `workflow_call arg "implementation_pool" references unknown facet pool "${poolName}"`,
+      );
+      expect(getWorkflowConfigErrorPath(thrown)).toEqual(['callableArgs', 'implementation_pool']);
+    },
+  );
+
+  it.each(['constructor', 'toString', '__proto__'])(
+    'should reject an inherited root facet pool name when dynamic facets use %s',
+    (poolName) => {
+      let thrown: unknown;
+      try {
+        normalizeWorkflowConfig(createRootDynamicFacetPoolWorkflow(poolName), '/tmp');
+      } catch (error) {
+        thrown = error;
+      }
+
+      expect(thrown).toBeInstanceOf(Error);
+      expect((thrown as Error).message).toContain(
+        `Configuration error: step "implement" references unknown facet pool "${poolName}"`,
+      );
+      expect(getWorkflowConfigErrorPath(thrown)).toEqual([
+        'steps',
+        0,
+        'dynamic_facets',
+        'pool',
+      ]);
+    },
+  );
 
   it('accepts scalar vars only on workflow_call steps and preserves them after normalization', () => {
     const raw = {
