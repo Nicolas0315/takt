@@ -5,6 +5,7 @@ import { parse as parseYaml } from 'yaml';
 import { describe, expect, it } from 'vitest';
 import type { AgentWorkflowStep } from '../core/models/index.js';
 import { resolveLoopMonitorJudgeProviderModel, resolveStepProviderModel } from '../core/workflow/provider-resolution.js';
+import { resolveExecConfigProviderModel } from '../features/exec/runtimeConfig.js';
 import type { ExecConfig } from '../features/exec/types.js';
 import { buildExecWorkflowYaml as buildExecWorkflowYamlRaw } from '../features/exec/workflowTemplate.js';
 import { loadWorkflowFromFile } from '../infra/config/loaders/workflowFileLoader.js';
@@ -13,6 +14,16 @@ type ExecConfigOverrides = Omit<Partial<ExecConfig>, 'session' | 'replan' | 'loo
   session?: Partial<ExecConfig['session']>;
   replan?: Partial<ExecConfig['replan']>;
   loop?: Partial<ExecConfig['loop']>;
+};
+
+type RawProviderOptions = {
+  claude?: { effort?: string };
+  codex?: { reasoning_effort?: string };
+  copilot?: { effort?: string };
+};
+
+type RawParallelStep = {
+  provider_options?: RawProviderOptions;
 };
 
 const defaultExecWorkflowSkillOptions = {
@@ -44,10 +55,13 @@ type RawWorkflow = {
   loop_monitors?: Array<{
     cycle: string[];
     threshold: number;
-    judge: Record<string, unknown>;
+    judge: Record<string, unknown> & { provider_options?: RawProviderOptions };
   }>;
   report_formats?: Record<string, string>;
-  steps: Array<Record<string, unknown>>;
+  steps: Array<Record<string, unknown> & {
+    provider_options?: RawProviderOptions;
+    parallel?: RawParallelStep[];
+  }>;
 };
 
 function createExecConfig(overrides: ExecConfigOverrides = {}): ExecConfig {
@@ -584,23 +598,46 @@ describe('exec workflow template', () => {
     }
   });
 
-  it('should reject effort values that the selected provider cannot use', () => {
-    expect(() => buildExecWorkflowYaml(createExecConfig({
+  it('should pass through arbitrary effort values to the selected provider', () => {
+    const config = resolveExecConfigProviderModel(createExecConfig({
+      session: {
+        provider: 'codex',
+        model: 'gpt-5',
+        effort: '  max  ',
+      },
       workers: [
         {
           name: 'codex-worker',
-          provider: 'codex',
-          model: 'gpt-5',
-          effort: 'max',
+          provider: 'claude',
+          model: 'opus',
+          effort: '  experimental  ',
           instruction: 'exec-worker',
           knowledge: ['architecture'],
           policy: ['coding'],
         },
       ],
-    }), {
-      workflowName: 'exec-invalid-effort-test',
-      taskDescription: 'Reject invalid effort',
-    })).toThrow(/does not support effort "max"/);
+      reviews: [
+        {
+          name: 'copilot-reviewer',
+          provider: 'copilot',
+          model: 'gpt-5',
+          effort: '  vendor-level  ',
+          instruction: 'exec-review',
+          knowledge: ['architecture'],
+          policy: ['review'],
+        },
+      ],
+    }), {});
+    const raw = parseRawWorkflow(buildExecWorkflowYaml(config, {
+      workflowName: 'exec-custom-effort-test',
+      taskDescription: 'Pass through custom effort',
+    }));
+
+    expect(raw.steps[0]?.parallel[0]?.provider_options?.claude?.effort).toBe('experimental');
+    expect(raw.steps[1]?.parallel[0]?.provider_options?.copilot?.effort).toBe('vendor-level');
+    expect(raw.steps[2]?.provider_options?.codex?.reasoning_effort).toBe('max');
+    expect(raw.loop_monitors?.[0]?.judge.provider_options?.codex?.reasoning_effort).toBe('max');
+    expect(raw.loop_monitors?.[1]?.judge.provider_options?.codex?.reasoning_effort).toBe('max');
   });
 
   it('should reject effort for providers without effort support', () => {
