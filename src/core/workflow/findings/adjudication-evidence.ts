@@ -10,6 +10,7 @@ import type {
   FindingLedger,
   FindingLedgerConflict,
   FindingLedgerEntry,
+  FindingObservation,
   RawFinding,
 } from './types.js';
 import { compareBinaryStrings } from '../../../shared/utils/binary-string-comparator.js';
@@ -218,8 +219,193 @@ export function renderAdjudicationInstruction(snapshot: AdjudicationEvidenceSnap
   });
 }
 
+interface ConflictAdjudicationSubjectReference {
+  subjectId: string;
+  role: ConflictAdjudicationSnapshot['subjects'][number]['role'];
+  findingId: string;
+  expectedHead: ConflictAdjudicationSnapshot['subjects'][number]['expectedHead'];
+  targetIdentityHash: string | null;
+  claimIdentityHash: string | null;
+  semanticClaimIdentityHash: string | null;
+  claimSnapshotDigest: string;
+  evidenceSetDigest: string;
+  sourceRawFindingIds: string[];
+  sourceRawFindingCount: number;
+  sourceRawFindingDigest: string;
+  sourceRawPayloadIds: string[];
+  sourceRawPayloadCount: number;
+  sourceRawPayloadDigest: string;
+  evidenceBindingIds: string[];
+  evidenceBindingCount: number;
+  evidenceBindingDigest: string;
+  rawClaimLandingIds: string[];
+  rawClaimLandingCount: number;
+  rawClaimLandingDigest: string;
+}
+
+interface ConflictAdjudicationSnapshotReference {
+  snapshotFormat: 'reference-v1';
+  conflictSnapshotId: string;
+  conflictId: string;
+  expectedConflictHead: ConflictAdjudicationSnapshot['expectedConflictHead'];
+  claimUniverseDigest: string;
+  coverageSnapshotDigest: string;
+  evidenceSnapshotDigest: string;
+  targetContentDigests: ConflictAdjudicationSnapshot['targetContentDigests'];
+  rawClaimLandingIds: string[];
+  rawClaimLandingCount: number;
+  rawClaimLandingDigest: string;
+  priorSettlementIds: string[];
+  priorSettlementCount: number;
+  priorSettlementDigest: string;
+  subjects: ConflictAdjudicationSubjectReference[];
+  originStep: string | null;
+}
+
+const INLINE_HISTORY_LIMIT = 3;
+
+export interface ConflictAdjudicationHistoryOrder {
+  sourceRawFindingIds: ReadonlyMap<string, FindingObservation>;
+  sourceRawPayloadDigests: ReadonlyMap<string, FindingObservation>;
+  evidenceBindingIds: ReadonlyMap<string, FindingObservation>;
+  rawClaimLandingIds: ReadonlyMap<string, FindingObservation>;
+  priorSettlementIds: ReadonlyMap<string, FindingObservation>;
+}
+
+function rememberLatestObservation(
+  observations: Map<string, FindingObservation>,
+  key: string,
+  observation: FindingObservation,
+): void {
+  const current = observations.get(key);
+  if (
+    current === undefined
+    || compareObservations(current, observation) < 0
+  ) {
+    observations.set(key, structuredClone(observation));
+  }
+}
+
+export function buildConflictAdjudicationHistoryOrder(
+  ledger: FindingLedger,
+): ConflictAdjudicationHistoryOrder {
+  const sourceRawFindingIds = new Map<string, FindingObservation>();
+  const sourceRawPayloadDigests = new Map<string, FindingObservation>();
+  for (const snapshot of ledger.rawCanonicalSnapshots) {
+    rememberLatestObservation(sourceRawFindingIds, snapshot.rawFindingId, snapshot.capturedAt);
+    rememberLatestObservation(sourceRawPayloadDigests, snapshot.rawPayloadDigest, snapshot.capturedAt);
+  }
+  const evidenceBindingIds = new Map<string, FindingObservation>();
+  for (const event of ledger.lifecycleEvents) {
+    for (const bindingId of event.evidenceBindingIds) {
+      rememberLatestObservation(evidenceBindingIds, bindingId, event.occurredAt);
+    }
+  }
+  const rawClaimLandingIds = new Map<string, FindingObservation>();
+  for (const landing of ledger.conflictRawClaimLandings) {
+    rememberLatestObservation(rawClaimLandingIds, landing.rawClaimLandingId, landing.landedAt);
+  }
+  const priorSettlementIds = new Map<string, FindingObservation>();
+  for (const settlement of ledger.conflictClaimSettlements) {
+    rememberLatestObservation(priorSettlementIds, settlement.settlementId, settlement.recordedAt);
+  }
+  return {
+    sourceRawFindingIds,
+    sourceRawPayloadDigests,
+    evidenceBindingIds,
+    rawClaimLandingIds,
+    priorSettlementIds,
+  };
+}
+
+function compareObservations(left: FindingObservation, right: FindingObservation): number {
+  return compareBinaryStrings(left.timestamp, right.timestamp)
+    || compareBinaryStrings(left.runId, right.runId)
+    || compareBinaryStrings(left.stepName, right.stepName);
+}
+
+function inlineHistory(
+  values: readonly string[],
+  observedAtByValue: ReadonlyMap<string, FindingObservation>,
+): string[] {
+  const missingValue = values.find((value) => !observedAtByValue.has(value));
+  if (missingValue !== undefined) {
+    throw new Error(`Conflict adjudication history is missing an observation for ${missingValue}`);
+  }
+  return values
+    .map((value) => ({ value, observedAt: observedAtByValue.get(value)! }))
+    .sort((left, right) => compareObservations(left.observedAt, right.observedAt)
+      || compareBinaryStrings(left.value, right.value))
+    .slice(-INLINE_HISTORY_LIMIT)
+    .map(({ value }) => value);
+}
+
+function digestStringSet(values: readonly string[]): string {
+  return createHash('sha256')
+    .update(canonicalJson([...values].sort(compareBinaryStrings)))
+    .digest('hex');
+}
+
+function subjectReference(
+  subject: ConflictAdjudicationSnapshot['subjects'][number],
+  history: ConflictAdjudicationHistoryOrder,
+): ConflictAdjudicationSubjectReference {
+  return {
+    subjectId: subject.subjectId,
+    role: subject.role,
+    findingId: subject.findingId,
+    expectedHead: structuredClone(subject.expectedHead),
+    targetIdentityHash: subject.targetIdentityHash,
+    claimIdentityHash: subject.claimIdentityHash,
+    semanticClaimIdentityHash: subject.semanticClaimIdentityHash,
+    claimSnapshotDigest: subject.claimSnapshotDigest,
+    evidenceSetDigest: subject.evidenceSetDigest,
+    sourceRawFindingIds: inlineHistory(subject.sourceRawFindingIds, history.sourceRawFindingIds),
+    sourceRawFindingCount: subject.sourceRawFindingIds.length,
+    sourceRawFindingDigest: digestStringSet(subject.sourceRawFindingIds),
+    sourceRawPayloadIds: inlineHistory(subject.sourceRawPayloadDigests, history.sourceRawPayloadDigests),
+    sourceRawPayloadCount: subject.sourceRawPayloadDigests.length,
+    sourceRawPayloadDigest: digestStringSet(subject.sourceRawPayloadDigests),
+    evidenceBindingIds: inlineHistory(subject.evidenceBindingIds, history.evidenceBindingIds),
+    evidenceBindingCount: subject.evidenceBindingIds.length,
+    evidenceBindingDigest: digestStringSet(subject.evidenceBindingIds),
+    rawClaimLandingIds: inlineHistory(subject.rawClaimLandingIds, history.rawClaimLandingIds),
+    rawClaimLandingCount: subject.rawClaimLandingIds.length,
+    rawClaimLandingDigest: digestStringSet(subject.rawClaimLandingIds),
+  };
+}
+
+/**
+ * Durable snapshot は台帳側の完全な入力を保持するが、provider には履歴全体を再送しない。
+ * 直近の少数参照と、それ以前を表す count/digest を渡し、完全な snapshot は engine が解決する。
+ */
+export function buildConflictAdjudicationSnapshotReference(
+  snapshot: ConflictAdjudicationSnapshot,
+  history: ConflictAdjudicationHistoryOrder,
+): ConflictAdjudicationSnapshotReference {
+  return {
+    snapshotFormat: 'reference-v1',
+    conflictSnapshotId: snapshot.conflictSnapshotId,
+    conflictId: snapshot.conflictId,
+    expectedConflictHead: structuredClone(snapshot.expectedConflictHead),
+    claimUniverseDigest: snapshot.claimUniverseDigest,
+    coverageSnapshotDigest: snapshot.coverageSnapshotDigest,
+    evidenceSnapshotDigest: snapshot.evidenceSnapshotDigest,
+    targetContentDigests: snapshot.targetContentDigests ?? [],
+    rawClaimLandingIds: inlineHistory(snapshot.rawClaimLandingIds, history.rawClaimLandingIds),
+    rawClaimLandingCount: snapshot.rawClaimLandingIds.length,
+    rawClaimLandingDigest: digestStringSet(snapshot.rawClaimLandingIds),
+    priorSettlementIds: inlineHistory(snapshot.priorSettlementIds, history.priorSettlementIds),
+    priorSettlementCount: snapshot.priorSettlementIds.length,
+    priorSettlementDigest: digestStringSet(snapshot.priorSettlementIds),
+    subjects: snapshot.subjects.map((subject) => subjectReference(subject, history)),
+    originStep: snapshot.originStep,
+  };
+}
+
 export function renderConflictAdjudicationInstruction(
   snapshot: ConflictAdjudicationSnapshot,
+  history: ConflictAdjudicationHistoryOrder,
   grounding?: {
     reviewScopeSnapshotId: string;
     windows: readonly FindingEvidenceSearchWindow[];
@@ -229,9 +415,10 @@ export function renderConflictAdjudicationInstruction(
     'Adjudicate the durable finding conflict snapshot below. You are read-only.',
     'Return exactly one configured proposal. References must use subjectId values from the snapshot and authorityRefIds must identify exact engine-proof records.',
     'Use merge_holding only for a verified identical claim, promote_holding only with verification supporting the complete product projection, terminate_subject only with verification supporting no-issue or refutation, and undetermined otherwise.',
+    'The snapshot below is an engine-owned reference. Historical ID collections retain a recent reference window and use count/digest for older members; do not infer omitted members.',
     '',
     '## Durable conflict snapshot',
-    renderFencedJsonBlock(snapshot),
+    renderFencedJsonBlock(buildConflictAdjudicationSnapshotReference(snapshot, history)),
   ];
   if (grounding === undefined) {
     return instruction.join('\n');

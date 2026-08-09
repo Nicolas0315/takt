@@ -13,12 +13,18 @@ import {
   commitFindingConflictAdjudication,
   completeFailedConflictAdjudication,
 } from './adjudication-commit.js';
-import { renderConflictAdjudicationInstruction } from './adjudication-evidence.js';
+import {
+  buildConflictAdjudicationHistoryOrder,
+  renderConflictAdjudicationInstruction,
+} from './adjudication-evidence.js';
 import {
   buildFindingEvidenceSearchWindows,
   findingEvidenceAnchorLineFor,
 } from './evidence-search.js';
-import { captureReviewScopeProofSnapshot } from './snapshot.js';
+import {
+  captureConflictTargetContentDigests,
+  captureReviewScopeProofSnapshot,
+} from './snapshot.js';
 import {
   freshConflictAdjudicationSnapshot,
   isActiveConflictUnadjudicated,
@@ -34,6 +40,8 @@ import type { FindingAdjudicationStore } from './store.js';
 import type { FindingLedger, FindingObservation } from './types.js';
 import { composeFindingAdjudicationInstruction } from './adjudication-instruction.js';
 import { compareBinaryStrings } from '../../../shared/utils/binary-string-comparator.js';
+import { conflictTargetPaths } from './conflict-target.js';
+import { refreshActiveConflictAdjudicationSnapshots } from './conflict-adjudication-model.js';
 
 export interface FindingConflictAdjudicationRunnerDeps {
   ledgerStore: FindingAdjudicationStore;
@@ -205,17 +213,7 @@ function conflictGroundingTarget(ledger: FindingLedger, conflictId: string): {
   const rawFindings = rawFindingIds
     .map((rawFindingId) => ledger.rawFindings.find((raw) => raw.rawFindingId === rawFindingId))
     .filter((raw): raw is NonNullable<typeof raw> => raw !== undefined);
-  const targetPaths = new Set<string>();
-  for (const target of [
-    ...findings.map((finding) => finding.target),
-    ...rawFindings.map((raw) => raw.target),
-  ]) {
-    if (target?.kind === 'code') {
-      for (const path of target.paths) {
-        targetPaths.add(path);
-      }
-    }
-  }
+  const targetPaths = conflictTargetPaths({ ledger, conflictId });
   const anchorLines = new Map<string, number | undefined>();
   for (const path of targetPaths) {
     for (const raw of rawFindings) {
@@ -227,7 +225,7 @@ function conflictGroundingTarget(ledger: FindingLedger, conflictId: string): {
     }
   }
   return {
-    targetPaths: [...targetPaths].sort(compareBinaryStrings),
+    targetPaths,
     anchorLines,
   };
 }
@@ -269,8 +267,35 @@ export function createFindingConflictAdjudicationRunner(deps: FindingConflictAdj
       deps.refreshFindingsState();
       return { response: finish(state, step, value), instruction: '', providerInfo };
     };
+    const reviewScopeSnapshot = captureReviewScopeProofSnapshot(deps.getCwd());
+    const queryInventoryByPath = new Map(
+      reviewScopeSnapshot.queryInventory.map((entry) => [entry.path, entry]),
+    );
     const runAttempt = async (groundingRequested: boolean): Promise<StepRunResult> => {
-      const current = deps.ledgerStore.loadLedger();
+      const refreshed = await deps.ledgerStore.updateLedger((fresh) => {
+        const targetContentDigestsByConflict = new Map(
+          fresh.conflicts
+            .filter((candidate) => candidate.status === 'active')
+            .map((candidate) => [
+              candidate.id,
+              captureConflictTargetContentDigests(
+                queryInventoryByPath,
+                conflictTargetPaths({ ledger: fresh, conflictId: candidate.id }),
+              ),
+            ] as const),
+        );
+        return {
+          ledger: refreshActiveConflictAdjudicationSnapshots({
+            ledger: fresh,
+            originStep: lastOriginStep ?? step.name,
+            createdAt: observation,
+            targetContentDigestsByConflict,
+          }),
+          result: undefined,
+        };
+      });
+      const current = refreshed.ledger;
+      const history = buildConflictAdjudicationHistoryOrder(current);
       const conflict = selectConflictForAdjudication(
         current,
         (candidate) => (
@@ -292,19 +317,18 @@ export function createFindingConflictAdjudicationRunner(deps: FindingConflictAdj
         || hasGroundingRetryCandidate(current, conflict.id);
       const groundingInstruction = grounding
         ? (() => {
-            const reviewScopeSnapshot = captureReviewScopeProofSnapshot(deps.getCwd());
             const target = conflictGroundingTarget(current, conflict.id);
             const windows = buildFindingEvidenceSearchWindows({
               snapshot: reviewScopeSnapshot,
               targetPaths: target.targetPaths,
               anchorLines: target.anchorLines,
             });
-            return renderConflictAdjudicationInstruction(snapshot, {
+            return renderConflictAdjudicationInstruction(snapshot, history, {
               reviewScopeSnapshotId: reviewScopeSnapshot.reviewScopeSnapshotId,
               windows,
             });
           })()
-        : renderConflictAdjudicationInstruction(snapshot);
+        : renderConflictAdjudicationInstruction(snapshot, history);
       const instruction = deps.stepExecutor.buildPhase1Instruction(
         composeFindingAdjudicationInstruction(deps.guidance, groundingInstruction),
         step,

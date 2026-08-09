@@ -1,12 +1,20 @@
 import {
+  existsSync,
   mkdirSync,
+  mkdtempSync,
   readdirSync,
   readFileSync,
+  rmSync,
   writeFileSync,
 } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { parse as parseYaml } from 'yaml';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const { runAgentMock } = vi.hoisted(() => ({ runAgentMock: vi.fn() }));
+vi.mock('../agents/runner.js', () => ({ runAgent: runAgentMock }));
+
 import { getAllParallelSubSteps } from '../core/models/index.js';
 import type {
   AgentResponse,
@@ -34,6 +42,21 @@ import { loadWorkflowFromFile } from '../infra/config/loaders/workflowFileLoader
 import { resolveRefToContent } from '../infra/config/loaders/resource-resolver.js';
 import { buildStepFragmentLookupDirs } from '../infra/config/loaders/stepFragmentLookupDirectories.js';
 import { resolveWorkflowStepFragments } from '../infra/config/loaders/workflowStepFragmentResolver.js';
+import { WorkflowEngine } from './helpers/workflow-engine.js';
+import { createTestFindingLedgerStore } from './helpers/finding-storage.js';
+import { initializeGitFixture } from './helpers/git-fixture.js';
+import { verifiedFindingEvidenceFixture } from './helpers/finding-evidence.js';
+import { authorizeFindingLedgerFixture } from './helpers/finding-lifecycle-fixture.js';
+import { landUnownedConflictRawClaims } from '../core/workflow/findings/conflict-claim-landing.js';
+import {
+  freshConflictAdjudicationSnapshot,
+  refreshActiveConflictAdjudicationSnapshots,
+} from '../core/workflow/findings/conflict-adjudication-model.js';
+import {
+  captureConflictTargetContentDigests,
+  captureReviewScopeProofSnapshot,
+} from '../core/workflow/findings/snapshot.js';
+import { conflictTargetPaths } from '../core/workflow/findings/conflict-target.js';
 
 type Language = 'en' | 'ja';
 
@@ -160,6 +183,179 @@ const EMPTY_FINDING_COUNTS: FindingCounts = {
 };
 
 let testRoot: string;
+let engineScenarioCwd: string | undefined;
+
+const ENGINE_SCENARIO_OBSERVATION = {
+  runId: 'builtin-fc-engine-scenario',
+  stepName: 'reviewers',
+  timestamp: '2026-08-09T00:00:00.000Z',
+};
+
+function createBuiltinEngineScenarioConfig(): WorkflowConfig {
+  const builtin = loadWorkflow('en', 'takt-default-high');
+  const reviewers = loadedStep(builtin, 'reviewers');
+  const fix = loadedStep(builtin, 'fix');
+  const reviewer = {
+    name: 'reviewers',
+    kind: 'agent' as const,
+    persona: 'reviewer',
+    personaDisplayName: 'reviewer',
+    instruction: 'Review the current implementation.',
+    passPreviousResponse: false,
+    rules: reviewers.rules?.filter((rule) => (
+      !containsAggregate(rule.condition)
+      && ['finding-conflict-adjudication', 'fix', 'ABORT'].includes(rule.next ?? '')
+    )),
+  };
+  return {
+    ...builtin,
+    name: 'builtin-fc-engine-scenario',
+    initialStep: 'reviewers',
+    maxSteps: 8,
+    loopMonitors: [],
+    findingContract: {
+      ...builtin.findingContract,
+      adjudicator: {
+        persona: 'supervisor',
+        instruction: 'adjudicate-finding-contract',
+      },
+    },
+    steps: [{
+      name: 'fix',
+      kind: 'agent' as const,
+      persona: 'coder',
+      personaDisplayName: 'coder',
+      instruction: 'Apply the fix.',
+      passPreviousResponse: false,
+      rules: fix.rules?.filter((rule) => rule.next === 'reviewers'),
+    }, reviewer],
+  };
+}
+
+async function seedBuiltinEngineScenarioLedger(cwd: string) {
+  const evidence = verifiedFindingEvidenceFixture({
+    cwd,
+    path: 'src/a.ts',
+    startLine: 1,
+    title: 'Disputed issue',
+    description: 'Reviewers disagree about the implementation.',
+    familyTag: 'bug',
+    targetFindingId: 'F-0001',
+  });
+  const authorized = authorizeFindingLedgerFixture({
+    workflowName: 'builtin-fc-engine-scenario',
+    nextId: 2,
+    updatedAt: ENGINE_SCENARIO_OBSERVATION.timestamp,
+    findings: [{
+      id: 'F-0001',
+      status: 'open',
+      lifecycle: 'new',
+      revision: 1,
+      severity: 'high',
+      title: 'Disputed issue',
+      description: 'Reviewers disagree about the implementation.',
+      evidenceIds: [evidence.record.evidenceId],
+      reviewers: ['reviewer'],
+      rawFindingIds: ['raw-1'],
+      firstSeen: ENGINE_SCENARIO_OBSERVATION,
+      lastSeen: ENGINE_SCENARIO_OBSERVATION,
+    }],
+    rawFindings: [{
+      rawFindingId: 'raw-1',
+      stepName: 'reviewers',
+      reviewer: 'reviewer',
+      familyTag: 'bug',
+      severity: 'high',
+      title: 'Disputed issue',
+      description: 'Reviewers disagree about the implementation.',
+      suggestion: null,
+      relation: 'persists',
+      targetFindingId: 'F-0001',
+      targetPrecondition: {
+        targetFindingId: 'F-0001',
+        targetRevision: 1,
+        targetStatus: 'open',
+        targetEvidenceHash: '0'.repeat(64),
+      },
+      evidence: [evidence.evidence],
+    }],
+    conflicts: [{
+      id: 'C-FA2947446963',
+      status: 'active',
+      findingIds: ['F-0001'],
+      rawFindingIds: ['raw-1'],
+      description: 'Reviewers disagree about the implementation.',
+      firstSeen: ENGINE_SCENARIO_OBSERVATION,
+      lastSeen: ENGINE_SCENARIO_OBSERVATION,
+      revision: 1,
+    }],
+    evidenceRecords: [evidence.record],
+    evidenceBindings: [],
+    lifecycleReservations: [],
+    lifecycleEvents: [],
+  });
+  const landed = landUnownedConflictRawClaims({
+    ledger: authorized,
+    observation: ENGINE_SCENARIO_OBSERVATION,
+  });
+  const snapshot = captureReviewScopeProofSnapshot(cwd);
+  const queryInventoryByPath = new Map(
+    snapshot.queryInventory.map((entry) => [entry.path, entry]),
+  );
+  const ledger = refreshActiveConflictAdjudicationSnapshots({
+    ledger: landed,
+    originStep: 'reviewers',
+    createdAt: ENGINE_SCENARIO_OBSERVATION,
+    targetContentDigestsByConflict: new Map([[
+      'C-FA2947446963',
+      captureConflictTargetContentDigests(
+        queryInventoryByPath,
+        conflictTargetPaths({ ledger: landed, conflictId: 'C-FA2947446963' }),
+      ),
+    ]]),
+  });
+  const store = createTestFindingLedgerStore({
+    projectCwd: cwd,
+    runId: 'test-report-dir',
+    reportDir: join(cwd, '.takt', 'runs', 'test-report-dir', 'reports'),
+    workflowName: 'builtin-fc-engine-scenario',
+  });
+  await store.updateLedger(() => ({ ledger, result: undefined }));
+  return store;
+}
+
+async function refreshBuiltinEngineScenarioSnapshot(
+  store: Awaited<ReturnType<typeof seedBuiltinEngineScenarioLedger>>,
+  cwd: string,
+): Promise<void> {
+  const snapshot = captureReviewScopeProofSnapshot(cwd);
+  const queryInventoryByPath = new Map(
+    snapshot.queryInventory.map((entry) => [entry.path, entry]),
+  );
+  await store.updateLedger((ledger) => ({
+    ledger: refreshActiveConflictAdjudicationSnapshots({
+      ledger,
+      originStep: 'reviewers',
+      createdAt: {
+        runId: 'builtin-fc-engine-scenario',
+        stepName: 'reviewers',
+        timestamp: new Date().toISOString(),
+      },
+      targetContentDigestsByConflict: new Map(
+        ledger.conflicts
+          .filter((conflict) => conflict.status === 'active')
+          .map((conflict) => [
+            conflict.id,
+            captureConflictTargetContentDigests(
+              queryInventoryByPath,
+              conflictTargetPaths({ ledger, conflictId: conflict.id }),
+            ),
+          ] as const),
+      ),
+    }),
+    result: undefined,
+  }));
+}
 
 function builtinPath(language: Language, ...parts: string[]): string {
   return join(process.cwd(), 'builtins', language, ...parts);
@@ -233,6 +429,17 @@ function conditionShape(condition: WorkflowRuleCondition): string {
       return `${condition.aggregate}(${condition.targetConditions.map(conditionShape).join(',')})`;
     case 'and':
       return `${conditionShape(condition.left)}&&${conditionShape(condition.right)}`;
+  }
+}
+
+function containsAggregate(condition: WorkflowRuleCondition): boolean {
+  switch (condition.kind) {
+    case 'aggregate':
+      return true;
+    case 'and':
+      return containsAggregate(condition.left) || containsAggregate(condition.right);
+    default:
+      return false;
   }
 }
 
@@ -352,7 +559,7 @@ function expectedRuleMatch(counts: FindingCounts): ExpectedRuleMatch {
     return { index: 0, nextStep: 'finding-conflict-adjudication' };
   }
   if (counts.conflicts > 0 && !counts.roundBudgetExhausted) {
-    return { index: 1, returnValue: 'needs_review' };
+    return { index: 1, returnValue: 'needs_fix' };
   }
   if (counts.conflicts > 0) return { index: 2, nextStep: 'ABORT' };
   if (counts.claimBearingTerminalCount > 0) {
@@ -486,6 +693,7 @@ function enumerateFindingCounts(): FindingCounts[] {
 }
 
 beforeEach(() => {
+  runAgentMock.mockReset();
   const configDir = process.env.TAKT_CONFIG_DIR;
   if (configDir === undefined) throw new Error('TAKT_CONFIG_DIR must be set by test-setup.ts');
   testRoot = dirname(configDir);
@@ -499,6 +707,10 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  if (engineScenarioCwd !== undefined && existsSync(engineScenarioCwd)) {
+    rmSync(engineScenarioCwd, { recursive: true, force: true });
+  }
+  engineScenarioCwd = undefined;
   invalidateGlobalConfigCache();
   invalidateAllResolvedConfigCache();
 });
@@ -710,13 +922,13 @@ describe('takt-default-fc builtins', () => {
     );
   });
 
-  it.each(LANGUAGES)('%s keeps unresolved conflicts in review while stop budget remains', (language) => {
+  it.each(LANGUAGES)('%s routes adjudicated unresolved conflicts to fix while stop budget remains', (language) => {
     const reviewers = loadedStep(
       loadWorkflow(language, 'peer-review-suite-finding-contract-base'),
       'reviewers',
     );
     for (const [roundBudgetExhausted, expected] of [
-      [false, { returnValue: 'needs_review' }],
+      [false, { returnValue: 'needs_fix' }],
       [true, { nextStep: 'ABORT' }],
     ] as const) {
       const counts = {
@@ -781,6 +993,119 @@ describe('takt-default-fc builtins', () => {
       const jaStep = findBuiltinLadderStep(targetsByLanguage.ja, workflow, stepName, 'ja');
       expect(ladderSignature(jaStep), `${workflow}:${stepName}`).toEqual(ladderSignature(enStep));
     }
+  });
+
+  it('executes the builtin FC conflict route through WorkflowEngine', async () => {
+    engineScenarioCwd = mkdtempSync(join(tmpdir(), 'takt-default-fc-engine-'));
+    mkdirSync(join(engineScenarioCwd, 'src'), { recursive: true });
+    writeFileSync(join(engineScenarioCwd, 'src', 'a.ts'), 'export const value = true;\n');
+    initializeGitFixture(engineScenarioCwd, ['src/a.ts']);
+    const store = await seedBuiltinEngineScenarioLedger(engineScenarioCwd);
+    let adjudicationCalls = 0;
+    let fixCalls = 0;
+    let codeChanges = 0;
+    let engine: WorkflowEngine;
+    runAgentMock.mockImplementation(async (...args: unknown[]) => {
+      const persona = typeof args[0] === 'string' ? args[0] : 'unknown';
+      const instruction = typeof args[1] === 'string' ? args[1] : '';
+      const options = args[2];
+      if (typeof options === 'object' && options !== null && 'onPromptResolved' in options
+        && typeof options.onPromptResolved === 'function') {
+        options.onPromptResolved({
+          systemPrompt: 'system',
+          userInstruction: typeof args[1] === 'string' ? args[1] : '',
+        });
+      }
+      const outputSchema = typeof options === 'object' && options !== null
+        && 'outputSchema' in options
+        ? options.outputSchema
+        : undefined;
+      const taskManifestMatch = /## Task manifest\s+```json\s+([\s\S]*?)\s+```/u.exec(instruction);
+      const taskManifest = taskManifestMatch?.[1] === undefined
+        ? undefined
+        : JSON.parse(taskManifestMatch[1]) as Record<string, unknown>;
+      if (typeof taskManifest?.taskId === 'string'
+        && Array.isArray(taskManifest.candidateIntents)) {
+        const evaluations = taskManifest.candidateIntents.flatMap((intent) => {
+          if (typeof intent !== 'object' || intent === null || typeof intent.intentId !== 'string') {
+            return [];
+          }
+          return [{
+            intentId: intent.intentId,
+            result: { kind: 'no_action', reason: 'No manager action is required.' },
+          }];
+        });
+        return {
+          persona,
+          status: 'done' as const,
+          content: '{}',
+          structuredOutput: {
+            taskId: taskManifest.taskId,
+            evaluations,
+            selectedIntentId: null,
+          },
+          timestamp: new Date('2026-08-09T00:00:04.000Z'),
+        };
+      }
+      if (persona === 'supervisor') {
+        adjudicationCalls += 1;
+        const adjudicationSnapshot = freshConflictAdjudicationSnapshot(
+          store.loadLedger(),
+          'C-FA2947446963',
+        );
+        return {
+          persona,
+          status: 'done' as const,
+          content: '{}',
+          structuredOutput: {
+            proposal: {
+              kind: 'undetermined' as const,
+              subjectIds: adjudicationSnapshot.subjects.map(({ subjectId }) => subjectId).sort(),
+              rationale: 'No verified terminal authority is available.',
+            },
+          },
+          timestamp: new Date('2026-08-09T00:00:02.000Z'),
+        };
+      }
+      if (persona === 'coder' || persona.includes('fix')) {
+        fixCalls += 1;
+        if (fixCalls === 1) {
+          codeChanges += 1;
+          writeFileSync(join(engineScenarioCwd!, 'src', 'a.ts'), 'export const value = false;\n');
+          await refreshBuiltinEngineScenarioSnapshot(store, engineScenarioCwd!);
+          (engine as unknown as { refreshFindingsState: () => void }).refreshFindingsState();
+        }
+        return {
+          persona,
+          status: 'done' as const,
+          content: 'Fixes are complete',
+          timestamp: new Date('2026-08-09T00:00:03.000Z'),
+        };
+      }
+      return {
+        persona,
+        status: 'done' as const,
+        content: 'No findings.',
+        timestamp: new Date('2026-08-09T00:00:01.000Z'),
+      };
+    });
+
+    engine = new WorkflowEngine(
+      createBuiltinEngineScenarioConfig(),
+      engineScenarioCwd,
+      'Exercise the builtin conflict route.',
+      {
+        projectCwd: engineScenarioCwd,
+        provider: 'claude',
+        reportDirName: 'test-report-dir',
+      },
+    );
+    const result = await engine.run();
+
+    expect(result.status).toBe('aborted');
+    expect(adjudicationCalls).toBe(4);
+    expect(fixCalls).toBe(2);
+    expect(codeChanges).toBe(1);
   });
 
   it.each(LANGUAGES)('%s all builtin FC control ladders are total over the finding state product', (language) => {

@@ -326,6 +326,7 @@ function assertStatefulRegistryTransition<Value>(input: {
   stateOf: (value: Value) => string;
   identityOf: (value: Value) => unknown;
   canTransition: (current: string, next: string) => boolean;
+  allowSameStateReplacement?: (current: Value, next: Value) => boolean;
   initialState: string;
   label: string;
 }): void {
@@ -339,15 +340,22 @@ function assertStatefulRegistryTransition<Value>(input: {
     }
     const existingState = input.stateOf(existing);
     const candidateState = input.stateOf(candidate);
-    if (
-      !sameCanonicalValue(input.identityOf(existing), input.identityOf(candidate))
-      || !input.canTransition(existingState, candidateState)
-    ) {
+    const allowedReplacement = existingState === candidateState
+      && input.allowSameStateReplacement?.(existing, candidate) === true;
+    if (!input.canTransition(existingState, candidateState)) {
       throw new Error(
         `${input.label} "${input.idOf(existing)}" cannot transition from ${existingState} to ${candidateState}`,
       );
     }
-    if (existingState === candidateState && !sameCanonicalValue(existing, candidate)) {
+    if (!sameCanonicalValue(input.identityOf(existing), input.identityOf(candidate))
+      && !allowedReplacement) {
+      throw new Error(
+        `${input.label} "${input.idOf(existing)}" cannot transition from ${existingState} to ${candidateState}`,
+      );
+    }
+    if (existingState === candidateState
+      && !sameCanonicalValue(existing, candidate)
+      && !allowedReplacement) {
       throw new Error(`${input.label} "${input.idOf(existing)}" cannot be replaced`);
     }
   });
@@ -486,12 +494,48 @@ function assertContractRegistryTransitions(
     'claimSettlementIds',
     'lifecycleEventIds',
   ] as const;
+  const rebuildExcludedAttemptFields = [
+    ...attemptStateFields,
+    'providerCallId',
+    'requestDigest',
+    'startedAt',
+  ] as const;
   // provider_result_unknown と reservation_released は、どちらも provider の
   // terminal result を確定できないまま終わった attempt の着地点であり、started
   // から interrupted への同じ一方向遷移として扱う。
   const canAttemptTransition = (from: string, to: string): boolean => from === to
     || (from === 'started' && ['interrupted', 'proposed', 'applied', 'completed'].includes(to))
     || (from === 'proposed' && ['applied', 'completed'].includes(to));
+  const rebuiltConflictAttemptIds = new Set<string>();
+  current.conflictAdjudicationAttempts.forEach((existing) => {
+    const candidate = next.conflictAdjudicationAttempts.find(
+      (attempt) => attempt.attemptId === existing.attemptId,
+    );
+    const releasedCall = next.findingManagerProviderCalls.find(
+      (call) => call.providerCallId === existing.providerCallId,
+    );
+    const replacementCall = candidate === undefined
+      ? undefined
+      : next.findingManagerProviderCalls.find(
+          (call) => call.providerCallId === candidate.providerCallId,
+        );
+    if (
+      existing.stage === 'started'
+      && candidate?.stage === 'started'
+      && candidate.episodeId === existing.episodeId
+      && candidate.attemptOrdinal === existing.attemptOrdinal
+      && candidate.retryOrdinal === existing.retryOrdinal
+      && candidate.providerCallId !== existing.providerCallId
+      && releasedCall?.state === 'released'
+      && replacementCall?.state === 'reserved'
+      && sameCanonicalValue(
+        stateIdentity(existing, rebuildExcludedAttemptFields),
+        stateIdentity(candidate, rebuildExcludedAttemptFields),
+      )
+    ) {
+      rebuiltConflictAttemptIds.add(existing.attemptId);
+    }
+  });
   assertStatefulRegistryTransition({
     current: current.terminalAdjudicationAttempts,
     next: next.terminalAdjudicationAttempts,
@@ -509,6 +553,8 @@ function assertContractRegistryTransitions(
     stateOf: (attempt) => attempt.stage,
     identityOf: (attempt) => stateIdentity(attempt, attemptStateFields),
     canTransition: canAttemptTransition,
+    allowSameStateReplacement: (existing, candidate) => rebuiltConflictAttemptIds.has(existing.attemptId)
+      && candidate.stage === 'started',
     initialState: 'started',
     label: 'Conflict adjudication attempt',
   });
