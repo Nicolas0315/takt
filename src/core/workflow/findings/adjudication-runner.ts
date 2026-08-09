@@ -26,6 +26,7 @@ import {
   captureReviewScopeProofSnapshot,
 } from './snapshot.js';
 import {
+  conflictAdjudicationAttemptsForBasis,
   freshConflictAdjudicationSnapshot,
   isActiveConflictUnadjudicated,
 } from './conflict-adjudication-model.js';
@@ -179,15 +180,7 @@ function hasGroundingRetryCandidate(
     return false;
   }
   const snapshot = freshConflictAdjudicationSnapshot(ledger, conflictId);
-  const episode = ledger.conflictAdjudicationEpisodes.find((candidate) => (
-    candidate.conflictSnapshotId === snapshot.conflictSnapshotId
-  ));
-  if (episode === undefined) {
-    return false;
-  }
-  const attempts = ledger.conflictAdjudicationAttempts.filter((attempt) => (
-    attempt.episodeId === episode.episodeId
-  ));
+  const attempts = conflictAdjudicationAttemptsForBasis(ledger, snapshot);
   return attempts.some((attempt) => (
     attempt.stage === 'completed'
     && attempt.attemptOrdinal === 1

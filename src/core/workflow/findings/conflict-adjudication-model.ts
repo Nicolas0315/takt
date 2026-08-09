@@ -11,6 +11,7 @@ import {
 } from '../../models/finding-contract-identity.js';
 import type {
   AdjudicatedConflictClaimSettlement,
+  ConflictAdjudicationAttempt,
   ConflictAdjudicationEpisode,
   ConflictAdjudicationSnapshot,
   ConflictClaimSettlement,
@@ -22,6 +23,7 @@ import type {
   FindingLedgerConflict,
   FindingLedgerEntry,
   FindingObservation,
+  FindingLifecycleOperation,
 } from './types.js';
 import { captureFindingLifecycleHead } from './lifecycle-mutation.js';
 import { hasVerifiedOrdinaryLifecycleCoverage } from '../../models/finding-lifecycle-continuity.js';
@@ -345,6 +347,154 @@ function snapshotMatchesCurrentProjection(
   return rebuilt.conflictSnapshotId === snapshot.conflictSnapshotId;
 }
 
+function sameConflictSubjectBasis(
+  left: ConflictClaimSubject,
+  right: ConflictClaimSubject,
+): boolean {
+  return left.role === right.role
+    && left.findingId === right.findingId
+    && left.targetIdentityHash === right.targetIdentityHash
+    && left.claimIdentityHash === right.claimIdentityHash
+    && left.semanticClaimIdentityHash === right.semanticClaimIdentityHash
+    && canonicalJson(left.rawClaimLandingIds) === canonicalJson(right.rawClaimLandingIds)
+    && canonicalJson(left.sourceRawFindingIds) === canonicalJson(right.sourceRawFindingIds)
+    && canonicalJson(left.sourceRawPayloadDigests) === canonicalJson(right.sourceRawPayloadDigests)
+    && canonicalJson(left.evidenceBindingIds) === canonicalJson(right.evidenceBindingIds)
+    && left.evidenceSetDigest === right.evidenceSetDigest
+    && left.claimSnapshotDigest === right.claimSnapshotDigest;
+}
+
+function lifecycleOperationsBetweenHeads(
+  ledger: FindingLedger,
+  previous: ConflictClaimSubject['expectedHead'],
+  current: ConflictClaimSubject['expectedHead'],
+): FindingLifecycleOperation[] | undefined {
+  const revisionGap = current.revision - previous.revision;
+  if (revisionGap !== 1) {
+    return undefined;
+  }
+  const operations = ledger.lifecycleEvents.flatMap((event) => (
+    event.transitions
+      .filter((transition) => (
+        transition.after.entityKind === current.entityKind
+        && transition.after.entityId === current.entityId
+        && transition.after.revision > previous.revision
+        && transition.after.revision <= current.revision
+      ))
+      .map(() => event.operation)
+  ));
+  return operations.length === revisionGap ? operations : undefined;
+}
+
+/**
+ * A fresh projection snapshot is still retained for the ledger invariant, but
+ * repeated evidence observation must not reset the adjudication stop budget.
+ * Only the observation operations that cannot change the conflict claim basis
+ * are folded into the previous adjudication basis.
+ */
+function isObservationOnlyConflictProjectionRefresh(input: {
+  ledger: FindingLedger;
+  previous: ConflictAdjudicationSnapshot;
+  current: ConflictAdjudicationSnapshot;
+}): boolean {
+  if (
+    input.previous.conflictId !== input.current.conflictId
+    || canonicalJson(input.previous.expectedConflictHead)
+      !== canonicalJson(input.current.expectedConflictHead)
+    || input.previous.claimUniverseDigest !== input.current.claimUniverseDigest
+    || canonicalJson(input.previous.rawClaimLandingIds)
+      !== canonicalJson(input.current.rawClaimLandingIds)
+    || canonicalJson(input.previous.priorSettlementIds)
+      !== canonicalJson(input.current.priorSettlementIds)
+    || canonicalJson(input.previous.targetContentDigests ?? [])
+      !== canonicalJson(input.current.targetContentDigests ?? [])
+  ) {
+    return false;
+  }
+
+  const previousSubjects = [...input.previous.subjects].sort((left, right) => (
+    compareBinaryStrings(`${left.role}\0${left.findingId}`, `${right.role}\0${right.findingId}`)
+  ));
+  const currentSubjects = [...input.current.subjects].sort((left, right) => (
+    compareBinaryStrings(`${left.role}\0${left.findingId}`, `${right.role}\0${right.findingId}`)
+  ));
+  if (previousSubjects.length !== currentSubjects.length) {
+    return false;
+  }
+
+  let headChanged = false;
+  for (let index = 0; index < previousSubjects.length; index += 1) {
+    const previous = previousSubjects[index]!;
+    const current = currentSubjects[index]!;
+    if (!sameConflictSubjectBasis(previous, current)) {
+      if (
+        previous.role !== 'product_finding'
+        || current.role !== 'product_finding'
+        || previous.findingId !== current.findingId
+        || previous.targetIdentityHash !== current.targetIdentityHash
+        || previous.claimIdentityHash !== current.claimIdentityHash
+        || previous.semanticClaimIdentityHash !== current.semanticClaimIdentityHash
+      ) {
+        return false;
+      }
+    }
+    if (canonicalJson(previous.expectedHead) === canonicalJson(current.expectedHead)) {
+      continue;
+    }
+    const operations = lifecycleOperationsBetweenHeads(
+      input.ledger,
+      previous.expectedHead,
+      current.expectedHead,
+    );
+    if (
+      operations === undefined
+      || operations.some((operation) => (
+        operation !== 'record_rejected_observation'
+        && !(current.role === 'product_finding' && operation === 'persist_finding')
+      ))
+    ) {
+      return false;
+    }
+    headChanged = true;
+  }
+  return headChanged;
+}
+
+/**
+ * `previous` must be the ledger candidate snapshot and `current` must be the
+ * latest projection snapshot. The observation-only check reads the lifecycle
+ * head on `current`, so swapping the arguments can change the result.
+ */
+export function sharesConflictAdjudicationBasis(
+  ledger: FindingLedger,
+  previous: ConflictAdjudicationSnapshot,
+  current: ConflictAdjudicationSnapshot,
+): boolean {
+  return previous.conflictSnapshotId === current.conflictSnapshotId
+    || isObservationOnlyConflictProjectionRefresh({ ledger, previous, current });
+}
+
+export function conflictAdjudicationAttemptsForBasis(
+  ledger: FindingLedger,
+  snapshot: ConflictAdjudicationSnapshot,
+): ConflictAdjudicationAttempt[] {
+  const equivalentSnapshotIds = new Set(ledger.conflictAdjudicationSnapshots
+    .filter((candidate) => (
+      candidate.conflictId === snapshot.conflictId
+      && sharesConflictAdjudicationBasis(ledger, candidate, snapshot)
+    ))
+    .map((candidate) => candidate.conflictSnapshotId));
+  const episodeIds = new Set(ledger.conflictAdjudicationEpisodes
+    .filter((episode) => (
+      episode.conflictId === snapshot.conflictId
+      && equivalentSnapshotIds.has(episode.conflictSnapshotId)
+    ))
+    .map((episode) => episode.episodeId));
+  return ledger.conflictAdjudicationAttempts.filter((attempt) => (
+    episodeIds.has(attempt.episodeId)
+  ));
+}
+
 export function refreshActiveConflictAdjudicationSnapshots(input: {
   ledger: FindingLedger;
   originStep: string | null;
@@ -421,8 +571,11 @@ export function isConflictSnapshotAdjudicated(
   snapshot: ConflictAdjudicationSnapshot,
 ): boolean {
   return ledger.conflictAdjudicationAttempts.some((attempt) => (
-    attempt.conflictSnapshotId === snapshot.conflictSnapshotId
-    && canonicalJson(attempt.expectedConflictHead) === canonicalJson(snapshot.expectedConflictHead)
+    ledger.conflictAdjudicationSnapshots.some((candidate) => (
+      candidate.conflictSnapshotId === attempt.conflictSnapshotId
+      && sharesConflictAdjudicationBasis(ledger, candidate, snapshot)
+      && canonicalJson(attempt.expectedConflictHead) === canonicalJson(candidate.expectedConflictHead)
+    ))
     && ledger.findingManagerProviderCalls.some((call) => (
       call.providerCallId === attempt.providerCallId
       && call.requestDigest === attempt.requestDigest
@@ -446,16 +599,23 @@ function hasRemainingConflictAttempts(
   ledger: FindingLedger,
   snapshot: ConflictAdjudicationSnapshot,
 ): boolean {
-  const episode = ledger.conflictAdjudicationEpisodes.find((candidate) => (
-    candidate.episodeId === computeConflictEpisodeId({
-      conflictId: snapshot.conflictId,
-      expectedConflictHead: snapshot.expectedConflictHead,
-      conflictSnapshotId: snapshot.conflictSnapshotId,
-    })
+  const equivalentSnapshotIds = new Set(ledger.conflictAdjudicationSnapshots
+    .filter((candidate) => (
+      candidate.conflictId === snapshot.conflictId
+      && sharesConflictAdjudicationBasis(ledger, candidate, snapshot)
+    ))
+    .map((candidate) => candidate.conflictSnapshotId));
+  const episodes = ledger.conflictAdjudicationEpisodes.filter((episode) => (
+    episode.conflictId === snapshot.conflictId
+    && equivalentSnapshotIds.has(episode.conflictSnapshotId)
   ));
-  return episode === undefined || ledger.conflictAdjudicationAttempts.filter(
-    (attempt) => attempt.episodeId === episode.episodeId,
-  ).length < episode.maxAttempts;
+  if (episodes.length === 0) {
+    return true;
+  }
+  const attemptCount = ledger.conflictAdjudicationAttempts.filter((attempt) => (
+    episodes.some((episode) => episode.episodeId === attempt.episodeId)
+  )).length;
+  return attemptCount < Math.max(...episodes.map((episode) => episode.maxAttempts));
 }
 
 export function isActiveConflictUnadjudicated(

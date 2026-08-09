@@ -10,6 +10,7 @@ import type {
 } from '../../models/finding-contract-types.js';
 import {
   createConflictAdjudicationEpisode,
+  conflictAdjudicationAttemptsForBasis,
   freshConflictAdjudicationSnapshot,
   hasAlwaysChangingConflictTarget,
   isConflictSnapshotAdjudicated,
@@ -170,9 +171,7 @@ export async function reserveFindingConflictAdjudication(input: {
       snapshot,
       input.observation,
     );
-    const episodeAttempts = fresh.conflictAdjudicationAttempts.filter(
-      (attempt) => attempt.episodeId === ensured.episode.episodeId,
-    );
+    const episodeAttempts = conflictAdjudicationAttemptsForBasis(fresh, snapshot);
     const groundingRetryAlreadyUsed = episodeAttempts.some((attempt) => (
       attempt.attemptOrdinal === 2
       && fresh.findingManagerProviderCalls
@@ -202,9 +201,8 @@ export async function reserveFindingConflictAdjudication(input: {
     // 予約解放は provider 実行前なので attempt を消費しない。同じ snapshot digest の
     // 予約を同じ ordinal で再構築し、次回に snapshot digest が一致すればこの経路を
     // 再度通らないことを停止保証とする。
-    const used = fresh.conflictAdjudicationAttempts.filter(
-      (attempt) => attempt.episodeId === ensured.episode.episodeId
-        && attempt.attemptId !== rebuildingAttempt?.attemptId,
+    const used = episodeAttempts.filter(
+      (attempt) => attempt.attemptId !== rebuildingAttempt?.attemptId,
     ).length;
     if (used >= ensured.episode.maxAttempts) {
       return { ledger: fresh, result: { started: false } };
