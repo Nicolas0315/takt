@@ -65,6 +65,7 @@ import {
   mergeProvisionalClaimProjection,
 } from './finding-entry.js';
 import { isProvisionalReopenSource } from './provisional-promotion-eligibility.js';
+import { collectUnsettledActiveConflictHoldingFindingIds } from './conflict-ownership.js';
 import { findingMatchesMutationPrecondition } from './finding-preconditions.js';
 import type {
   PreAdmissionEntityMutationResult,
@@ -681,6 +682,7 @@ export interface ReconcileFindingLedgerPlan {
   ledger: FindingLedger;
   lifecycleCommands: FindingLifecycleCommand[];
   entityMutationResults: PreAdmissionEntityMutationResult[];
+  deferredResolutionRejections: string[];
 }
 
 export function reconcileFindingLedgerPlan(
@@ -970,6 +972,10 @@ function reconcileFindingLedgerWithValidator(
   const currentRawFindingsById = new Map(input.rawFindings.map((finding) => [finding.rawFindingId, finding]));
   let nextId = input.previousLedger.nextId;
   const usedRawFindingIds = new Set<string>();
+  const unsettledConflictHoldingFindingIds = collectUnsettledActiveConflictHoldingFindingIds(
+    input.previousLedger,
+  );
+  const deferredResolutionRejections: string[] = [];
 
   const updatedById = new Map<string, FindingRecord>(
     input.previousLedger.findings.map((finding) => [finding.id, { ...finding }]),
@@ -1068,6 +1074,58 @@ function reconcileFindingLedgerWithValidator(
   for (const resolved of input.managerOutput.resolvedFindings) {
     assertKnownFinding(knownFindingIds, resolved.findingId);
     const finding = updatedById.get(resolved.findingId)!;
+    if (
+      finding.provisional !== undefined
+      && unsettledConflictHoldingFindingIds.has(finding.id)
+    ) {
+      assertFindingStatus(finding, 'open', 'resolve');
+      assertResolvedEvidenceRawFindings({
+        finding,
+        resolvedRawFindingIds: resolved.rawFindingIds,
+        previousRawFindingsById,
+        currentRawFindingsById,
+      });
+      const observedRawFindingIds = resolved.rawFindingIds.filter(
+        (rawFindingId) => currentRawFindingsById.has(rawFindingId),
+      );
+      markRawFindingIdsUsed(usedRawFindingIds, observedRawFindingIds);
+      const evidence = foldFindingObservation({
+        finding,
+        rawFindings: getRawFindings(input.rawFindings, observedRawFindingIds),
+        observation: observationFromContext(input.context),
+      });
+      const updated: FindingRecord = {
+        ...finding,
+        revision: bumpRevision(finding),
+        evidenceIds: mergeBinarySortedUniqueStrings(
+          finding.evidenceIds,
+          evidenceIdsForRawFindings(
+            resolved.rawFindingIds,
+            input.verifiedEvidenceRecordsByRawFindingId,
+          ),
+        ),
+        ...evidence,
+      };
+      updatedById.set(resolved.findingId, updated);
+      findingCommand(
+        'update_provisional',
+        [updated],
+        rawFindingLifecycleAuthority({
+          operation: 'update_provisional',
+          rawFindingIds: finding.provisional.sourceRawFindingIds,
+          rawFindings: input.rawFindings,
+          adjudications: input.managerOutput.anchorAdjudications,
+        }),
+        verifiedFindingSources(
+          [finding.id],
+          finding.provisional.sourceRawFindingIds,
+        ),
+      );
+      deferredResolutionRejections.push(
+        `Resolution for provisional finding "${finding.id}" deferred while waiting for an unsettled conflict landing to settle (raw findings: ${resolved.rawFindingIds.join(', ')})`,
+      );
+      continue;
+    }
     assertFindingStatus(finding, 'open', 'resolve');
     assertResolvedEvidenceRawFindings({
       finding,
@@ -1480,6 +1538,7 @@ function reconcileFindingLedgerWithValidator(
     ledger,
     lifecycleCommands,
     entityMutationResults: entityMutationApplication.results,
+    deferredResolutionRejections,
   };
 }
 
