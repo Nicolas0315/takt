@@ -39,6 +39,11 @@ parallel:
       - security-review
     knowledge:
       - security
+      - security-web
+      - security-api
+      - security-local
+      - security-data
+      - security-dependencies
       - takt
       - $param: review_knowledge_additions
     instruction: review-security

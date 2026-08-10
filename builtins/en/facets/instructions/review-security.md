@@ -2,10 +2,13 @@ Focus on reviewing **security**.
 
 Treat the Security-specific policy's finding and warning boundary as the source of truth for the final classification.
 
+{{include:instructions/security-knowledge-routing}}
+
 Procedure:
 1. Open the Knowledge and Policy Source paths with the Read tool and obtain the full content
-2. List every `##` section in each of them (do not cherry-pick)
-3. Match the criteria in each listed section against the diff and detect any issues
+2. Compare the applicability condition of each Knowledge assigned to the step with the request, changed code, and real call paths
+3. List every `##` section from the Knowledge that applies under the scope rules above
+4. Match the criteria in each listed section against the diff and detect any issues
 
 {{include:instructions/review-round-scope}}
 

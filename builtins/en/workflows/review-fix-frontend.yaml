@@ -82,7 +82,7 @@ steps:
         policy:
           - contract-change
           - security-review
-        knowledge: security
+        knowledge: [security, security-web, security-data, security-dependencies]
         instruction: review-security
         output_contracts:
           report:
