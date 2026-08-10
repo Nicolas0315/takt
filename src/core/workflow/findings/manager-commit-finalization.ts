@@ -427,6 +427,7 @@ export function reconcileCommitPlan(input: {
     settlement,
   });
   const rejectedObservationAttachments = [
+    ...reconciledPlan.rejectedObservationAttachments,
     ...settlement.rejectedObservationAttachments,
     ...terminalEntityResults.flatMap((result) => (
       result.sourceRawFindingIds.map((rawFindingId) => ({
