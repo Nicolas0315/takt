@@ -257,8 +257,29 @@ describe('TaskExecutionConfigSchema', () => {
     })).not.toThrow();
   });
 
-  it('should round-trip dynamic parallel resume selections', () => {
-    const parsed = TaskExecutionConfigSchema.parse({
+  it.each([
+    ['dynamic_parallel_selections', {
+      '{"workflow":"default","step":"reviewers","calls":[]}': {
+        identity: '{"workflow":"default","step":"reviewers","calls":[]}',
+        step_name: 'reviewers',
+        round: 1,
+        selected_pool_ids: ['frontend'],
+        effective_selection_ids: ['architecture', 'frontend'],
+      },
+    }],
+    ['dynamic_facet_selections', {
+      '{"workflow":"default","step":"fix","calls":[]}': {
+        identity: '{"workflow":"default","step":"fix","calls":[]}',
+        step_name: 'fix',
+        round: 1,
+        selected_ids: ['frontend'],
+        selected_policy_refs: [],
+        selected_knowledge_refs: [],
+        rationale: 'frontend is relevant',
+      },
+    }],
+  ] as const)('should reject legacy resume point field %s', (field, value) => {
+    const result = TaskExecutionConfigSchema.safeParse({
       resume_point: {
         version: 2,
         stack: [{
@@ -270,21 +291,22 @@ describe('TaskExecutionConfigSchema', () => {
         }],
         iteration: 3,
         elapsed_ms: 100,
-        dynamic_parallel_selections: {
-          '{"workflow":"default","step":"reviewers","calls":[]}': {
-            identity: '{"workflow":"default","step":"reviewers","calls":[]}',
-            step_name: 'reviewers',
-            round: 1,
-            selected_pool_ids: ['frontend'],
-            effective_selection_ids: ['architecture', 'frontend'],
-          },
-        },
+        [field]: value,
         workflow_call_invocations: {},
         workflow_step_participations: {},
       },
     });
 
-    expect(parsed.resume_point?.dynamic_parallel_selections).toBeDefined();
+    expect(result.success).toBe(false);
+    if (result.success) throw new Error(`Expected legacy field ${field} to be rejected`);
+    const issue = result.error.issues.find(({ code, path }) =>
+      code === 'custom' && path.length === 1 && path[0] === 'resume_point');
+    expect(issue).toMatchObject({
+      code: 'custom',
+      path: ['resume_point'],
+    });
+    expect(issue?.message).toContain('Unrecognized key');
+    expect(issue?.message).toContain(`"${field}"`);
   });
 
   it('should round-trip the canonical workflow-call invocation index', () => {
