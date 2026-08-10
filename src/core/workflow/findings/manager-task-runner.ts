@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { AgentResponse, AgentWorkflowStep, FindingContractConfig } from '../../models/types.js';
 import { normalizeFindingText } from '../../models/finding-claim-identity.js';
-import { createEmptyFindingContractRegistries } from '../../models/finding-contract-seed.js';
 import { canonicalJson } from '../../../shared/utils/canonical-json.js';
 import { compareBinaryStrings } from '../../../shared/utils/binary-string-comparator.js';
 import {
@@ -13,7 +12,7 @@ import type {
 } from './manager-contracts.js';
 import {
   buildManagerInputLedger,
-  managerRawFindingView,
+  managerPromptTargetView,
   runPreparedManagerAttempt,
   SEMANTIC_RESOLUTION_INSTRUCTION,
 } from './manager-agent.js';
@@ -52,6 +51,18 @@ import {
 } from './manager-raw-decision-adapter.js';
 import { computeConflictEvidenceHash } from './adjudication-evidence.js';
 import { composeFindingManagerInstruction } from './manager-instruction-composer.js';
+import {
+  boundPromptArray,
+  promptArrayView,
+  boundPromptString,
+  FINDING_MANAGER_PROMPT_CONTEXT_COVERAGE_MAX_BYTES,
+  FINDING_MANAGER_PROMPT_BUDGETS,
+  FINDING_MANAGER_PROMPT_FIELD_LIMITS,
+  FINDING_MANAGER_PROMPT_QUOTE_WINDOWS_ARRAY_MAX_BYTES,
+  renderCompactJsonBlock,
+  renderQuoteWindowsJsonBlock,
+  rawTaskSectionBudget,
+} from './prompt-bounds.js';
 import type {
   FindingEvidenceRecord,
   FindingLedger,
@@ -70,6 +81,38 @@ const CONTROL_PRIOR_TEXT_LIMIT = 4_000;
 export interface MainManagerRawFailure {
   kind: FindingProvisionalKind;
   reason: string;
+}
+
+class FindingManagerPromptOverflowError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'FindingManagerPromptOverflowError';
+  }
+}
+
+export function buildRawTaskInputOverflow(input: {
+  taskId: string;
+  ownedRawFindingIds: readonly string[];
+  inputBytes: number | null;
+  reason: string;
+}): {
+  failures: Map<string, MainManagerRawFailure>;
+  audit: FindingManagerTaskAudit;
+} {
+  return {
+    failures: new Map(input.ownedRawFindingIds.map((rawFindingId) => [
+      rawFindingId,
+      { kind: 'manager-input-overflow' as const, reason: input.reason },
+    ])),
+    audit: {
+      taskId: input.taskId,
+      taskKind: 'raw',
+      ownedIds: [...input.ownedRawFindingIds],
+      status: 'input_overflow',
+      inputBytes: input.inputBytes,
+      reason: input.reason,
+    },
+  };
 }
 
 export interface MainManagerTaskExecution {
@@ -103,6 +146,11 @@ interface RawTaskContext {
   };
 }
 
+interface RawTaskRenderAttempt {
+  inputBytes: number | null;
+  reason: string;
+}
+
 interface ControlTaskQueueItem {
   task: MainManagerControlTask;
 }
@@ -111,17 +159,79 @@ function taskLedgerProjection(
   ledger: FindingLedger,
   fullDetailFindingIds: ReadonlySet<string>,
 ): unknown {
-  const projection = buildManagerInputLedger(ledger, fullDetailFindingIds, {
-    includeRawFindingDetails: false,
-  }) as {
-    workflowName: string;
+  const projection = buildManagerInputLedger(
+    ledger,
+    fullDetailFindingIds,
+    { includeRawFindingDetails: false },
+  ) as {
     findings: unknown[];
-    conflicts: unknown[];
   };
+  const evidenceContext = (value: unknown): unknown => {
+    const compactRecord = (record: unknown): unknown => {
+      if (typeof record !== 'object' || record === null || Array.isArray(record)) {
+        return record;
+      }
+      const view = record as Record<string, unknown>;
+      if (view.kind !== 'file_quote') {
+        return {
+          evidenceId: view.evidenceId,
+          ...(view.protocolError === undefined ? {} : { protocolError: view.protocolError }),
+        };
+      }
+      return {
+        kind: view.kind,
+        path: view.path,
+        ...(view.pathTruncation === undefined ? {} : { pathTruncation: view.pathTruncation }),
+        startLine: view.startLine,
+        endLine: view.endLine,
+        verbatimExcerpt: view.verbatimExcerpt,
+        ...(view.verbatimExcerptTruncation === undefined
+          ? {}
+          : { verbatimExcerptTruncation: view.verbatimExcerptTruncation }),
+      };
+    };
+    const items = Array.isArray(value)
+      ? value
+      : typeof value === 'object' && value !== null && Array.isArray((value as Record<string, unknown>).items)
+        ? (value as Record<string, unknown>).items as unknown[]
+        : [];
+    const bounded = boundPromptArray({
+      items: items.map(compactRecord),
+      fieldPath: 'taskLedger.evidenceDetails',
+      maxItems: FINDING_MANAGER_PROMPT_FIELD_LIMITS.evidenceMaxItems,
+      maxRenderedBytes: FINDING_MANAGER_PROMPT_FIELD_LIMITS.taskLedgerEvidenceArrayMaxBytes,
+    });
+    if (bounded.truncation === undefined) {
+      return bounded.items;
+    }
+    return bounded;
+  };
+  const findings = projection.findings.map((finding) => {
+    const view = finding as Record<string, unknown>;
+    return {
+      id: view.id,
+      revision: view.revision,
+      status: view.status,
+      lifecycle: view.lifecycle,
+      severity: view.severity,
+      title: view.title,
+      ...(view.titleTruncation === undefined ? {} : { titleTruncation: view.titleTruncation }),
+      target: view.target,
+      description: view.description,
+      ...(view.descriptionTruncation === undefined
+        ? {}
+        : { descriptionTruncation: view.descriptionTruncation }),
+      suggestion: view.suggestion,
+      ...(view.suggestionTruncation === undefined
+        ? {}
+        : { suggestionTruncation: view.suggestionTruncation }),
+      evidenceDetails: evidenceContext(view.evidenceDetails),
+    };
+  });
   return {
-    workflowName: projection.workflowName,
-    findings: projection.findings,
-    conflicts: projection.conflicts,
+    findings,
+    // raw adjudication does not own conflict decisions; those are sent to control tasks.
+    conflicts: [],
   };
 }
 
@@ -445,16 +555,164 @@ function rawTaskContext(
   };
 }
 
-function rawTaskManifestView(task: MainManagerRawTask): unknown {
+function rawTaskManifestView(input: {
+  task: MainManagerRawTask;
+  rawFindings: readonly RawFinding[];
+}): unknown {
+  const rawById = new Map(input.rawFindings.map((raw) => [raw.rawFindingId, raw]));
   return {
-    taskId: task.taskId,
-    ownedRawFindingIds: task.ownedRawFindingIds,
-    rawFindings: task.rawFindings,
-    capturedTargetHeads: task.ownedRawFindingIds.map((rawFindingId) => ({
-      rawFindingId,
-      targetHead: task.capturedTargetHeads.get(rawFindingId) ?? null,
+    taskId: input.task.taskId,
+    rawFindings: input.task.ownedRawFindingIds.map((rawFindingId) => {
+      const raw = rawById.get(rawFindingId);
+      if (raw === undefined) {
+        throw new Error(`Raw task manifest is missing raw finding "${rawFindingId}"`);
+      }
+      const componentId = input.task.componentIdByRawFindingId.get(rawFindingId);
+      if (componentId === undefined) {
+        throw new Error(
+          `Finding manager engine bug: raw task "${input.task.taskId}" is missing componentId for raw finding "${rawFindingId}"`,
+        );
+      }
+      const reviewer = boundPromptString({
+        value: raw.reviewer,
+        fieldPath: `${rawFindingId}.reviewer`,
+        maxRenderedBytes: FINDING_MANAGER_PROMPT_FIELD_LIMITS.reviewerMaxBytes,
+      });
+      return {
+        rawFindingId,
+        componentId,
+        reviewer: reviewer.text,
+        ...(reviewer.truncation === undefined
+          ? {}
+          : { reviewerTruncation: reviewer.truncation }),
+        relation: raw.relation,
+        targetFindingId: raw.targetFindingId,
+        target: managerPromptTargetView(raw.target),
+      };
+    }),
+  };
+}
+
+function promptSection(
+  label: string,
+  value: unknown,
+  maxBytes: number,
+  render = renderCompactJsonBlock,
+): string {
+  const rendered = [label, render(value)].join('\n');
+  const bytes = Buffer.byteLength(rendered, 'utf8');
+  if (bytes > maxBytes) {
+    throw new FindingManagerPromptOverflowError(
+      `Finding manager prompt section "${label}" exceeds ${maxBytes} UTF-8 bytes (${bytes})`,
+    );
+  }
+  return rendered;
+}
+
+function boundedRawClaimItems(input: {
+  rawFindings: readonly RawFinding[];
+}): unknown {
+  const items: Array<Record<string, unknown>> = input.rawFindings.map((raw) => ({
+    rawFindingId: raw.rawFindingId,
+  }));
+  const fields = [
+    ['title', FINDING_MANAGER_PROMPT_FIELD_LIMITS.rawTitleMaxBytes],
+    ['description', FINDING_MANAGER_PROMPT_FIELD_LIMITS.rawDescriptionMaxBytes],
+    ['suggestion', FINDING_MANAGER_PROMPT_FIELD_LIMITS.rawSuggestionMaxBytes],
+    ['rawExcerpt', FINDING_MANAGER_PROMPT_FIELD_LIMITS.rawExcerptMaxBytes],
+    ['familyTag', FINDING_MANAGER_PROMPT_FIELD_LIMITS.familyTagMaxBytes],
+  ] as const;
+  for (const [field, maxFieldBytes] of fields) {
+    input.rawFindings.forEach((raw, index) => {
+      const value = raw[field];
+      if (value === null || value === undefined) {
+        return;
+      }
+      const bounded = boundPromptString({
+        value,
+        fieldPath: `${raw.rawFindingId}.${field}`,
+        maxRenderedBytes: maxFieldBytes,
+      });
+      items[index] = {
+        ...items[index],
+        [field]: bounded.text,
+        ...(bounded.truncation === undefined ? {} : { [`${field}Truncation`]: bounded.truncation }),
+      };
+    });
+  }
+  return { items };
+}
+
+function rawEvidenceView(
+  rawFinding: RawFinding,
+  evidenceRecords: readonly FindingEvidenceRecord[],
+): unknown {
+  const evidence = rawFinding.evidence.map((entry, index) => {
+    if (entry.kind === 'file_quote') {
+      const path = boundPromptString({
+        value: entry.path,
+        fieldPath: `${rawFinding.rawFindingId}.evidence[${index}].path`,
+        maxRenderedBytes: FINDING_MANAGER_PROMPT_FIELD_LIMITS.quoteWindowPathMaxBytes,
+      });
+      const verbatimExcerpt = boundPromptString({
+        value: entry.verbatimExcerpt,
+        fieldPath: `${rawFinding.rawFindingId}.evidence[${index}].verbatimExcerpt`,
+        maxRenderedBytes: FINDING_MANAGER_PROMPT_FIELD_LIMITS.evidenceVerbatimExcerptMaxBytes,
+      });
+      return {
+        kind: entry.kind,
+        path: path.text,
+        ...(path.truncation === undefined ? {} : { pathTruncation: path.truncation }),
+        startLine: entry.startLine,
+        endLine: entry.endLine,
+        verbatimExcerpt: verbatimExcerpt.text,
+        ...(verbatimExcerpt.truncation === undefined
+          ? {}
+          : { verbatimExcerptTruncation: verbatimExcerpt.truncation }),
+        snapshotId: entry.snapshotId,
+      };
+    }
+    const record = evidenceRecords.find(
+      (candidate): candidate is Extract<FindingEvidenceRecord, { kind: 'engine_proof' }> => (
+        candidate.kind === 'engine_proof' && candidate.proofId === entry.proofId
+      ),
+    );
+    return record === undefined
+      ? { kind: entry.kind, proofId: entry.proofId, protocolError: 'missing evidence registry record' }
+      : {
+          kind: record.kind,
+          proofId: record.proofId,
+          evidenceId: record.evidenceId,
+          purpose: record.purpose,
+          verifier: { id: record.verifierId, version: record.verifierVersion },
+          claimIdentityHash: record.claimIdentityHash,
+          targetFindingId: record.targetFindingId,
+          subject: record.subject,
+          dependencyDigests: record.dependencyDigests,
+          resultDigest: record.resultDigest,
+          snapshotId: record.snapshotId,
+        };
+  });
+  return {
+    rawFindingId: rawFinding.rawFindingId,
+    evidence: promptArrayView(boundPromptArray({
+      items: evidence,
+      fieldPath: `${rawFinding.rawFindingId}.evidence`,
+      maxItems: FINDING_MANAGER_PROMPT_FIELD_LIMITS.evidenceMaxItems,
+      maxRenderedBytes: FINDING_MANAGER_PROMPT_QUOTE_WINDOWS_ARRAY_MAX_BYTES,
     })),
   };
+}
+
+function boundedRawQuoteWindows(input: {
+  rawFindings: readonly RawFinding[];
+  evidenceRecordsByRawFindingId: ReadonlyMap<string, readonly FindingEvidenceRecord[]>;
+}): unknown {
+  const items = input.rawFindings.map((rawFinding) => rawEvidenceView(
+    rawFinding,
+    input.evidenceRecordsByRawFindingId.get(rawFinding.rawFindingId) ?? [],
+  ));
+  return { items };
 }
 
 function buildRawTaskInstruction(input: {
@@ -465,8 +723,7 @@ function buildRawTaskInstruction(input: {
   mechanicallyClassifiedCount: number;
   evidenceRecordsByRawFindingId: ReadonlyMap<string, readonly FindingEvidenceRecord[]>;
 }): string {
-  return [
-    input.contract.manager.instruction,
+  const structure = [
     '',
     'This is one engine-owned raw adjudication task. Decide only the exact owned raw finding ids in the manifest.',
     'Return the manifest taskId and exactly one decision for every owned raw finding id. Do not add, omit, or duplicate ids.',
@@ -479,28 +736,64 @@ function buildRawTaskInstruction(input: {
       ? []
       : [`${input.mechanicallyClassifiedCount} other raw findings were classified mechanically and are outside this task.`]),
     '',
+  ].join('\n');
+  if (Buffer.byteLength(structure, 'utf8') > FINDING_MANAGER_PROMPT_BUDGETS.structureMaxBytes) {
+    throw new FindingManagerPromptOverflowError(
+      `Finding manager prompt structure exceeds ${FINDING_MANAGER_PROMPT_BUDGETS.structureMaxBytes} UTF-8 bytes`,
+    );
+  }
+  const rawFindingIds = input.task.ownedRawFindingIds;
+  const manifestBudget = rawTaskSectionBudget('manifest', rawFindingIds);
+  const manifestTask = promptSection(
     '## Task manifest',
-    renderFencedJsonBlock(rawTaskManifestView(input.task)),
-    '',
-    '## Context coverage',
-    renderFencedJsonBlock(input.context.coverage),
-    '',
+    rawTaskManifestView({
+      task: input.task,
+      rawFindings: input.rawFindings,
+    }),
+    manifestBudget,
+    renderFencedJsonBlock,
+  );
+  const manifest = [
+    manifestTask,
+    promptSection(
+      '## Context coverage',
+      input.context.coverage,
+      FINDING_MANAGER_PROMPT_CONTEXT_COVERAGE_MAX_BYTES,
+    ),
+  ].join('\n');
+  if (Buffer.byteLength(manifest, 'utf8') > manifestBudget) {
+    throw new FindingManagerPromptOverflowError(
+      `Finding manager prompt manifest exceeds ${manifestBudget} UTF-8 bytes`,
+    );
+  }
+  const ledger = promptSection(
     '## Relevant ledger projection',
-    renderFencedJsonBlock(taskLedgerProjection(
+    taskLedgerProjection(
       input.context.ledger,
       new Set(input.rawFindings.flatMap((rawFinding) => (
         rawFinding.targetFindingId === null ? [] : [rawFinding.targetFindingId]
       ))),
-    )),
-    '',
-    '## Owned raw findings',
-    renderFencedJsonBlock(input.rawFindings.map((rawFinding) => (
-      managerRawFindingView(
-        rawFinding,
-        input.evidenceRecordsByRawFindingId.get(rawFinding.rawFindingId) ?? [],
-      )
-    ))),
-  ].join('\n');
+    ),
+    rawTaskSectionBudget('ledgerProjection', rawFindingIds),
+  );
+  const excerpts = promptSection(
+    '## Report excerpts',
+    boundedRawClaimItems({
+      rawFindings: input.rawFindings,
+    }),
+    rawTaskSectionBudget('reportExcerpts', rawFindingIds),
+  );
+  const quoteWindows = promptSection(
+    '## Byte-exact quote windows',
+    boundedRawQuoteWindows({
+      rawFindings: input.rawFindings,
+      evidenceRecordsByRawFindingId: input.evidenceRecordsByRawFindingId,
+    }),
+    rawTaskSectionBudget('quoteWindows', rawFindingIds),
+    renderQuoteWindowsJsonBlock,
+  );
+  return [input.contract.manager.instruction, structure, manifest, excerpts, quoteWindows, ledger]
+    .join('\n');
 }
 
 function responseStructuredOutput(response: AgentResponse, label: string): unknown {
@@ -667,11 +960,12 @@ async function executeRawTasks(input: {
     let prepared:
       | { phase1Instruction: string; inputBytes: number }
       | undefined;
-    let renderedInputBytes: number | undefined;
+    const renderAttempts: RawTaskRenderAttempt[] = [];
     const candidateLimits = item.rawFindings.length > 1
       ? [CONTEXT_CANDIDATE_LIMITS[0]]
       : CONTEXT_CANDIDATE_LIMITS;
     for (const candidateLimit of candidateLimits) {
+      let renderedInputBytes: number | undefined;
       const context = rawTaskContext(
         input.previousLedger,
         item.rawFindings,
@@ -683,27 +977,49 @@ async function executeRawTasks(input: {
       ) {
         break;
       }
-      const baseInstruction = buildRawTaskInstruction({
-        contract: input.contract,
-        task: item.task,
-        rawFindings: item.rawFindings,
-        context,
-        mechanicallyClassifiedCount: input.mechanicallyClassifiedCount,
-        evidenceRecordsByRawFindingId: input.evidenceRecordsByRawFindingId,
-      });
-      const phase1Instruction = input.runInput.stepExecutor.buildPhase1Instruction(
-        composeFindingManagerInstruction({
-          baseInstruction,
-          policyContents: input.managerStep.policyContents,
-          knowledgeContents: input.managerStep.knowledgeContents,
-        }),
-        input.managerStep,
-      );
-      const inputBytes = Buffer.byteLength(phase1Instruction, 'utf8');
-      renderedInputBytes = inputBytes;
-      if (inputBytes <= MAIN_MANAGER_INPUT_MAX_BYTES) {
-        prepared = { phase1Instruction, inputBytes };
-        break;
+      try {
+        const baseInstruction = buildRawTaskInstruction({
+          contract: input.contract,
+          task: item.task,
+          rawFindings: item.rawFindings,
+          context,
+          mechanicallyClassifiedCount: input.mechanicallyClassifiedCount,
+          evidenceRecordsByRawFindingId: input.evidenceRecordsByRawFindingId,
+        });
+        const phase1Instruction = input.runInput.stepExecutor.buildPhase1Instruction(
+          composeFindingManagerInstruction({
+            baseInstruction,
+            policyContents: input.managerStep.policyContents,
+            knowledgeContents: input.managerStep.knowledgeContents,
+          }),
+          input.managerStep,
+        );
+        const inputBytes = Buffer.byteLength(phase1Instruction, 'utf8');
+        renderedInputBytes = inputBytes;
+        if (inputBytes > FINDING_MANAGER_PROMPT_BUDGETS.totalMaxBytes) {
+          throw new FindingManagerPromptOverflowError(
+            `Finding manager prompt exceeds the prompt budget of ${FINDING_MANAGER_PROMPT_BUDGETS.totalMaxBytes} UTF-8 bytes (${inputBytes})`,
+          );
+        }
+        if (inputBytes <= MAIN_MANAGER_INPUT_MAX_BYTES) {
+          prepared = { phase1Instruction, inputBytes };
+          break;
+        }
+        renderAttempts.push({
+          inputBytes,
+          reason: `Fully rendered manager input exceeds ${MAIN_MANAGER_INPUT_MAX_BYTES} UTF-8 bytes even for one raw finding (${inputBytes})`,
+        });
+      } catch (error) {
+        if (!(error instanceof FindingManagerPromptOverflowError)) {
+          throw error;
+        }
+        const inputBytes = renderedInputBytes ?? null;
+        renderAttempts.push({
+          inputBytes,
+          reason: inputBytes === null
+            ? `${error.message} (input bytes unknown because prompt rendering failed before full input was rendered)`
+            : error.message,
+        });
       }
     }
     if (prepared === undefined) {
@@ -724,16 +1040,20 @@ async function executeRawTasks(input: {
         continue;
       }
       const rawFindingId = item.task.ownedRawFindingIds[0]!;
-      const reason = `Fully rendered manager input exceeds ${MAIN_MANAGER_INPUT_MAX_BYTES} UTF-8 bytes even for one raw finding`;
-      failures.set(rawFindingId, { kind: 'manager-input-overflow', reason });
-      audits.push({
+      const finalAttempt = renderAttempts.at(-1) ?? {
+        inputBytes: null,
+        reason: `Fully rendered manager input exceeds ${MAIN_MANAGER_INPUT_MAX_BYTES} UTF-8 bytes even for one raw finding`,
+      };
+      const overflow = buildRawTaskInputOverflow({
         taskId: item.task.taskId,
-        taskKind: 'raw',
-        ownedIds: [rawFindingId],
-        status: 'input_overflow',
-        inputBytes: renderedInputBytes ?? null,
-        reason,
+        ownedRawFindingIds: [rawFindingId],
+        inputBytes: finalAttempt.inputBytes,
+        reason: finalAttempt.reason,
       });
+      for (const [failedRawFindingId, failure] of overflow.failures) {
+        failures.set(failedRawFindingId, failure);
+      }
+      audits.push(overflow.audit);
       continue;
     }
     try {
@@ -1479,55 +1799,18 @@ function assertFixedPrefixFits(input: {
   managerStep: AgentWorkflowStep;
   stepExecutor: RunFindingManagerForStepInput['stepExecutor'];
 }): void {
-  const emptyTask = createRawTask({
-    ...createEmptyFindingContractRegistries(),
-    workflowName: '__manager-prefix-check__',
-    nextId: 1,
-    updatedAt: '1970-01-01T00:00:00.000Z',
-    findings: [],
-    evidenceRecords: [],
-    evidenceBindings: [],
-    lifecycleReservations: [],
-    lifecycleEvents: [],
-    rawFindings: [],
-    conflicts: [],
-  }, [], new Map(), []);
-  const baseInstruction = buildRawTaskInstruction({
-    contract: input.contract,
-    task: emptyTask.task,
-    rawFindings: [],
-    context: rawTaskContext(
-      {
-        ...createEmptyFindingContractRegistries(),
-        workflowName: '__manager-prefix-check__',
-        nextId: 1,
-        updatedAt: '1970-01-01T00:00:00.000Z',
-        findings: [],
-        evidenceRecords: [],
-        evidenceBindings: [],
-        lifecycleReservations: [],
-        lifecycleEvents: [],
-        rawFindings: [],
-        conflicts: [],
-      },
-      [],
-      0,
-    ),
-    mechanicallyClassifiedCount: 0,
-    evidenceRecordsByRawFindingId: new Map(),
-  });
   const phase1 = input.stepExecutor.buildPhase1Instruction(
     composeFindingManagerInstruction({
-      baseInstruction,
+      baseInstruction: input.contract.manager.instruction,
       policyContents: input.managerStep.policyContents,
       knowledgeContents: input.managerStep.knowledgeContents,
     }),
     input.managerStep,
   );
   const bytes = Buffer.byteLength(phase1, 'utf8');
-  if (bytes > MAIN_MANAGER_INPUT_MAX_BYTES) {
+  if (bytes > FINDING_MANAGER_PROMPT_BUDGETS.fixedPrefixMaxBytes) {
     throw new Error(
-      `Finding manager fixed instruction prefix exceeds ${MAIN_MANAGER_INPUT_MAX_BYTES} UTF-8 bytes (${bytes})`,
+      `Finding manager configuration error: fixed instruction prefix exceeds ${FINDING_MANAGER_PROMPT_BUDGETS.fixedPrefixMaxBytes} UTF-8 bytes (${bytes})`,
     );
   }
 }

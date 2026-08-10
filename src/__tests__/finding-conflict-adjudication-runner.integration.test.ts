@@ -279,11 +279,13 @@ function managerResolutionResponse(
     };
   }
 
-  const match = /## Owned raw findings\n(`{3,})json\n([\s\S]*?)\n\1/.exec(instruction);
-  if (match?.[2] === undefined) {
+  const taskManifest = findingManagerTaskManifest(instruction) as {
+    rawFindings?: Array<{ rawFindingId: string }>;
+  };
+  const rawFindings = taskManifest.rawFindings ?? [];
+  if (rawFindings.length === 0) {
     throw new Error('Test setup error: manager resolution task input is missing');
   }
-  const rawFindings = JSON.parse(match[2]) as Array<{ rawFindingId: string }>;
   return findingManagerTaskResponse(instruction, {
     rawDecisions: rawFindings.map(({ rawFindingId }) => ({
       decision: 'resolved',

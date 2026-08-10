@@ -7,9 +7,12 @@
  * step envelope 違反は reviewer 全体を単一 overflow provisional に置き換える。
  */
 import {
+  isVerbatimExcerptWithinByteLimit,
   RAW_FINDING_FIELD_LIMITS,
   RAW_FINDING_NORMALIZER_LIMITS,
 } from '../../models/finding-contract-limits.js';
+
+type RawFindingFieldMeasurementUnit = 'characters' | 'UTF-8 bytes';
 
 export const RAW_FINDING_LIMITS = {
   /** raw 件数 / reviewer / review invocation */
@@ -183,15 +186,26 @@ export function findRawFieldLimitViolation(fields: {
       continue;
     }
     const record = evidence as Record<string, unknown>;
-    const evidenceChecks: Array<[string, unknown, number]> = record.kind === 'file_quote'
+    const evidenceChecks: Array<[string, unknown, number, RawFindingFieldMeasurementUnit]> = record.kind === 'file_quote'
       ? [
-          [`evidence[${index}].path`, record.path, RAW_FINDING_LIMITS.maxEvidencePathChars],
-          [`evidence[${index}].verbatimExcerpt`, record.verbatimExcerpt, RAW_FINDING_LIMITS.maxVerbatimExcerptChars],
+          [`evidence[${index}].path`, record.path, RAW_FINDING_LIMITS.maxEvidencePathChars, 'characters'],
+          [`evidence[${index}].verbatimExcerpt`, record.verbatimExcerpt, RAW_FINDING_LIMITS.maxVerbatimExcerptBytes, 'UTF-8 bytes'],
         ]
       : [];
-    for (const [name, value, limit] of evidenceChecks) {
-      if (typeof value === 'string' && value.length > limit) {
-        return `${name} is ${value.length} characters, exceeding the limit of ${limit}`;
+    for (const [name, value, limit, unit] of evidenceChecks) {
+      if (typeof value !== 'string') {
+        continue;
+      }
+      const measured = unit === 'UTF-8 bytes'
+        ? Buffer.byteLength(value, 'utf8')
+        : value.length;
+      const withinLimit = unit === 'UTF-8 bytes'
+        ? isVerbatimExcerptWithinByteLimit(value, limit)
+        : measured <= limit;
+      if (!withinLimit) {
+        return unit === 'UTF-8 bytes'
+          ? `${name} is ${measured} UTF-8 bytes, exceeding the limit of ${limit}`
+          : `${name} is ${measured} characters, exceeding the limit of ${limit} characters`;
       }
     }
   }

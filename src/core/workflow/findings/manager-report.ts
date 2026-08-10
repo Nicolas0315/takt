@@ -13,6 +13,7 @@ import type {
   FindingManagerTaskAudit,
   FindingManagerValidationReport,
   InterpretationRecoveryOriginSettlement,
+  FindingRawObservationSettlementSummary,
 } from './types.js';
 
 interface ManagerCommitReportInput {
@@ -32,6 +33,7 @@ interface ManagerCommitReportInput {
   interpretationStats: InterpretationStatsReport;
   interpretationRecoverySettlements: InterpretationRecoveryOriginSettlement[];
   managerTaskAudits: FindingManagerTaskAudit[];
+  settlement: FindingRawObservationSettlementSummary;
 }
 
 export function buildManagerCommitReport(
@@ -48,7 +50,8 @@ export function buildManagerCommitReport(
     || input.clarifications.length > 0
     || input.rawNormalizations.length > 0
     || input.interpretationRecoverySettlements.length > 0
-    || input.managerTaskAudits.length > 0;
+    || input.managerTaskAudits.length > 0
+    || input.settlement !== undefined;
   if (!reportNeeded) {
     return undefined;
   }
@@ -77,6 +80,7 @@ export function buildManagerCommitReport(
     ...(input.managerTaskAudits.length > 0
       ? { managerTaskAudits: input.managerTaskAudits }
       : {}),
+    settlement: input.settlement,
     ...(input.deferredResolutionRejections.length > 0
       ? { deferredResolutionRejections: input.deferredResolutionRejections }
       : {}),

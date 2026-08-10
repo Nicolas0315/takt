@@ -4,6 +4,8 @@ import { compareRfc3339Timestamps, normalizeRfc3339Timestamp } from './rfc3339.j
 import { collectFindingLedgerProjectionInvariantViolations } from './finding-ledger-invariants.js';
 import { computeInterpretationBatchId } from './finding-interpretation-identity.js';
 import {
+  FINDING_EVIDENCE_ISSUANCE_LIMITS,
+  isVerbatimExcerptWithinByteLimit,
   RAW_FINDING_FIELD_LIMITS,
   RAW_FINDING_NORMALIZER_LIMITS,
 } from './finding-contract-limits.js';
@@ -440,7 +442,15 @@ export const FileQuoteEvidenceSchema = z.object({
   path: nonEmptyString.max(RAW_FINDING_FIELD_LIMITS.maxEvidencePathChars),
   startLine: z.number().int().positive(),
   endLine: z.number().int().positive(),
-  verbatimExcerpt: nonEmptyString.max(RAW_FINDING_FIELD_LIMITS.maxVerbatimExcerptChars),
+  verbatimExcerpt: nonEmptyString
+    .max(RAW_FINDING_FIELD_LIMITS.maxVerbatimExcerptChars)
+    .refine(
+      (value) => isVerbatimExcerptWithinByteLimit(
+        value,
+        FINDING_EVIDENCE_ISSUANCE_LIMITS.maxFileQuoteBytes,
+      ),
+      `verbatimExcerpt must be at most ${FINDING_EVIDENCE_ISSUANCE_LIMITS.maxFileQuoteBytes} UTF-8 bytes`,
+    ),
   snapshotId: Sha256Schema.max(RAW_FINDING_FIELD_LIMITS.maxSnapshotIdChars),
 }).strict();
 
@@ -2261,6 +2271,31 @@ const InterpretationStatsReportSchema = z.object({
   budgetExhaustedLineages: z.number().int().nonnegative(),
 }).strict();
 
+const FindingRawObservationSettlementSchema = z.object({
+  rawFindingIds: z.array(rawFindingIdString).min(1),
+  destination: z.object({
+    kind: z.enum([
+      'finding',
+      'conflict',
+      'rejected-observation',
+      'reviewer-anomaly',
+    ]),
+    id: nonEmptyString,
+  }).strict(),
+}).strict();
+
+const FindingRawObservationFailureSchema = z.object({
+  rawFindingId: rawFindingIdString,
+  phase: nonEmptyString,
+  reason: nonEmptyString,
+}).strict();
+
+const FindingRawObservationSettlementSummarySchema = z.object({
+  expectedRawFindingIds: z.array(rawFindingIdString),
+  settlements: z.array(FindingRawObservationSettlementSchema),
+  failures: z.array(FindingRawObservationFailureSchema),
+}).strict();
+
 const FindingManagerValidationReportSchema = z.object({
   version: z.literal(1),
   runId: nonEmptyString,
@@ -2322,6 +2357,7 @@ const FindingManagerValidationReportSchema = z.object({
       reason: nonEmptyString,
     }).strict(),
   ])).optional(),
+  settlement: FindingRawObservationSettlementSummarySchema.optional(),
 }).strict();
 
 const FindingManagerCommitProjectionSchema = z.object({
