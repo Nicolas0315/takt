@@ -74,6 +74,7 @@ import type { TraceReportMode } from './traceReport.js';
 import { sanitizeTextForStorage } from './traceReportRedaction.js';
 import type { WorkflowExecutionOptions } from './types.js';
 import { resolveCompiledProviderEnvironment } from '../../../infra/config/runtime-provider/provider-environment.js';
+import type { CompiledProviderEnvironment } from '../../../infra/config/runtime-provider/environment.js';
 import {
   collectLegacyProviderSignals,
   collectStepPromotionEntries,
@@ -162,6 +163,15 @@ class AutoRoutingReachTracker {
   hasReached(): boolean {
     return this.reached;
   }
+}
+
+function resolveExecutionCompanionProviders(
+  workflow: WorkflowConfig,
+  environment: CompiledProviderEnvironment,
+  options: Parameters<typeof resolveWorkflowCompanions>[2],
+): Record<string, ProviderRoutingEntry> {
+  if (environment.providerConfigMode !== 'runtime-v1') return {};
+  return Object.fromEntries(resolveWorkflowCompanions(workflow, environment, options));
 }
 
 function resolveMaxStepsForRestoredIteration(
@@ -590,12 +600,14 @@ export async function createWorkflowExecutionBootstrap(
     maxSteps: effectiveMaxSteps,
   };
   inheritWorkflowConfigMetadata(workflowConfig, effectiveWorkflowConfig);
-  const companionProviders = Object.fromEntries(
-    resolveWorkflowCompanions(effectiveWorkflowConfig, providerEnvironment, {
+  const companionProviders = resolveExecutionCompanionProviders(
+    effectiveWorkflowConfig,
+    providerEnvironment,
+    {
       projectCwd,
       lookupCwd: cwd,
       workflowCallResolver: options.workflowCallResolver,
-    }),
+    },
   );
   validateWorkflowCallContracts(effectiveWorkflowConfig, projectCwd, cwd, {
     providerValidationOptions: {

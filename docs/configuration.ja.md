@@ -591,6 +591,14 @@ steps:
 
 runtime モードはファイルの存在ではなく、有効な `provider` セクションの有無で有効化されます。`version: 1` だけのファイルは inactive で、従来の `config.yaml` による provider 解決がそのまま使われます。
 
+Companion の扱いは entry point ごとの契約に従います。legacy の `config.yaml` provider 設定しか
+利用できない状態で workflow が Companion を参照しても、実行時は fail-soft です。TAKT は
+legacy provider を Companion の代替には使わず、主 step を継続しながら Companion の完了状態に
+`completionFailure` を記録します。同じ設定で preview と doctor は strict の fail-fast を維持します。
+有効な runtime-v1 セクションが選ばれた場合は、CLI または環境変数による provider/model override
+の後も、実行・preview・doctor のすべてが `runtime.yaml` で Companion の target、isolated execution
+対応、structured output 対応を検証します。
+
 ### 設定例
 
 ```yaml
@@ -1203,7 +1211,7 @@ logging:
 
 ## Companion の provider target
 
-Companion には有効な `runtime.yaml` の provider section が必要です。参照する companion ごとに `provider.targets.companions` で割り当て、名前が未指定の場合は `provider.defaults` を使います。companion target は固定 profile のみ指定でき、pool と ladder は `runtime.yaml` の読み込み時に拒否されます。legacy `config.yaml` の provider 設定へはフォールバックせず、`companion` を使う workflow では移行案内付きで拒否します。
+Companion の strict 検証には有効な `runtime.yaml` の provider section が必要です。参照する companion ごとに `provider.targets.companions` で割り当て、名前が未指定の場合は `provider.defaults` を使います。companion target は固定 profile のみ指定でき、pool と ladder は `runtime.yaml` の読み込み時に拒否されます。legacy `config.yaml` の provider 設定へはフォールバックしません。workflow 実行では Companion の完了失敗を fail-soft に記録して主 step を継続し、preview と doctor では移行案内付きで拒否します。
 
 ```yaml
 version: 1

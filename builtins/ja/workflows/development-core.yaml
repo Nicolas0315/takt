@@ -103,21 +103,14 @@ steps:
         next: ABORT
 
   - name: replan
-    tags: [plan]
-    edit: false
-    capabilities: readonly
-    persona: planner
-    policy:
-      - contract-change
-      - $param: plan_policy
-    knowledge:
-      $param: plan_knowledge
-    instruction:
-      $param: replan_instruction
-    output_contracts:
-      report:
-        - name: plan.md
-          format: plan
+    uses: development-core-replan
+    with:
+      plan_policy:
+        $param: plan_policy
+      plan_knowledge:
+        $param: plan_knowledge
+      replan_instruction:
+        $param: replan_instruction
     rules:
       - condition: プロジェクト内で実行可能な未試行の変更または原因調査と、その検証手順を具体化した
         next: implement

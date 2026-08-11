@@ -62,6 +62,7 @@ function compiledEnvironment(
   overrides: Partial<CompiledProviderEnvironment> = {},
 ): CompiledProviderEnvironment {
   return {
+    providerConfigMode: 'legacy',
     provider: undefined,
     providerSource: 'default',
     model: undefined,

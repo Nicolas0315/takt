@@ -226,7 +226,10 @@ function collectReviewerSteps(
 ): ReviewerStepReference[] {
   const reviewRoot = findWorkflowStep(workflow, workflow.initialStep);
   if (reviewRoot.parallel === undefined) {
-    throw new Error(`Review workflow "${workflow.name}" has no parallel reviewers`);
+    if (typeof reviewRoot.persona !== 'string') {
+      throw new Error(`Review workflow "${workflow.name}" has no reviewer persona`);
+    }
+    return [{ workflow, step: reviewRoot, persona: reviewRoot.persona }];
   }
 
   return getAllParallelSubSteps(reviewRoot.parallel).flatMap((step) => {
@@ -353,12 +356,12 @@ function rejectedCompanionFinding(): ScenarioEntry[] {
   ];
 }
 
-describe('experimental builtin workflow', () => {
+describe('default development builtin workflow', () => {
   let projectDir: string;
   let engines: WorkflowEngine[];
 
   beforeEach(() => {
-    projectDir = mkdtempSync(join(tmpdir(), 'takt-experimental-workflow-'));
+    projectDir = mkdtempSync(join(tmpdir(), 'takt-default-workflow-'));
     engines = [];
     vi.clearAllMocks();
     invalidateGlobalConfigCache();
@@ -375,59 +378,14 @@ describe('experimental builtin workflow', () => {
     invalidateAllResolvedConfigCache();
   });
 
-  it.each(['en', 'ja'] as const)(
-    'should load the %s dynamic review wrappers through their consuming reviewer suites',
-    (language) => {
-      writeFileSync(join(projectDir, '.takt', 'config.yaml'), `language: ${language}\n`);
-      invalidateAllResolvedConfigCache();
-      for (const workflowName of ['experimental', 'takt-experimental']) {
-        const wrapper = loadWorkflowFromFile(
-          join(getBuiltinWorkflowsDir(language), `${workflowName}.yaml`),
-          projectDir,
-        );
-        const core = loadCoreForWrapper(language, wrapper, projectDir);
-        const peerReview = loadPeerReviewForCore(language, core, projectDir);
-        const reviewerSuite = loadReviewerSuiteForPeerReview(language, peerReview, projectDir);
-        const securityReview = findWorkflowStep(reviewerSuite, 'security-review');
-        const poolName = securityReview.dynamicFacets?.pool;
-        if (poolName === undefined) {
-          throw new Error(`Security reviewer in "${reviewerSuite.name}" has no dynamic facet pool`);
-        }
-        const candidates = reviewerSuite.facetPools?.[poolName]?.candidates.map((candidate) => ({
-          id: candidate.id,
-          knowledgeRefs: candidate.knowledgeRefs,
-        }));
-        expect(candidates).toEqual(workflowName === 'experimental'
-          ? [
-              { id: 'web', knowledgeRefs: ['security-web', 'security-api'] },
-              { id: 'cli', knowledgeRefs: ['security-local'] },
-            ]
-          : [
-              { id: 'cli', knowledgeRefs: ['security-local'] },
-            ]);
-      }
-    },
-  );
-
-  it('should reject an unknown security review pool at the consuming reviewer-suite boundary', () => {
-    writeFileSync(join(projectDir, '.takt', 'config.yaml'), 'language: en\n');
-    invalidateAllResolvedConfigCache();
-
-    expect(() => loadWorkflowFromFile(
-      join(getBuiltinWorkflowsDir('en'), 'experimental-review.yaml'),
-      projectDir,
-      { callableArgs: { security_review_pool: 'missing-security-review-pool' } },
-    )).toThrow('references unknown facet pool "missing-security-review-pool"');
-  });
-
   it(
-    'should run adjudication, verified remediation, follow-up review, and the final gate for takt-experimental',
+    'should run adjudication, verified remediation, follow-up review, and the final gate for takt-default',
     async () => {
       const language = 'en';
       writeFileSync(join(projectDir, '.takt', 'config.yaml'), `language: ${language}\n`);
       invalidateAllResolvedConfigCache();
       const workflow = loadWorkflowFromFile(
-        join(getBuiltinWorkflowsDir(language), 'takt-experimental.yaml'),
+        join(getBuiltinWorkflowsDir(language), 'takt-default.yaml'),
         projectDir,
       );
       const core = loadCoreForWrapper(language, workflow, projectDir);
@@ -521,7 +479,7 @@ describe('experimental builtin workflow', () => {
       writeFileSync(join(projectDir, '.takt', 'config.yaml'), `language: ${language}\n`);
       invalidateAllResolvedConfigCache();
       const workflow = loadWorkflowFromFile(
-        join(getBuiltinWorkflowsDir(language), 'experimental.yaml'),
+        join(getBuiltinWorkflowsDir(language), 'default.yaml'),
         projectDir,
       );
       const core = loadCoreForWrapper(language, workflow, projectDir);
@@ -595,27 +553,28 @@ describe('experimental builtin workflow', () => {
   );
 
   it(
-    'should keep the default workflow fixed while rerunning reviewers after verified remediation',
+    'should run simple-mini through one coding reviewer and shared peer-review remediation without companions',
     async () => {
       const language = 'en';
       writeFileSync(join(projectDir, '.takt', 'config.yaml'), `language: ${language}\n`);
       invalidateAllResolvedConfigCache();
       const workflow = loadWorkflowFromFile(
-        join(getBuiltinWorkflowsDir(language), 'default.yaml'),
+        join(getBuiltinWorkflowsDir(language), 'simple-mini.yaml'),
         projectDir,
       );
-      const core = loadCoreForWrapper(language, workflow, projectDir);
+      const core = workflow;
       const implementation = loadImplementationForCore(language, core, projectDir);
       const peerReview = loadPeerReviewForCore(language, core, projectDir);
       const remediation = loadRemediationForPeerReview(language, peerReview, projectDir);
       const reviewerSuite = loadReviewerSuiteForPeerReview(language, peerReview, projectDir);
       const reviewerSteps = collectReviewerSteps(language, reviewerSuite, projectDir);
+      expect(reviewerSteps).toHaveLength(1);
+      expect(reviewerSteps[0]?.persona).toBe('coding-reviewer');
       const reviewResponses = (verdict: 'approved' | 'needs_fix'): ScenarioEntry[] =>
         reviewerSteps.map(({ workflow: reviewerWorkflow, step, persona }) =>
           response(reviewerWorkflow, step.name, persona, verdict));
       setMockScenario([
-        responseForNext(core, 'plan', 'write_tests'),
-        responseForNext(core, 'write_tests', 'implement'),
+        responseForNext(core, 'plan', 'implement'),
         responseForNext(implementation, 'implement', 'COMPLETE'),
         ...reviewResponses('needs_fix'),
         responseForNext(peerReview, 'review-adjudication', 'remediation'),
@@ -626,7 +585,7 @@ describe('experimental builtin workflow', () => {
         responseForNext(peerReview, 'review-adjudication', 'final-gate'),
         responseForNext(peerReview, 'final-gate', 'COMPLETE'),
       ]);
-      const engine = new WorkflowEngine(workflow, projectDir, 'Implement and review a standard workflow change', {
+      const engine = new WorkflowEngine(workflow, projectDir, 'Implement and review a simple workflow change', {
         projectCwd: projectDir,
         provider: 'mock',
         selectorProvider: SELECTOR_PROVIDER,
@@ -654,13 +613,13 @@ describe('experimental builtin workflow', () => {
   );
 
   it(
-    'should abort the Japanese experimental wrapper when the final gate is blocked by the environment',
+    'should abort the Japanese default wrapper when the final gate is blocked by the environment',
     async () => {
       const language = 'ja';
       writeFileSync(join(projectDir, '.takt', 'config.yaml'), `language: ${language}\n`);
       invalidateAllResolvedConfigCache();
       const wrapper = loadWorkflowFromFile(
-        join(getBuiltinWorkflowsDir(language), 'experimental.yaml'),
+        join(getBuiltinWorkflowsDir(language), 'default.yaml'),
         projectDir,
       );
       const core = loadCoreForWrapper(language, wrapper, projectDir);

@@ -36,6 +36,7 @@ import type {
 import type { StepProviderOptions } from '../../../core/models/workflow-types.js';
 import type { ProviderResolutionSource } from '../../../core/workflow/provider-options-trace.js';
 import { normalizeProviderOptions } from '../providerOptions.js';
+import type { ProviderConfigMode } from './mode.js';
 import { validateRuntimeProviderSection, flattenProfiles, type FlatProfile } from './policy.js';
 import type {
   RuntimeCompanionProviderAssignment,
@@ -51,6 +52,8 @@ export type InternalAgentEnvironment = InternalAgentSeats;
 
 /** Format-agnostic provider engine-options bundle consumed by the engine. */
 export interface CompiledProviderEnvironment {
+  /** Configuration format selected before provider/model overrides are applied. */
+  providerConfigMode: ProviderConfigMode;
   provider: ProviderType | undefined;
   providerSource: ProviderResolutionSource;
   model: string | undefined;
@@ -126,6 +129,7 @@ export function compileLegacyProviderEnvironment(
   legacy: LegacyProviderEnvironmentInput,
 ): CompiledProviderEnvironment {
   return {
+    providerConfigMode: 'legacy',
     provider: legacy.provider,
     providerSource: legacy.providerSource,
     model: legacy.model,
@@ -167,6 +171,7 @@ export function compileRuntimeProviderEnvironment(
   const providerLadders = buildProviderLadders(section, flatProfiles);
 
   return {
+    providerConfigMode: 'runtime-v1',
     provider: defaults?.provider,
     providerSource: 'runtime-v1',
     model: defaults?.model,

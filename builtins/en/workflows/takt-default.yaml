@@ -1,5 +1,5 @@
 name: takt-default
-description: TAKT development workflow that injects TAKT-specific facets into the shared development flow.
+description: TAKT development workflow that injects TAKT-specific facets and dynamic implementation companions into the shared development flow.
 max_steps: 51
 initial_step: develop
 steps:
@@ -7,12 +7,21 @@ steps:
     kind: workflow_call
     call: development-core
     args:
+      implementation_pool: takt-coding-facets
       plan_policy: [design-planning]
-      plan_knowledge: [takt, architecture]
+      plan_knowledge: [takt, architecture, task-decomposition]
+      implementation_workflow: development-implement-dynamic
+      remediation_workflow: development-remediation-dynamic
+      implementation_companions:
+        fixed: [ai-antipattern-review-companion]
+        pool: []
+        moderator: ai-antipattern-review-moderator
+      reviewer_suite: takt-default-development-review-adapter
+      review_policy_additions: [takt-testing]
       testing_policy: [coding, testing, takt-testing]
       testing_knowledge: [takt, architecture, unit-testing, e2e-testing]
       development_policy: [coding, testing, takt-testing, ai-antipattern]
-      development_knowledge: [takt, architecture, task-decomposition, implementation-semantics]
+      development_knowledge: [takt, architecture, implementation-semantics]
       implementation_instruction: implement
       review_policy: [coding, testing, takt-testing, review]
       review_knowledge: [takt, architecture, unit-testing, e2e-testing]

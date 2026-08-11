@@ -8,9 +8,9 @@ TAKT に同梱されているすべてのビルトイン workflow と persona �
 
 | Workflow | 推奨用途 |
 |----------|-----------------|
-| `simple` | 強いモデルの判断力を信頼するシンプルな開発 workflow です。モデル自身が関連 SKILL を選び、計画 → テスト作成 → 実装 → コードレビュー → 修正ループ → 最終監督 → 完了。 |
-| `simple-mini` | 強いモデルの判断力を信頼する軽量版です。独立したテスト作成と最終監督を省き、計画 → 実装 → コードレビュー → 修正ループ → 完了。 |
-| `default` | 共通開発フローを標準ファセットで実行するテスト先行開発ワークフロー。 |
+| `simple` | 強いモデルの判断力を信頼するシンプルな開発 workflow です。関連 SKILL を選び、計画 → テスト作成 → 実装 → ピアレビュー裁定 → 検証付き修正 → follow-up review → 共有 final gate → 完了。 |
+| `simple-mini` | 独立した `write_tests` を省き、ピアレビュー裁定・検証付き修正・follow-up review・共有 final gate へ委譲する軽量版です。 |
+| `default` | 動的ファセット実装に AI アンチパターン Companion と Moderator、動的レビュー選択、共有の裁定・収束修正・follow-up review・final gate を組み合わせる workflow。 |
 | `default-mini` | 標準ファセットを共通Mini開発フローへ注入する、テスト作成ステップなしの軽量ワークフロー。 |
 | `default-high` | 共通開発コアを直接実装で使い、専門ピアレビュー、収束修正、follow-up review、最終監督まで行うフルスペック workflow です。 |
 | `frontend` | フロントエンド特化開発 workflow。React/Next.js に焦点を当てたレビューとナレッジ注入付き。 |
@@ -23,8 +23,8 @@ TAKT に同梱されているすべてのビルトイン workflow と persona �
 
 | カテゴリ | Workflow | 説明 |
 |---------|----------|-------------|
-| 🚀 クイックスタート | `simple` | 強いモデルの判断力を信頼するシンプルな開発 workflow。モデル自身が関連 SKILL を選び、計画 → テスト作成 → 実装 → コードレビュー → 修正ループ → 最終監督 → 完了。 |
-| | `default` | 共通開発フローを標準ファセットで実行するテスト先行開発ワークフロー。 |
+| 🚀 クイックスタート | `simple` | 強いモデルの判断力を信頼するシンプルな開発 workflow。関連 SKILL を選び、計画 → テスト作成 → 実装 → ピアレビュー裁定 → 検証付き修正 → follow-up review → 共有 final gate → 完了。 |
+| | `default` | 動的ファセット実装に AI アンチパターン Companion と Moderator、動的レビュー選択、共有の裁定・収束修正・follow-up review・final gate を組み合わせる workflow。 |
 | | `default-mini` | 標準ファセットを共通Mini開発フローへ注入する、テスト作成ステップなしの軽量ワークフロー。 |
 | | `default-high` | 共通開発コアを直接実装で使い、専門ピアレビュー、収束修正、follow-up review、最終監督まで行うフルスペック workflow です。 |
 | | `cli` | CLI開発向けファセットを共通開発フローへ注入するワークフロー。 |
@@ -32,32 +32,32 @@ TAKT に同梱されているすべてのビルトイン workflow と persona �
 | | `backend` | バックエンド向けファセットを共通開発フローへ注入するワークフロー。 |
 | | `dual` | フロントエンドとバックエンドのファセットを共通開発フローへ注入するワークフロー。 |
 | ✨ Simple | `simple` | 強いモデルの判断力を信頼する汎用版。モデル自身が関連 SKILL を選び、最小限の構成で開発を進める。 |
-| | `simple-mini` | 強いモデルの判断力を信頼し、独立したテスト作成と最終監督を省いた軽量版。 |
+| | `simple-mini` | 独立した `write_tests` を省き、ピアレビュー裁定・検証付き修正・follow-up review・共有 final gate へ委譲する軽量版。 |
 | | `simple-frontend` | 強いモデル向けの簡潔なフロントエンド版。frontend、React、security、architecture、testing のナレッジとポリシーを注入する。 |
 | | `simple-backend` | 強いモデル向けの簡潔なバックエンド版。backend、security、architecture、testing のナレッジとポリシーを注入する。 |
 | | `simple-dual` | 強いモデル向けの簡潔なデュアル版。frontend、React、backend、security、architecture、testing のナレッジとポリシーを注入する。 |
 | | `simple-cqrs` | 強いモデル向けの簡潔な CQRS+ES 版。backend、CQRS+ES、security、architecture、testing のナレッジとポリシーを注入する。 |
 | | `simple-dual-cqrs` | 強いモデル向けの簡潔なデュアル CQRS+ES 版。frontend、React、backend、CQRS+ES、security、architecture、testing のナレッジとポリシーを注入する。 |
-| ⚡ Mini | `simple-mini` | 強いモデルの判断力を信頼する軽量版。独立したテスト作成と最終監督を省き、計画 → 実装 → コードレビュー → 修正ループ → 完了。 |
+| ⚡ Mini | `simple-mini` | 独立した `write_tests` を省き、ピアレビュー裁定・検証付き修正・follow-up review・共有 final gate へ委譲する軽量版。 |
 | | `default-mini` | 標準ファセットを共通Mini開発フローへ注入する、テスト作成ステップなしの軽量ワークフロー。 |
 | | `frontend-mini` | フロントエンド向けMini開発ワークフロー（plan → implement → 並列レビュー → 修正 → 完了）。 |
 | | `backend-mini` | バックエンド向けMini開発ワークフロー（plan → implement → 並列レビュー → 修正 → 完了）。 |
 | | `backend-cqrs-mini` | CQRS+ES向けMini開発ワークフロー（plan → implement → 並列レビュー → 修正 → 完了）。 |
 | | `dual-mini` | フロントエンド＋バックエンド向けMini開発ワークフロー（plan → implement → 並列レビュー → 修正 → 完了）。フロントエンド＋バックエンドのナレッジ注入付き。 |
 | | `dual-cqrs-mini` | CQRS+ES フロントエンド＋バックエンド向けMini開発ワークフロー（plan → implement → 並列レビュー → 修正 → 完了）。CQRS+ESナレッジ注入付き。 |
-| 🎨 フロントエンド | `simple-frontend` | 強いモデル向け。`simple-core` にフロントエンド向けナレッジとポリシーを注入するシンプル版。 |
+| 🎨 フロントエンド | `simple-frontend` | 強いモデル向け。共有開発コアにフロントエンド向けナレッジとポリシーを注入するシンプル版。 |
 | | `frontend` | フロントエンド特化開発 workflow。React/Next.js に焦点を当てたレビューとナレッジ注入付き。 |
 | | `frontend-mini` | フロントエンド向けMini開発ワークフロー（plan → implement → 並列レビュー → 修正 → 完了）。 |
 | | `frontend-maintenance` | （実験的）既存プロダクト改修向けのフロントエンド workflow。現行の規約を尊重し変更をスコープ内に収める、保守スコープの plan/implement/test/fix/supervise。現状はやや過剰に動くことがあるため、出発点として使い調整する。 |
-| ⚙️ バックエンド | `simple-backend` | 強いモデル向け。`simple-core` にバックエンド向けナレッジとポリシーを注入するシンプル版。 |
-| | `simple-cqrs` | 強いモデル向け。`simple-core` にバックエンドと CQRS+ES のナレッジとポリシーを注入するシンプル版。 |
+| ⚙️ バックエンド | `simple-backend` | 強いモデル向け。共有開発コアにバックエンド向けナレッジとポリシーを注入するシンプル版。 |
+| | `simple-cqrs` | 強いモデル向け。共有開発コアにバックエンドと CQRS+ES のナレッジとポリシーを注入するシンプル版。 |
 | | `backend` | バックエンド向けファセットを共通開発フローへ注入するワークフロー。 |
 | | `backend-mini` | バックエンド向けMini開発ワークフロー（plan → implement → 並列レビュー → 修正 → 完了）。 |
 | | `backend-maintenance` | バックエンド本番保守向け厳密 workflow。専門ピアレビュー、収束修正、follow-up review、最終監督を行う。 |
 | | `backend-cqrs` | CQRS+ES 特化バックエンド開発 workflow。CQRS+ES 知識を注入した専門ピアレビューと収束修正付き。 |
 | | `backend-cqrs-mini` | CQRS+ES向けMini開発ワークフロー（plan → implement → 並列レビュー → 修正 → 完了）。 |
-| 🔧 デュアル | `simple-dual` | 強いモデル向け。`simple-core` にフロントエンドとバックエンドのナレッジとポリシーを注入するシンプル版。 |
-| | `simple-dual-cqrs` | 強いモデル向け。`simple-core` にフロントエンド、バックエンド、CQRS+ES のナレッジとポリシーを注入するシンプル版。 |
+| 🔧 デュアル | `simple-dual` | 強いモデル向け。共有開発コアにフロントエンドとバックエンドのナレッジとポリシーを注入するシンプル版。 |
+| | `simple-dual-cqrs` | 強いモデル向け。共有開発コアにフロントエンド、バックエンド、CQRS+ES のナレッジとポリシーを注入するシンプル版。 |
 | | `dual` | フロントエンドとバックエンドのファセットを共通開発フローへ注入するワークフロー。 |
 | | `dual-mini` | フロントエンド＋バックエンド向けMini開発ワークフロー（plan → implement → 並列レビュー → 修正 → 完了）。フロントエンド＋バックエンドのナレッジ注入付き。 |
 | | `dual-cqrs` | フロントエンド＋バックエンド開発 workflow (CQRS+ES 特化)。CQRS+ES、frontend、security、testing レビューと収束修正付き。 |
@@ -84,8 +84,7 @@ TAKT に同梱されているすべてのビルトイン workflow と persona �
 | | `audit-architecture-frontend` | フロントエンド特化アーキテクチャ監査。UI モジュールと境界を列挙。 |
 | | `audit-architecture-backend` | バックエンド特化アーキテクチャ監査。サービスモジュールと境界を列挙。 |
 | | `audit-architecture-dual` | フルスタックアーキテクチャ監査。フロントエンド/バックエンドの境界とクロスレイヤー配線を列挙。 |
-| 🎵 TAKT開発 | `takt-default` | 計画、テスト、実装、レビュー、修正へ TAKT 固有知識を注入して共通開発コアを実行する workflow です。 |
-| | `takt-experimental` | 共通開発コアの裁定・修正検証・follow-up review・マージ準備判定へ、TAKT固有 reviewer と実装 companion を追加する実験的 TAKT 開発 workflow です。 |
+| 🎵 TAKT開発 | `takt-default` | TAKT 固有の動的ファセット実装、AI アンチパターン Companion と Moderator、TAKT レビュー候補、共有の裁定・収束修正・follow-up review・final gate を使う workflow です。 |
 | | `auto-improvement-loop` | PR・Issue・新規改善を巡回しながら次の task を積み続ける orchestration loop workflow。 |
 | | `review-takt-default` | TAKT開発向け多角レビュー（AIアンチパターン・コーディングレビュー含む5観点レビュー）。 |
 | | `review-fix-takt-default` | レビュー対象を収集してから、TAKT固有ファセットを共通開発フローへ注入するワークフロー。 |

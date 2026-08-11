@@ -1,14 +1,25 @@
 name: simple-frontend
-description: A simple development workflow that trusts a capable model's judgment and injects frontend knowledge and policies into simple-core.
+description: A development workflow for capable models that injects frontend knowledge and policies into the shared development core.
 max_steps: 30
 initial_step: develop
 steps:
   - name: develop
     kind: workflow_call
-    call: simple-core
+    call: development-core
     args:
+      reviewer_suite: peer-review-suite-simple
+      review_policy_additions: [testing, design-fidelity]
+      plan_instruction: simple-plan
+      replan_instruction: replan-implementation
+      testing_instruction: simple-write-tests-first
+      implementation_instruction: simple-implement-after-tests
       plan_policy:
         - design-planning
+      plan_knowledge:
+        - frontend
+        - react
+        - security
+        - architecture
       testing_policy:
         - coding
         - testing

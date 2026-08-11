@@ -121,7 +121,7 @@ Optional per-run SQLite ledger (`finding-contract.sqlite`) that makes review fin
 - Manager/adjudicator prompt wire formats (structured output schemas, allowed actions, evidence requirements) are **engine-owned**; facets add judgment guidance only.
 - Reviewer relation clarification (`clarifyAmbiguousRawRelationsOnce`) only ever ran on the structured-reviewer path and is unreachable under the one-path model; its `relationClarification` plumbing and the ledger's `clarificationAttempted` field are still present and need their own removal decision.
 
-Workflows: `takt-default`, `takt-experimental`, and `review-fix-takt-default` use the shared development core. Finding Contract fix/plan/monitor instructions treat the engine-injected live ledger state as the single source of truth, and report files are not authoritative there.
+Workflows: `takt-default` and `review-fix-takt-default` use the shared development core. Finding Contract fix/plan/monitor instructions treat the engine-injected live ledger state as the single source of truth, and report files are not authoritative there.
 
 ### Config & workflow loading
 

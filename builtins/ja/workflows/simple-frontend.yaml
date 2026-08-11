@@ -1,14 +1,25 @@
 name: simple-frontend
-description: 強いモデルの判断力を信頼し、simple-core にフロントエンド向けナレッジとポリシーを注入するシンプルな開発ワークフロー。
+description: 強いモデルの判断力を信頼し、共有開発コアへフロントエンド向けナレッジとポリシーを注入する開発ワークフロー。
 max_steps: 30
 initial_step: develop
 steps:
   - name: develop
     kind: workflow_call
-    call: simple-core
+    call: development-core
     args:
+      reviewer_suite: peer-review-suite-simple
+      review_policy_additions: [testing, design-fidelity]
+      plan_instruction: simple-plan
+      replan_instruction: replan-implementation
+      testing_instruction: simple-write-tests-first
+      implementation_instruction: simple-implement-after-tests
       plan_policy:
         - design-planning
+      plan_knowledge:
+        - frontend
+        - react
+        - security
+        - architecture
       testing_policy:
         - coding
         - testing

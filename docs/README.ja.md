@@ -241,7 +241,7 @@ steps:
 
 繰り返し使う step 定義は `.takt/steps/` に置き、workflow から `uses` で参照できます。探索順と上書き規則は [Workflow Guide](./workflows.ja.md) を参照してください。
 
-`experimental` / `takt-experimental` wrapper は、汎用または TAKT 固有の外部 security-review facet pool を束縛する reviewer-suite adapter をトップで選びます。pool 参照は実際に消費する suite だけへ渡され、共有の development / peer-review workflow 契約は変更しません。`dynamic_facets` は通常の agent step と `parallel` の agent sub-step の両方で使え、dynamic parallel では participant selector の後に選択された子だけが facet selector を実行します。各子の固定 facet は維持され、`max_selected` まで pool 候補が追加され、空選択なら追加されません。対象の facet selector をすべて完了してから parallel の子を起動し、1件でも不正な選択があれば同じ parallel 親配下の子は起動しません。プロセスの resume では participant selector と facet selector を現在の pool に対して再実行します。
+`default` / `takt-default` workflow は、汎用または TAKT 固有の外部 security-review facet pool を束縛する reviewer-suite adapter を選びます。pool 参照は実際に消費する suite だけへ渡され、共有の development / peer-review workflow 契約は変更しません。`dynamic_facets` は通常の agent step と `parallel` の agent sub-step の両方で使え、dynamic parallel では participant selector の後に選択された子だけが facet selector を実行します。各子の固定 facet は維持され、`max_selected` まで pool 候補が追加され、空選択なら追加されません。対象の facet selector をすべて完了してから parallel の子を起動し、1件でも不正な選択があれば同じ parallel 親配下の子は起動しません。プロセスの resume では participant selector と facet selector を現在の pool に対して再実行します。
 
 workflow ファイルの正式ディレクトリ名は `workflows/` です。
 
@@ -251,11 +251,11 @@ workflow ファイルの正式ディレクトリ名は `workflows/` です。
 
 | Workflow | 用途 |
 |-------|------|
-| `default` | 標準の開発 workflow。テスト先行＋多観点並列ピアレビュー（アーキテクチャ / AI アンチパターン / コーディング / セマンティクス / 契約ライフサイクル / 堅牢性）＋裁定＋収束型 fix ループの構成。 |
+| `default` | AI アンチパターン Companion と Moderator、動的ピアレビュー、裁定、収束型修正、follow-up review、共有 final gate を使う既定の動的ファセット開発 workflow。 |
 | `frontend` | フロントエンド開発向けの workflow。 |
 | `backend` | バックエンド開発向けの workflow。 |
 | `dual` | フロントエンド＋バックエンドを同時に進める workflow。 |
-| `takt-default` | TAKT 自体の開発で実際に使われている workflow。CLI ツールの開発にそのまま活用できます。 |
+| `takt-default` | TAKT 自体の開発で実際に使われている workflow。TAKT 固有の動的ファセット、AI アンチパターン Companion と Moderator、裁定、収束型修正、follow-up review、共有 final gate を使い、CLI ツールの開発にも活用できます。 |
 | `frontend-maintenance` | フロントエンド本番保守向け。ループモニター付き厳密マルチフェーズレビュー。 |
 | `backend-maintenance` | バックエンド本番保守向け。デュアルスーパーバイザー最終承認付き厳密マルチフェーズレビュー。 |
 | `*-mini` シリーズ | 各 workflow の軽量版（`default-mini` / `frontend-mini` / `backend-mini` / `dual-mini`）。`write_tests` を省いた構成。 |

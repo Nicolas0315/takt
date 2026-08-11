@@ -1,5 +1,5 @@
-name: experimental-review-adapter
-description: experimental ラッパーが選択した汎用セキュリティレビュー用 facet pool をレビュースイートへ束縛する。
+name: takt-default-development-review-adapter
+description: takt-default ラッパーが選択した TAKT 固有セキュリティレビュー用 facet pool をレビュースイートへ束縛する。
 subworkflow:
   callable: true
   visibility: internal
@@ -17,9 +17,9 @@ initial_step: review
 steps:
   - name: review
     kind: workflow_call
-    call: experimental-review
+    call: takt-default-development-review
     args:
-      security_review_pool: security-review-facets
+      security_review_pool: takt-security-review-facets
       review_policy_additions:
         $param: review_policy_additions
       review_knowledge_additions:

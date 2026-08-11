@@ -1,0 +1,41 @@
+name: peer-review-suite-simple
+description: 関連スキルを選択する単一の coding reviewer を使う軽量な内部レビュースイート。
+subworkflow:
+  callable: true
+  visibility: internal
+  returns:
+    - needs_fix
+  params:
+    review_policy_additions:
+      type: facet_ref[]
+      facet_kind: policy
+      default: []
+    review_knowledge_additions:
+      type: facet_ref[]
+      facet_kind: knowledge
+      default: [architecture, unit-testing, e2e-testing]
+initial_step: reviewers
+steps:
+  - name: reviewers
+    tags: [review]
+    capabilities: [readonly, enable-skills]
+    edit: false
+    persona: coding-reviewer
+    policy:
+      - contract-change
+      - review
+      - coding
+      - $param: review_policy_additions
+    knowledge:
+      $param: review_knowledge_additions
+    pass_previous_response: false
+    instruction: simple-review-coding
+    output_contracts:
+      report:
+        - name: coding-review.md
+          format: coding-review
+    rules:
+      - condition: approved
+        next: COMPLETE
+      - condition: needs_fix
+        return: needs_fix

@@ -601,6 +601,15 @@ steps:
 
 Runtime mode is enabled by the presence of an active `provider` section, not by the file existing. A file that only contains `version: 1` is inactive and leaves the legacy `config.yaml` provider resolution in place.
 
+Companion handling follows the entry point's contract. During workflow execution, a Companion
+referenced while only legacy `config.yaml` provider settings are available is fail-soft: TAKT does
+not use the legacy provider as a Companion fallback, and the main step continues while the
+Companion completion state records `completionFailure`. Preview and doctor remain strict and
+fail-fast for the same configuration. When an active runtime-v1 section is selected, including
+after a CLI or environment provider/model override, execution, preview, and doctor all validate
+the Companion target, isolated execution support, and structured-output support through
+`runtime.yaml`.
+
 ### Configuration example
 
 ```yaml
@@ -1214,7 +1223,7 @@ This also enables the internal verbose console mode used by the CLI. `logging.le
 
 ## Companion provider targets
 
-Companions require an active `runtime.yaml` provider section. Assign each referenced companion through `provider.targets.companions`; an omitted name uses `provider.defaults`. Companion targets must name a fixed profile; pool and ladder assignments are rejected while parsing `runtime.yaml`. Legacy `config.yaml` provider settings are not a fallback and are rejected with migration guidance when a workflow uses `companion`.
+Companions require an active `runtime.yaml` provider section for strict validation. Assign each referenced companion through `provider.targets.companions`; an omitted name uses `provider.defaults`. Companion targets must name a fixed profile; pool and ladder assignments are rejected while parsing `runtime.yaml`. Legacy `config.yaml` provider settings are not a fallback: workflow execution records a fail-soft Companion completion failure and continues the main step, while preview and doctor reject the configuration with migration guidance.
 
 ```yaml
 version: 1

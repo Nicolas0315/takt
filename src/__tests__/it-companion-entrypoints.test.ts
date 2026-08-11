@@ -17,6 +17,10 @@ interface FixtureOptions {
   readonly assignment: 'target' | 'defaults' | 'legacy';
   readonly provider?: 'mock' | 'cursor';
   readonly includeCompanion?: boolean;
+  readonly providerOverride?: {
+    readonly source: 'env' | 'cli';
+    readonly provider: 'mock' | 'cursor';
+  };
 }
 
 interface CompanionEntrypointFixture {
@@ -25,6 +29,7 @@ interface CompanionEntrypointFixture {
   readonly configDir: string;
   readonly workflowPath: string;
   readonly scenarioPath: string;
+  readonly providerOverride?: FixtureOptions['providerOverride'];
 }
 
 function createFixture(options: FixtureOptions): CompanionEntrypointFixture {
@@ -103,7 +108,14 @@ function createFixture(options: FixtureOptions): CompanionEntrypointFixture {
   execFileSync('git', ['config', 'user.email', 'takt@example.invalid'], { cwd: projectDir });
   execFileSync('git', ['add', '.'], { cwd: projectDir });
   execFileSync('git', ['commit', '--quiet', '-m', 'fixture'], { cwd: projectDir });
-  return { root, projectDir, configDir, workflowPath, scenarioPath };
+  return {
+    root,
+    projectDir,
+    configDir,
+    workflowPath,
+    scenarioPath,
+    providerOverride: options.providerOverride,
+  };
 }
 
 function runEntrypoint(
@@ -118,14 +130,23 @@ function runEntrypoint(
         'Validate the companion entrypoint fixture',
         '--workflow',
         fixture.workflowPath,
+        ...(fixture.providerOverride?.source === 'cli'
+          ? ['--provider', fixture.providerOverride.provider]
+          : []),
       ]
     : ['--script', ENTRYPOINT_RUNNER];
+  const environment = {
+    ...process.env,
+    ...(fixture.providerOverride?.source === 'env'
+      ? { TAKT_PROVIDER: fixture.providerOverride.provider }
+      : {}),
+  };
   return new Promise((resolveResult, reject) => {
     const child = spawn(VITE_NODE, args, {
       cwd: PROJECT_ROOT,
       timeout: 45_000,
       env: {
-        ...process.env,
+        ...environment,
         TAKT_CONFIG_DIR: fixture.configDir,
         TAKT_MOCK_SCENARIO: fixture.scenarioPath,
         TAKT_TEST_WORKFLOW_CWD: fixture.projectDir,
@@ -158,36 +179,130 @@ describe('companion runtime, preview, and doctor entrypoint parity', () => {
   const cases: readonly {
     readonly name: string;
     readonly options: FixtureOptions;
-    readonly succeeds: boolean;
-    readonly errorPattern?: RegExp;
+    readonly expectations: Readonly<Record<typeof ENTRYPOINTS[number], {
+      readonly succeeds: boolean;
+      readonly errorPattern?: RegExp;
+    }>>;
   }[] = [
     {
       name: 'accepts an explicit companion target',
       options: { assignment: 'target' },
-      succeeds: true,
+      expectations: {
+        runtime: { succeeds: true },
+        preview: { succeeds: true },
+        doctor: { succeeds: true },
+      },
     },
     {
       name: 'accepts provider defaults when the target is omitted',
       options: { assignment: 'defaults' },
-      succeeds: true,
+      expectations: {
+        runtime: { succeeds: true },
+        preview: { succeeds: true },
+        doctor: { succeeds: true },
+      },
     },
     {
-      name: 'rejects legacy provider configuration',
+      name: 'keeps legacy Companion configuration fail-soft only during runtime execution',
       options: { assignment: 'legacy' },
-      succeeds: false,
-      errorPattern: /require runtime\.yaml|migrate provider configuration/,
+      expectations: {
+        runtime: { succeeds: true },
+        preview: {
+          succeeds: false,
+          errorPattern: /require runtime\.yaml|migrate provider configuration/,
+        },
+        doctor: {
+          succeeds: false,
+          errorPattern: /require runtime\.yaml|migrate provider configuration/,
+        },
+      },
+    },
+    {
+      name: 'keeps a valid environment provider override on the runtime-v1 path',
+      options: {
+        assignment: 'defaults',
+        providerOverride: { source: 'env', provider: 'mock' },
+      },
+      expectations: {
+        runtime: { succeeds: true },
+        preview: { succeeds: true },
+        doctor: { succeeds: true },
+      },
+    },
+    {
+      name: 'rejects an unsupported environment provider override on every strict entrypoint',
+      options: {
+        assignment: 'defaults',
+        providerOverride: { source: 'env', provider: 'cursor' },
+      },
+      expectations: {
+        runtime: {
+          succeeds: false,
+          errorPattern: /does not support companion strict isolated execution/,
+        },
+        preview: {
+          succeeds: false,
+          errorPattern: /does not support companion strict isolated execution/,
+        },
+        doctor: {
+          succeeds: false,
+          errorPattern: /does not support companion strict isolated execution/,
+        },
+      },
+    },
+    {
+      name: 'keeps a valid CLI provider override strict on runtime execution',
+      options: {
+        assignment: 'defaults',
+        providerOverride: { source: 'cli', provider: 'mock' },
+      },
+      expectations: {
+        runtime: { succeeds: true },
+        preview: { succeeds: true },
+        doctor: { succeeds: true },
+      },
+    },
+    {
+      name: 'rejects an unsupported CLI provider override only during runtime execution',
+      options: {
+        assignment: 'defaults',
+        providerOverride: { source: 'cli', provider: 'cursor' },
+      },
+      expectations: {
+        runtime: {
+          succeeds: false,
+          errorPattern: /does not support companion strict isolated execution/,
+        },
+        preview: { succeeds: true },
+        doctor: { succeeds: true },
+      },
     },
     {
       name: 'rejects a provider without companion isolation support',
       options: { assignment: 'target', provider: 'cursor' },
-      succeeds: false,
-      errorPattern: /does not support companion strict isolated execution/,
+      expectations: {
+        runtime: {
+          succeeds: false,
+          errorPattern: /does not support companion strict isolated execution/,
+        },
+        preview: {
+          succeeds: false,
+          errorPattern: /does not support companion strict isolated execution/,
+        },
+        doctor: {
+          succeeds: false,
+          errorPattern: /does not support companion strict isolated execution/,
+        },
+      },
     },
     {
       name: 'rejects an undefined companion',
       options: { assignment: 'target', includeCompanion: false },
-      succeeds: false,
-      errorPattern: /Undefined companion/,
+      expectations: {
+        runtime: { succeeds: false, errorPattern: /Undefined companion/ },
+        preview: { succeeds: false, errorPattern: /Undefined companion/ },
+        doctor: { succeeds: false, errorPattern: /Undefined companion/ },
+      },
     },
   ];
 
@@ -201,11 +316,12 @@ describe('companion runtime, preview, and doctor entrypoint parity', () => {
       })));
 
       for (const result of results) {
-        if (testCase.succeeds) {
+        const expectation = testCase.expectations[result.entrypoint];
+        if (expectation.succeeds) {
           expect(result.status, `${result.entrypoint}: ${result.output}`).toBe(0);
         } else {
           expect(result.status, `${result.entrypoint}: ${result.output}`).not.toBe(0);
-          expect(result.output, result.entrypoint).toMatch(testCase.errorPattern!);
+          expect(result.output, result.entrypoint).toMatch(expectation.errorPattern!);
         }
       }
     }, 60_000);

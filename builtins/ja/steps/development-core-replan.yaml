@@ -1,0 +1,26 @@
+params:
+  plan_policy:
+    type: facet_ref[]
+    facet_kind: policy
+  plan_knowledge:
+    type: facet_ref[]
+    facet_kind: knowledge
+  replan_instruction:
+    type: facet_ref
+    facet_kind: instruction
+name: replan
+tags: [plan]
+edit: false
+capabilities: readonly
+persona: planner
+policy:
+  - contract-change
+  - $param: plan_policy
+knowledge:
+  $param: plan_knowledge
+instruction:
+  $param: replan_instruction
+output_contracts:
+  report:
+    - name: plan.md
+      format: plan

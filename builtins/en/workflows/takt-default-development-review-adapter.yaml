@@ -1,5 +1,5 @@
-name: takt-experimental-review-adapter
-description: Bind the TAKT-specific security review facet pool selected by the takt-experimental wrapper to its reviewer suite.
+name: takt-default-development-review-adapter
+description: Bind the TAKT-specific security review facet pool selected by the takt-default wrapper to its reviewer suite.
 subworkflow:
   callable: true
   visibility: internal
@@ -17,7 +17,7 @@ initial_step: review
 steps:
   - name: review
     kind: workflow_call
-    call: takt-experimental-review
+    call: takt-default-development-review
     args:
       security_review_pool: takt-security-review-facets
       review_policy_additions:

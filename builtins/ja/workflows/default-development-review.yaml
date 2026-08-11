@@ -1,5 +1,5 @@
-name: experimental-review
-description: Common review execution for the experimental workflow, returning a review result with injected context.
+name: default-development-review
+description: 既定の動的レビュー実行部。レビュー知識とポリシーを注入して結果を返す。
 subworkflow:
   callable: true
   visibility: internal
@@ -22,7 +22,7 @@ facet_pools:
 initial_step: review
 steps:
   - name: review
-    uses: experimental-review
+    uses: default-development-review
     with:
       review_policy_additions:
         $param: review_policy_additions

@@ -1,5 +1,5 @@
-name: experimental-review-adapter
-description: Bind the generic security review facet pool selected by the experimental wrapper to its reviewer suite.
+name: default-development-review-adapter
+description: default 開発 workflow が選択した汎用セキュリティレビュー用 facet pool をレビュースイートへ束縛する。
 subworkflow:
   callable: true
   visibility: internal
@@ -17,7 +17,7 @@ initial_step: review
 steps:
   - name: review
     kind: workflow_call
-    call: experimental-review
+    call: default-development-review
     args:
       security_review_pool: security-review-facets
       review_policy_additions:

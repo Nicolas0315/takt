@@ -118,7 +118,7 @@ export function resolveWorkflowCompanions(
     0,
   );
   if (names.length === 0) return new Map();
-  if (environment.providerSource !== 'runtime-v1') {
+  if (environment.providerConfigMode !== 'runtime-v1') {
     throw new Error('Companion reviewers require runtime.yaml; migrate provider configuration from config.yaml');
   }
   const defaults = defaultResolution(environment);

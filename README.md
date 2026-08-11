@@ -238,7 +238,7 @@ Rules determine the next step. `COMPLETE` ends the workflow successfully, `ABORT
 
 Reusable step definitions can be stored in `.takt/steps/` and expanded with `uses` before validation. See the Workflow Guide for fragment lookup and override rules.
 
-The `experimental` and `takt-experimental` wrappers select reviewer-suite adapters that bind the generic or TAKT-specific external security-review facet pool only at the suite that consumes it. Shared development and peer-review workflow contracts remain unchanged. `dynamic_facets` works on normal agent steps and `parallel` agent sub-steps: dynamic parallel participants are selected first, each selected child keeps its fixed facets and receives up to `max_selected` pool candidates, and an empty selection adds nothing. All applicable facet selectors complete before any parallel child starts; if one selection is invalid, no child under that parallel parent starts. A process resume re-runs participant and facet selectors against their current pools.
+The `default` and `takt-default` workflows select reviewer-suite adapters that bind the generic or TAKT-specific external security-review facet pool only at the suite that consumes it. Shared development and peer-review workflow contracts remain unchanged. `dynamic_facets` works on normal agent steps and `parallel` agent sub-steps: dynamic parallel participants are selected first, each selected child keeps its fixed facets and receives up to `max_selected` pool candidates, and an empty selection adds nothing. All applicable facet selectors complete before any parallel child starts; if one selection is invalid, no child under that parallel parent starts. A process resume re-runs participant and facet selectors against their current pools.
 
 Workflow files live in `workflows/` as the official directory name.
 
@@ -248,11 +248,11 @@ When the same workflow name exists in multiple locations, TAKT resolves in this 
 
 | Workflow | Use Case |
 |-------|----------|
-| `default` | Standard development workflow. Test-first with multi-perspective parallel peer review (architecture, AI antipattern, coding, semantics, contract lifecycle, robustness), adjudication, and a convergent fix loop. |
+| `default` | Default dynamic-facet development workflow with the AI-antipattern Companion and Moderator, dynamic peer review, adjudication, convergent remediation, follow-up review, and a shared final gate. |
 | `frontend` | Frontend development workflow. |
 | `backend` | Backend development workflow. |
 | `dual` | Combined frontend + backend workflow. |
-| `takt-default` | The workflow used to develop TAKT itself. Directly applicable to other CLI tool development. |
+| `takt-default` | The workflow used to develop TAKT itself, with TAKT-specific dynamic facets, the AI-antipattern Companion and Moderator, adjudication, convergent remediation, follow-up review, and a shared final gate. |
 | `frontend-maintenance` | Frontend production maintenance. Strict multi-phase review with loop monitors. |
 | `backend-maintenance` | Backend production maintenance. Strict multi-phase review with dual-supervisor sign-off. |
 | `*-mini` series | Lightweight variants of each workflow (`default-mini` / `frontend-mini` / `backend-mini` / `dual-mini`). Omits `write_tests`. |

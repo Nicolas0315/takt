@@ -3,7 +3,6 @@ workflow_categories:
     workflows:
       - simple
       - default
-      - experimental
       - default-mini
       - default-high
       - cli
@@ -80,7 +79,6 @@ workflow_categories:
   🎵 TAKT Development:
     workflows:
       - takt-default
-      - takt-experimental
       - auto-improvement-loop
       - review-takt-default
       - review-fix-takt-default

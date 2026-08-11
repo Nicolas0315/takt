@@ -1,5 +1,5 @@
-name: takt-experimental-review
-description: TAKT-specific review execution with TAKT context and reviewer candidates only.
+name: takt-default-development-review
+description: TAKT固有のレビュー文脈と候補だけを注入する既定レビュー実行部。
 subworkflow:
   callable: true
   visibility: internal
@@ -22,7 +22,7 @@ facet_pools:
 initial_step: review
 steps:
   - name: review
-    uses: experimental-review
+    uses: default-development-review
     with:
       review_policy_additions:
         $param: review_policy_additions
@@ -33,7 +33,7 @@ steps:
     parallel:
       pool:
         - name: architecture-review
-          description: Review module structure, responsibility boundaries, dependency direction, and call paths.
+          description: モジュール構造、責務分割、依存方向、呼び出し経路をレビューする
           capabilities: readonly
           tags: [review]
           edit: false
@@ -47,7 +47,7 @@ steps:
               - name: architecture-review.md
                 format: architecture-review
         - name: security-review
-          description: Review concrete security boundaries introduced by TAKT changes.
+          description: TAKTの変更で生じる具体的なセキュリティ境界をレビューする
           capabilities: readonly
           tags: [review]
           edit: false
@@ -65,7 +65,7 @@ steps:
               - name: security-review.md
                 format: security-review
         - name: testing-review
-          description: Review test coverage, test design, integration boundaries, and E2E boundaries.
+          description: テストカバレッジ、テスト設計、統合境界、E2E境界をレビューする
           capabilities: readonly
           tags: [review]
           edit: false
