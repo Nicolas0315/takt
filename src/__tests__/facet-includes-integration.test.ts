@@ -285,5 +285,4 @@ describe('facet include expansion', () => {
     expect(resolvedSecurityReview).toContain(common);
     expect(resolvedSecurityReview?.split(common)).toHaveLength(2);
   });
-
 });

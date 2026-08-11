@@ -178,7 +178,7 @@ function loadRemediationForPeerReview(
   );
 }
 
-function loadReviewerSuiteForPeerReview(
+function loadReviewerAdapterForPeerReview(
   language: 'en' | 'ja',
   peerReview: WorkflowConfig,
   projectDir: string,
@@ -193,6 +193,23 @@ function loadReviewerSuiteForPeerReview(
     join(getBuiltinWorkflowsDir(language), `${reviewers.call}.yaml`),
     projectDir,
     { callableArgs: reviewers.args },
+  );
+}
+
+function loadReviewerSuiteForPeerReview(
+  language: 'en' | 'ja',
+  peerReview: WorkflowConfig,
+  projectDir: string,
+): WorkflowConfig {
+  const adapter = loadReviewerAdapterForPeerReview(language, peerReview, projectDir);
+  const reviewCall = findWorkflowStep(adapter, adapter.initialStep);
+  if (reviewCall.kind !== 'workflow_call' || typeof reviewCall.call !== 'string') {
+    return adapter;
+  }
+  return loadWorkflowFromFile(
+    join(getBuiltinWorkflowsDir(language), `${reviewCall.call}.yaml`),
+    projectDir,
+    { callableArgs: reviewCall.args },
   );
 }
 
@@ -358,6 +375,51 @@ describe('experimental builtin workflow', () => {
     invalidateAllResolvedConfigCache();
   });
 
+  it.each(['en', 'ja'] as const)(
+    'should load the %s dynamic review wrappers through their consuming reviewer suites',
+    (language) => {
+      writeFileSync(join(projectDir, '.takt', 'config.yaml'), `language: ${language}\n`);
+      invalidateAllResolvedConfigCache();
+      for (const workflowName of ['experimental', 'takt-experimental']) {
+        const wrapper = loadWorkflowFromFile(
+          join(getBuiltinWorkflowsDir(language), `${workflowName}.yaml`),
+          projectDir,
+        );
+        const core = loadCoreForWrapper(language, wrapper, projectDir);
+        const peerReview = loadPeerReviewForCore(language, core, projectDir);
+        const reviewerSuite = loadReviewerSuiteForPeerReview(language, peerReview, projectDir);
+        const securityReview = findWorkflowStep(reviewerSuite, 'security-review');
+        const poolName = securityReview.dynamicFacets?.pool;
+        if (poolName === undefined) {
+          throw new Error(`Security reviewer in "${reviewerSuite.name}" has no dynamic facet pool`);
+        }
+        const candidates = reviewerSuite.facetPools?.[poolName]?.candidates.map((candidate) => ({
+          id: candidate.id,
+          knowledgeRefs: candidate.knowledgeRefs,
+        }));
+        expect(candidates).toEqual(workflowName === 'experimental'
+          ? [
+              { id: 'web', knowledgeRefs: ['security-web', 'security-api'] },
+              { id: 'cli', knowledgeRefs: ['security-local'] },
+            ]
+          : [
+              { id: 'cli', knowledgeRefs: ['security-local'] },
+            ]);
+      }
+    },
+  );
+
+  it('should reject an unknown security review pool at the consuming reviewer-suite boundary', () => {
+    writeFileSync(join(projectDir, '.takt', 'config.yaml'), 'language: en\n');
+    invalidateAllResolvedConfigCache();
+
+    expect(() => loadWorkflowFromFile(
+      join(getBuiltinWorkflowsDir('en'), 'experimental-review.yaml'),
+      projectDir,
+      { callableArgs: { security_review_pool: 'missing-security-review-pool' } },
+    )).toThrow('references unknown facet pool "missing-security-review-pool"');
+  });
+
   it(
     'should run adjudication, verified remediation, follow-up review, and the final gate for takt-experimental',
     async () => {
@@ -394,6 +456,7 @@ describe('experimental builtin workflow', () => {
         ...rejectedCompanionFinding(),
         responseForNext(remediation, 'fix-verifier', 'COMPLETE'),
         selection(['security-review'], 'The second review round covers security changes.'),
+        selection(['cli'], 'The TAKT local execution security knowledge matches the changed surface.'),
         response(reviewerSuite, 'coding-review', 'coding-reviewer', 'approved'),
         response(reviewerSuite, 'ai-antipattern-review', 'ai-antipattern-reviewer', 'approved'),
         response(reviewerSuite, 'security-review', 'security-reviewer', 'approved'),
@@ -410,7 +473,7 @@ describe('experimental builtin workflow', () => {
         responseForNext(peerReview, 'review-adjudication', 'final-gate'),
         responseForNext(peerReview, 'final-gate', 'COMPLETE'),
       ]);
-      const engine = new WorkflowEngine(workflow, projectDir, 'Implement and review a frontend security change', {
+      const engine = new WorkflowEngine(workflow, projectDir, 'Implement and review a TAKT local execution security change', {
         projectCwd: projectDir,
         provider: 'mock',
         selectorProvider: SELECTOR_PROVIDER,

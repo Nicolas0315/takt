@@ -388,7 +388,7 @@ claim を失う等）で、既存の訂正1回でも直らないときは、TAKT
 
 ### Dynamic Facet Selection（facet pool）
 
-通常の agent step は、main agent の起動直前に、検証済み候補 pool から追加の `policy` / `knowledge` facet を動的に選択できます。step が既に宣言している固定 facet は維持したまま、現在の状況が必要とする facet だけを追加します。例えば、レビューで transaction 境界の懸念が指摘された後にだけ transaction-correctness policy を選ぶ、といった運用が可能です。
+通常の agent step と `parallel` 配下の agent sub-step は、main agent の起動直前に、検証済み候補 pool から追加の `policy` / `knowledge` facet を動的に選択できます。step が既に宣言している固定 facet は維持したまま、現在の状況が必要とする facet だけを追加します。例えば、レビューで transaction 境界の懸念が指摘された後にだけ transaction-correctness policy を選ぶ、といった運用が可能です。
 
 pool はトップレベルの `facet_pools` map に定義し、step から `dynamic_facets` で参照します。pool は workflow 内に inline で定義するか、外部 resource ファイルとして定義できます。
 
@@ -439,6 +439,45 @@ steps:
       - condition: 修正が完了した
         next: review
 ```
+
+#### parallel sub-step
+
+`dynamic_facets` は静的 `parallel` の子、および dynamic parallel の `fixed` / `pool` entry にも指定できます。dynamic parallel では participant selector を先に実行し、選ばれた子に対してだけ facet selector を実行します。静的 parallel では、dynamic facet を持つ各子が独立した facet selector を実行します。
+
+```yaml
+facet_pools:
+  security-review:
+    candidates:
+      - id: web
+        description: HTTP と browser のセキュリティ境界をレビューする
+        knowledge: [security-web, security-api]
+      - id: cli
+        description: CLI とローカルプロセスの境界をレビューする
+        knowledge: security-local
+
+steps:
+  - name: reviewers
+    parallel:
+      pool:
+        - name: security-review
+          description: 選択されたシステムのセキュリティをレビューする
+          persona: security-reviewer
+          knowledge: security
+          dynamic_facets:
+            pool: security-review
+            max_selected: 1
+          instruction: review-security
+          rules: [{ condition: approved }]
+      selection:
+        mode: replace
+    rules:
+      - condition: all("approved")
+        next: COMPLETE
+```
+
+選択した knowledge / policy は子の固定 facet に追加されます。空選択なら固定 facet は変わりません。対象の facet selector をすべて完了してから parallel の子を起動します。未知の pool 参照、candidate ID、`max_selected` 超過が1件でもあれば、その子と同じ parallel 親配下の sibling を起動せず workflow を停止します。中断のない同一 run では、parallel 親の frame と occurrence によって子ごとの選択を分離します。プロセスの resume は空の run-local 選択状態から始まり、participant selector と子の facet selector を再実行します。
+
+callable workflow をネストする場合、pool の選択責任は所有者であるトップレベル workflow に置きます。共有 workflow が任意の `workflow_ref` を受け取る場合、すべての呼び出し先へ pool 引数を追加してはいけません。未宣言の callable 引数は拒否されるためです。代わりに、トップレベル workflow が専用 adapter を選び、その adapter が実際に消費する suite を呼ぶときだけ `facet_pool_ref` を束縛します。消費側 suite が受理する外部 pool を宣言するため、無関係な callable 契約を広げず、未知参照はその境界のロード時に拒否されます。
 
 #### external pool
 
@@ -596,7 +635,7 @@ MVP では実行途中の facet hot swap を行いません。必要領域が変
 - 外部 resource の探索、trust、file validation 違反
 - `dynamic_facets.pool` が未知
 - 指定した `max_selected` が不正または候補数を超える
-- 通常 agent step 以外への `dynamic_facets` 指定
+- agent 以外の step または parallel 親への `dynamic_facets` 指定
 
 selector 実行時に次のいずれかが成立すると main agent 起動前に失敗します。
 
