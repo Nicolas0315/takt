@@ -11,7 +11,6 @@ export const parallelIntegrationTestGlobs = Object.freeze([
 // real child processes, or real Git boundaries.
 const legacyParallelIntegrationTestFiles = Object.freeze([
   'src/__tests__/acp-entrypoint.test.ts',
-  'src/__tests__/builtin-review-remediation-transitions.test.ts',
   'src/__tests__/dependency-versions.test.ts',
   'src/__tests__/e2e-helpers.test.ts',
   'src/__tests__/engine-abort.test.ts',
@@ -84,7 +83,6 @@ export const auditedIntegrationBoundaryTestFiles = Object.freeze([
   'src/__tests__/addTask.test.ts',
   'src/__tests__/assistantConfig.test.ts',
   'src/__tests__/assistantInitFiles.test.ts',
-  'src/__tests__/builtin-implementation-judgment-input.test.ts',
   'src/__tests__/catalog.test.ts',
   'src/__tests__/claude-terminal-client.test.ts',
   'src/__tests__/codex-isolated-structured.test.ts',
@@ -111,12 +109,10 @@ export const auditedIntegrationBoundaryTestFiles = Object.freeze([
   'src/__tests__/globalConfig.test.ts',
   'src/__tests__/imageAttachments.test.ts',
   'src/__tests__/instructMode.test.ts',
-  'src/__tests__/instruction-facet-fc-specialization-builtins.test.ts',
   'src/__tests__/interactive-mode.test.ts',
   'src/__tests__/interactive.test.ts',
   'src/__tests__/it-report-inheritance-task-resume.test.ts',
   'src/__tests__/kiro-config.test.ts',
-  'src/__tests__/local-llm-boundary-reviews.test.ts',
   'src/__tests__/mock-call-log.test.ts',
   'src/__tests__/opencode-client-cleanup.test.ts',
   'src/__tests__/opencode-client-compaction.test.ts',
@@ -156,7 +152,6 @@ export const auditedIntegrationBoundaryTestFiles = Object.freeze([
   'src/__tests__/sessionState.test.ts',
   'src/__tests__/summarize-non-workflow-provider.test.ts',
   'src/__tests__/system-workflow-schema.test.ts',
-  'src/__tests__/takt-default-fc-compatibility-baseline.test.ts',
   'src/__tests__/taskForceFailActions.test.ts',
   'src/__tests__/team-leader-finding-contract-recovery.test.ts',
   'src/__tests__/team-leader-finding-contract.test.ts',
@@ -204,7 +199,6 @@ export const fileSystemIntegrationTestFiles = Object.freeze([
   'src/__tests__/architecture-boundary.test.ts',
   'src/__tests__/arpeggio-csv.test.ts',
   'src/__tests__/builtin-workflow-categories-path.test.ts',
-  'src/__tests__/builtins-capabilities-migration.test.ts',
   'src/__tests__/builtins-facets-deployment.test.ts',
   'src/__tests__/claude-headless-client.test.ts',
   'src/__tests__/claude-mcp-config.test.ts',
@@ -338,7 +332,6 @@ export const publicContractIntegrationTestFiles = Object.freeze([
 export const lightContractIntegrationTestFiles = Object.freeze([
   'src/__tests__/analytics-workflowExecution.test.ts',
   'src/__tests__/finding-contract-flow.test.ts',
-  'src/__tests__/finding-ledger-routing-builtins.test.ts',
   'src/__tests__/finding-plan-normalization.test.ts',
   'src/__tests__/node-runtime-contract.test.ts',
   'src/__tests__/sigint-interrupt.test.ts',
@@ -402,7 +395,6 @@ export const parallelIntegrationTestFiles = Object.freeze([
 export const serialGitTestFiles = Object.freeze([
   'src/__tests__/companion-diff-runtime.integration.test.ts',
   // 2026-08-09: ラウンド9で遷移表→実 WorkflowEngine シナリオへ置換した結果、Git fixture+SQLite I/O の重量級になった(#1264 shard 飽和の主因)。
-  'src/__tests__/takt-default-fc-builtins.test.ts',
   // 2026-08-09: heavy 並列スライスで birpc onTaskUpdate 期限超過が CI 2コアランナーで2連続再現(#1264)。SQLite+fsync 負荷の実測干渉のため serial へ。
   'src/__tests__/workflowExecution-finding-storage.integration.test.ts',
   'src/__tests__/finding-conflict-adjudication-engine.integration.test.ts',
@@ -427,7 +419,6 @@ export const serialWorkflowTestFiles = Object.freeze([
   'src/__tests__/codex-isolated-executor.test.ts',
   'src/__tests__/finding-review-integrity-gate.test.ts',
   'src/__tests__/team-leader-finding-contract-runner.test.ts',
-  'src/__tests__/workflow-step-fragment-builtin-runtime.test.ts',
   'src/__tests__/workflow-step-fragment-runtime.test.ts',
   'src/__tests__/workflowExecution-claude-terminal.test.ts',
 ]);
