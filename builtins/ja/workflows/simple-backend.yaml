@@ -9,10 +9,6 @@ steps:
     args:
       reviewer_suite: peer-review-suite-simple
       review_policy_additions: [testing]
-      plan_instruction: simple-plan
-      replan_instruction: replan-implementation
-      testing_instruction: simple-write-tests-first
-      implementation_instruction: simple-implement-after-tests
       plan_policy:
         - design-planning
       plan_knowledge:

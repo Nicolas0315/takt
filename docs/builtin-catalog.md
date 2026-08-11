@@ -13,7 +13,7 @@ A comprehensive catalog of all builtin workflows and personas included with TAKT
 | `default` | Dynamic-facet implementation workflow with the AI-antipattern Companion and Moderator, dynamic review selection, and the shared adjudication, convergent remediation, follow-up review, and final-gate flow. |
 | `default-mini` | Lightweight workflow without a test-writing step that injects standard facets into the shared mini development flow. |
 | `default-high` | Full-spec workflow using the shared development core with direct implementation, specialist peer review, convergent remediation, follow-up review, and final supervision. |
-| `frontend` | Frontend-specialized development workflow with React/Next.js focused reviews and knowledge injection. |
+| `frontend` | Frontend-specialized development workflow with React/Next.js-focused reviews and knowledge injection. |
 | `backend` | Backend workflow that injects domain facets into the shared development flow. |
 | `dual` | Dual frontend/backend workflow that injects domain facets into the shared development flow. |
 
@@ -28,7 +28,7 @@ Organized by category.
 | | `default-mini` | Lightweight workflow without a test-writing step that injects standard facets into the shared mini development flow. |
 | | `default-high` | Full-spec workflow using the shared development core with direct implementation, specialist peer review, convergent remediation, follow-up review, and final supervision. |
 | | `cli` | CLI development workflow that injects CLI-oriented facets into the shared development flow. |
-| | `frontend` | Frontend-specialized development workflow with React/Next.js focused reviews and knowledge injection. |
+| | `frontend` | Frontend-specialized development workflow with React/Next.js-focused reviews and knowledge injection. |
 | | `backend` | Backend workflow that injects domain facets into the shared development flow. |
 | | `dual` | Dual frontend/backend workflow that injects domain facets into the shared development flow. |
 | ✨ Simple | `simple` | A general workflow that trusts a capable model's judgment. The model selects relevant available skills and develops with minimal orchestration. |
@@ -46,9 +46,9 @@ Organized by category.
 | | `dual-mini` | Frontend + backend mini development workflow (plan → implement → parallel review → fix if needed → complete) with frontend + backend knowledge injection. |
 | | `dual-cqrs-mini` | CQRS+ES frontend + backend mini development workflow (plan → implement → parallel review → fix if needed → complete) with CQRS+ES knowledge injection. |
 | 🎨 Frontend | `simple-frontend` | For capable models. A simple variant that injects frontend knowledge and policies into the shared development core. |
-| | `frontend` | Frontend-specialized development workflow with React/Next.js focused reviews and knowledge injection. |
+| | `frontend` | Frontend-specialized development workflow with React/Next.js-focused reviews and knowledge injection. |
 | | `frontend-mini` | Frontend-focused mini development workflow (plan → implement → parallel review → fix if needed → complete). |
-| | `frontend-maintenance` | (Experimental) Frontend workflow for modifying existing products: maintenance-scoped plan/implement/test/fix/supervise that respects current conventions and keeps changes within scope. Can be heavy-handed today — use as a starting point and tune. |
+| | `frontend-maintenance` | (Experimental) Frontend workflow for modifying existing products: maintenance-scoped plan/implement/test/fix/supervise that respects current conventions and keeps changes within scope. This workflow can be heavy-handed today — use as a starting point and tune. |
 | ⚙️ Backend | `simple-backend` | For capable models. A simple variant that injects backend knowledge and policies into the shared development core. |
 | | `simple-cqrs` | For capable models. A simple variant that injects backend and CQRS+ES knowledge and policies into the shared development core. |
 | | `backend` | Backend workflow that injects domain facets into the shared development flow. |
