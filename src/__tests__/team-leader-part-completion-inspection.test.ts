@@ -234,6 +234,7 @@ describe('sessionless part completion inspection', () => {
     'cursor',
     'copilot',
     'kiro',
+    'pi',
   ] as const)('fails fast for provider %s without path-scoped inspection capability', (provider) => {
     expect(() => buildSessionlessPartCompletionInspectionOptions(
       '/workspace',

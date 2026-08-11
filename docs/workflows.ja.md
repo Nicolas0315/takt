@@ -945,7 +945,13 @@ promotion は並列サブ step ではサポートされません。
 | `provider_options.copilot.effort` | - | Copilot の provider 固有 reasoning effort 文字列。TAKT は値を provider へそのまま渡す |
 | `provider_options.claude.sandbox.allow_unsandboxed_commands` | - | Claude の Bash を macOS Seatbelt サンドボックス外で実行（[configuration ガイド](./configuration.ja.md#claude-code-の-sandbox-制御-allow_unsandboxed_commands) 参照） |
 | `provider_options.kiro.agent` | - | Kiro CLI の custom agent 名。`kiro-cli chat --agent` として渡される。未指定の step は Kiro CLI 側の default agent を使用 |
-| `provider` | - | この step の provider を上書き (`claude`, `claude-sdk`, `claude-terminal`, `codex`, `opencode`, `cursor`, `copilot`, `kiro`, `mock`) |
+| `provider_options.pi.extensions` | - | Pi SDK の extension/package source（`path`、`npm:...`、`git:...`）。call ごとに一時解決 |
+| `provider_options.pi.no_extensions` | - | Pi の extension 探索を無効化。明示した `extensions` source は読み込む |
+| `provider_options.pi.no_skills` | - | Pi の Skill 探索を無効化 |
+| `provider_options.pi.no_prompt_templates` | - | Pi の prompt template 探索を無効化 |
+| `provider_options.pi.no_themes` | - | Pi の theme 探索を無効化 |
+| `provider_options.pi.no_context_files` | - | Pi の context file 探索を無効化 |
+| `provider` | - | この step の provider を上書き (`claude`, `claude-sdk`, `claude-terminal`, `codex`, `opencode`, `cursor`, `copilot`, `kiro`, `pi`, `mock`) |
 | `model` | - | この step の model を上書き |
 | `promotion` | - | 実行回数ごとの provider / model / options 昇格（[Step レベルのプロバイダープロモーション](#step-レベルのプロバイダープロモーション) 参照） |
 | `mcp_servers` | - | step ごとの MCP サーバー設定 (stdio / HTTP / SSE) |
@@ -957,6 +963,8 @@ promotion は並列サブ step ではサポートされません。
 通常の agent step、parallel sub-step、`loop_monitors.judge` では、`model: null` は model の明示的な省略を表します。`model` 未指定とは異なります。未指定は routing、workflow、loop monitor judge のトリガー元 step、入力由来の model など、適用可能な下位優先度のソースへフォールバックしますが、`null` はその entry で model 解決を止めます。明示 model が必須の provider では検証エラーになります。
 
 実効ツール一覧は、設定値より狭くなる場合があります。`edit: false` の場合、または step に `output_contracts` があり `edit: true` ではない場合、TAKT は provider 呼び出し前に `provider_options.*.allowed_tools` からコマンド・編集系 tool を除去します。Claude 系 provider では、カンマ区切り entry を atomic な tool spec に正規化し、`Bash(...)` は `(` より前の canonical tool 名で判定してから、`Bash`、`Edit`、`Write`、`Apply_Patch`、`Patch` を除去します。OpenCode では `bash`、`edit`、`write` など lowercase の tool を除去します。同じ read-only フィルタは、`part_edit: false` または継承された `edit: false` などにより part の実効 edit 設定が false の場合の `team_leader.part_allowed_tools` にも適用されます。
+
+Pi provider は generic な `Read`、`Glob`、`Grep`、`Edit`、`Write`、`Bash` 名を Pi SDK tool へ変換します。Pi は TAKT の MCP server と structured output に対応しません。step-level の MCP 設定は drop され、session-level の MCP 設定は対応 provider が必要です。`max_turns` は Pi call で無視します。
 
 ## Workflow レベルの設定
 

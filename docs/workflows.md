@@ -956,7 +956,13 @@ Promotion is not supported on parallel sub-steps.
 | `provider_options.copilot.effort` | - | Provider-specific Copilot reasoning effort string, passed through to the provider |
 | `provider_options.claude.sandbox.allow_unsandboxed_commands` | - | Run Claude Bash outside the macOS Seatbelt sandbox (see [configuration guide](./configuration.md#claude-code-sandbox-control-allow_unsandboxed_commands)) |
 | `provider_options.kiro.agent` | - | Kiro CLI custom agent name passed as `kiro-cli chat --agent`. Steps without it use the Kiro CLI default agent |
-| `provider` | - | Override provider for this step (`claude`, `claude-sdk`, `claude-terminal`, `codex`, `opencode`, `cursor`, `copilot`, `kiro`, or `mock`) |
+| `provider_options.pi.extensions` | - | Pi SDK extension/package sources (`path`, `npm:...`, or `git:...`), resolved temporarily for the call |
+| `provider_options.pi.no_extensions` | - | Disable Pi extension discovery; explicit `extensions` sources still load |
+| `provider_options.pi.no_skills` | - | Disable Pi Skill discovery |
+| `provider_options.pi.no_prompt_templates` | - | Disable Pi prompt-template discovery |
+| `provider_options.pi.no_themes` | - | Disable Pi theme discovery |
+| `provider_options.pi.no_context_files` | - | Disable Pi context-file discovery |
+| `provider` | - | Override provider for this step (`claude`, `claude-sdk`, `claude-terminal`, `codex`, `opencode`, `pi`, `cursor`, `copilot`, `kiro`, or `mock`) |
 | `model` | - | Override model for this step |
 | `promotion` | - | Per-execution provider/model/options escalation (see [Step-level Provider Promotion](#step-level-provider-promotion)) |
 | `mcp_servers` | - | Per-step MCP server configuration (stdio / HTTP / SSE) |
@@ -968,6 +974,8 @@ Promotion is not supported on parallel sub-steps.
 For normal agent steps, parallel sub-steps, and `loop_monitors.judge`, `model: null` explicitly omits the model. This is different from leaving `model` out: absence continues fallback to applicable lower-priority sources such as routing, workflow, the triggering step for loop monitor judges, and input models, while `null` stops model resolution at that entry. Providers that require an explicit model still fail validation.
 
 The effective tool list may be narrower than configured. When `edit: false`, or when a step has `output_contracts` and does not set `edit: true`, TAKT removes command/edit tools from `provider_options.*.allowed_tools` before calling the provider. For Claude-family providers, comma-separated entries are normalized into atomic tool specs first, `Bash(...)` is judged by the canonical tool name before `(`, and `Bash`, `Edit`, `Write`, `Apply_Patch`, and `Patch` are removed. For OpenCode, lowercase tools such as `bash`, `edit`, and `write` are removed. The same read-only filtering applies to `team_leader.part_allowed_tools` when the part's effective edit setting is false, such as `part_edit: false` or inherited `edit: false`.
+
+The Pi provider maps generic `Read`, `Glob`, `Grep`, `Edit`, `Write`, and `Bash` names to Pi SDK tools. Pi does not support TAKT MCP servers or structured output; step-level MCP settings are dropped, while session-level MCP settings require a provider that supports them. `max_turns` is ignored for Pi calls.
 
 ## Workflow-level Configuration
 

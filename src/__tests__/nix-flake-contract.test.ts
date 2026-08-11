@@ -82,11 +82,27 @@ describe('Nix flake contract', () => {
     expect(flake).not.toContain(`homepage = "${packageJson.homepage}"`);
   });
 
+  it('Given the npm lock, When Nix prefetches registry tarballs, Then every tarball has integrity metadata', () => {
+    const lock = JSON.parse(readRequiredFile('package-lock.json')) as {
+      packages?: Record<string, { integrity?: string; resolved?: string }>;
+    };
+    const missingIntegrity = Object.entries(lock.packages ?? {})
+      .filter(([path, entry]) => (
+        path.length > 0
+        && entry.resolved?.startsWith('https://registry.npmjs.org/') === true
+        && entry.integrity === undefined
+      ))
+      .map(([path]) => path);
+
+    expect(missingIntegrity).toEqual([]);
+  });
+
   it('Given runtime requirements, When package and dev shell are defined, Then Node is shared and Bun is development-only', () => {
     const flake = readRequiredFile('flake.nix');
 
     expect(flake).toContain('nodejs = pkgs.nodejs_24');
     expect(flake).toContain('nodejs = nodejs');
+    expect(flake).toContain('npmDepsFetcherVersion = 2');
     expect(flake).toContain('devShells = forAllSystems');
     expect(flake).toContain('pkgs.mkShell');
     expect(flake).toContain('nodejs');
@@ -135,6 +151,11 @@ describe('Nix flake contract', () => {
     const workflow = YAML.parse(readRequiredFile('.github/workflows/nix.yml')) as {
       jobs?: Record<string, {
         name?: string;
+        'runs-on'?: string;
+        strategy?: {
+          'fail-fast'?: boolean;
+          matrix?: { os?: string[] };
+        };
         steps?: Array<{ run?: string; uses?: string; with?: Record<string, unknown> }>;
       }>;
     };
@@ -147,7 +168,11 @@ describe('Nix flake contract', () => {
       !use.startsWith('./') && !use.startsWith('docker://')
     );
 
-    expect(jobs.some((job) => job.name === 'Build and test Nix flake')).toBe(true);
+    const flakeJob = jobs.find((job) => job.name === 'Build and test Nix flake');
+    expect(flakeJob).toBeDefined();
+    expect(flakeJob?.['runs-on']).toBe('${{ matrix.os }}');
+    expect(flakeJob?.strategy?.['fail-fast']).toBe(false);
+    expect(flakeJob?.strategy?.matrix?.os).toEqual(['ubuntu-latest', 'macos-latest']);
     expect(checkoutStep?.uses).toMatch(pinnedActionPattern);
     expect(checkoutStep?.with?.['persist-credentials']).toBe(false);
     expect(externalUses.every((use) => pinnedActionPattern.test(use))).toBe(true);
@@ -161,10 +186,17 @@ describe('Nix flake contract', () => {
       && command.includes("-path '*/@anthropic-ai/claude-agent-sdk-*/claude'")
       && command.includes("codex_runtime=\"$(find result/lib/node_modules/takt/node_modules")
       && command.includes("-path '*/@openai/codex-*/vendor/*/bin/codex'")
+      && command.includes("pi_sdk=\"$(find result/lib/node_modules/takt/node_modules")
+      && command.includes("-path '*/@earendil-works/pi-coding-agent/dist/index.js'")
+      && command.includes("node_runtime=\"$(sed -n '1s/^#!//p' result/lib/node_modules/takt/bin/takt)")
       && command.includes('test -n "$claude_runtime"')
       && command.includes('test -x "$claude_runtime"')
       && command.includes('test -n "$codex_runtime"')
       && command.includes('test -x "$codex_runtime"')
+      && command.includes('test -n "$pi_sdk"')
+      && command.includes('test -x "$node_runtime"')
+      && command.includes('"$node_runtime" --input-type=module')
+      && command.includes('await import(\'./$pi_sdk\')')
     )).toBe(true);
     expect(runCommands).toContain('NO_UPDATE_NOTIFIER=1 ./result/bin/takt --version');
     expect(runCommands).toContain('NO_UPDATE_NOTIFIER=1 nix run .#default -- --version');

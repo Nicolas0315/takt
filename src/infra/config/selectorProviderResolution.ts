@@ -184,7 +184,12 @@ function resolveSelectorProviderOptions(
 function getSelectorProviderOptionKeys(provider: ProviderType): readonly (keyof StepProviderOptions)[] {
   if (provider === 'claude-sdk') return ['claude'];
   if (provider === 'claude-terminal') return ['claude', 'claudeTerminal'];
-  return provider === 'codex' || provider === 'opencode' || provider === 'claude' || provider === 'copilot' || provider === 'kiro'
+  return provider === 'codex'
+    || provider === 'opencode'
+    || provider === 'claude'
+    || provider === 'copilot'
+    || provider === 'kiro'
+    || provider === 'pi'
     ? [provider]
     : [];
 }

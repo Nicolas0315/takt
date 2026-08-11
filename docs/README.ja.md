@@ -37,11 +37,11 @@ TAKT は、AI コーディングエージェントを再現可能な開発ワー
 - 計画 → 実装 → レビュー → 修正ループを明示的な workflow step として実行
 - step ごとに persona、policy、knowledge、instruction、output contract を分け、コンテキストを肥大化させない
 - 積んだタスクを隔離された worktree で実行し、後からログとレポートを確認できる
-- Claude Code、Claude SDK、Codex SDK、OpenCode SDK、Cursor、GitHub Copilot CLI、Kiro を provider として利用できる
+- Claude Code、Claude SDK、Codex SDK、OpenCode SDK、Pi SDK、Cursor、GitHub Copilot CLI、Kiro を provider として利用できる
 
 **T**AKT **A**gent **K**oordination **T**opology は、複数の AI エージェントをオーケストレーションし、レビューループ・プロンプト管理・ガードレールを与えるツールです。
 
-AI と会話してやりたいことを決め、タスクとして積み、`takt run` で実行します。計画・実装・レビュー・修正のループは YAML の workflow ファイルで定義されており、エージェント任せにはしません。TAKT は Claude Code、Codex、OpenCode、Cursor、GitHub Copilot CLI、Kiro CLI を、役割・権限・文脈の異なるエージェントとして協調させます。
+AI と会話してやりたいことを決め、タスクとして積み、`takt run` で実行します。計画・実装・レビュー・修正のループは YAML の workflow ファイルで定義されており、エージェント任せにはしません。TAKT は Claude Code、Codex、OpenCode、Pi、Cursor、GitHub Copilot CLI、Kiro CLI を、役割・権限・文脈の異なるエージェントとして協調させます。
 
 TAKT は AI コーディングワークフローを主な用途として提供していますが、コーディング以外でも、複数の AI エージェントを協調させたいタスクや、レビュー・判定・フィードバックループによってタスクの精度を高めたい場面で活用できます。
 
@@ -80,7 +80,7 @@ takt run
 takt list
 ```
 
-初回実行時は `~/.takt/config.yaml` で provider を設定するか、[設定](#設定) にある API キー用の環境変数を使います。`claude-sdk`、`codex`、`opencode` などの SDK 経由 provider は Node.js と API キーで動きます。CLI 経由 provider を使う場合は、対応する外部 CLI が必要です。
+初回実行時は `~/.takt/config.yaml` で provider を設定するか、[設定](#設定) にある API キー用の環境変数を使います。`claude-sdk`、`codex`、`opencode`、`pi` などの SDK 経由 provider は Node.js と認証情報で動きます。CLI 経由 provider を使う場合は、対応する外部 CLI が必要です。
 
 ### 動画チュートリアル
 
@@ -113,6 +113,7 @@ TAKT の実行には Node.js `>=24.15.0` が必要です。
 - `claude-sdk` — `@anthropic-ai/claude-agent-sdk`
 - `codex` — `@openai/codex-sdk`
 - `opencode` — `@opencode-ai/sdk`
+- `pi` — `@earendil-works/pi-coding-agent`
 
 次のプロバイダーを使う場合は外部 CLI のインストールが必要です:
 
@@ -298,7 +299,7 @@ exec の入力行を編集中に画像を添付できます。macOS では `/pas
 最小限の `~/.takt/config.yaml` は次の通りです。
 
 ```yaml
-provider: claude    # claude, claude-sdk, claude-terminal, codex, opencode, cursor, copilot, kiro, or mock
+provider: claude    # claude, claude-sdk, claude-terminal, codex, opencode, cursor, copilot, kiro, pi, or mock
 model: sonnet       # プロバイダーにそのまま渡されます
 language: ja        # en or ja
 ```
@@ -353,7 +354,7 @@ AI による task slug 生成など workflow step context を持たない処理�
 
 オートルーティングの決定は `.takt/events/` に NDJSON としてローカル書き込みされます。TAKT がルーティング決定をアップロードすることはありません。ローカル記録はデフォルトで有効で、`telemetry.routing_decisions` で設定でき、`takt telemetry status|enable|disable` で確認・変更できます。
 
-API Key を直接使う場合は、CLI のインストールは不要です（Claude、Codex、OpenCode が対象）。
+provider の認証情報を直接使う場合は、CLI のインストールは不要です（Claude、Codex、OpenCode、Pi が対象）。
 
 ```bash
 export TAKT_ANTHROPIC_API_KEY=sk-ant-...   # Anthropic (Claude)
@@ -362,6 +363,7 @@ export TAKT_OPENCODE_API_KEY=...           # OpenCode
 export TAKT_CURSOR_API_KEY=...             # Cursor Agent（login 済みなら省略可）
 export TAKT_COPILOT_GITHUB_TOKEN=ghp_...   # GitHub Copilot CLI
 export TAKT_KIRO_API_KEY=...               # Kiro CLI
+# Pi は SDK の credential store または provider-native 環境変数を使用
 ```
 
 ### プロバイダー設定専用レイヤー（`runtime.yaml`）

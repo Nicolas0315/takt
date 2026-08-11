@@ -70,7 +70,7 @@ In pipeline mode, PRs are **not** created unless `--auto-pr` is explicitly speci
 | `--skip-git` | Skip branch creation, commit, and push (pipeline mode, workflow-only) |
 | `--repo <owner/repo>` | Specify repository (for PR creation) |
 | `-q, --quiet` | Minimal output mode: suppress AI output (for CI) |
-| `--provider <name>` | Override agent provider (claude\|claude-sdk\|claude-terminal\|codex\|opencode\|cursor\|copilot\|kiro\|mock) |
+| `--provider <name>` | Override agent provider (claude\|claude-sdk\|claude-terminal\|codex\|opencode\|cursor\|copilot\|kiro\|pi\|mock) |
 | `--model <name>` | Override agent model |
 | `--auto-strategy <strategy>` | Auto routing strategy (cost\|balanced\|performance) |
 
@@ -197,7 +197,7 @@ export TAKT_KIRO_API_KEY=...
 
 Priority: Environment variables take precedence over `config.yaml` settings.
 
-> **Note**: If you set an API key via environment variable, installing the corresponding CLI for SDK providers (Claude SDK, Codex, OpenCode) is not necessary. TAKT directly calls the respective API. Cursor, Copilot, and Kiro require their CLIs to be installed.
+> **Note**: If you set credentials for an SDK provider (Claude SDK, Codex, OpenCode, or Pi), installing its CLI is not necessary. TAKT directly calls the respective API. Cursor, Copilot, and Kiro require their CLIs to be installed.
 
 ## Cost Considerations
 

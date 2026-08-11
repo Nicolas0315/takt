@@ -50,6 +50,7 @@ interface CiWorkflowJob {
   needs?: string[];
   strategy?: {
     matrix?: {
+      os?: string[];
       shard?: number[];
       include?: Array<{
         group: string;
@@ -286,6 +287,19 @@ describe('release verification wiring', () => {
     expect(aggregateCommand).toContain('needs.heavy_it_serial.result');
     expect(aggregateCommand).toContain('!= "success"');
     expect(aggregateCommand).toContain('exit 1');
+  });
+
+  it('should build and smoke test the Pi SDK on Windows and macOS', () => {
+    const piJob = ciWorkflow.jobs?.['pi-cross-platform'];
+    const commands = piJob?.steps?.map((step) => step.run).filter(Boolean);
+
+    expect(piJob?.strategy?.matrix?.os).toEqual(['windows-latest', 'macos-latest']);
+    expect(commands).toEqual(expect.arrayContaining([
+      'npm ci',
+      'npm run build',
+      'npm test -- src/__tests__/pi-client.test.ts src/__tests__/pi-provider.test.ts',
+      'npm run test:pi-sdk-smoke',
+    ]));
   });
 
   it('should execute the complete release path when every gate succeeds', () => {

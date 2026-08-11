@@ -176,6 +176,27 @@ describe('selector provider resolution', () => {
     expect(resolved.providerOptions).toEqual({ codex: { reasoningEffort: 'medium' } });
   });
 
+  it('should pass Pi selector resource options to the resolved provider', () => {
+    const resolved = resolveSelectorProviderFromConfig({
+      local: {
+        taktProviders: {
+          selector: {
+            provider: 'pi',
+            providerOptions: {
+              pi: { extensions: ['npm:pi-fff'], noSkills: true },
+              codex: { reasoningEffort: 'medium' },
+            },
+          },
+        },
+      },
+      global: {},
+    });
+
+    expect(resolved.providerOptions).toEqual({
+      pi: { extensions: ['npm:pi-fff'], noSkills: true },
+    });
+  });
+
   it('should validate an OpenCode provider after composing its top-level model', () => {
     const resolved = resolveSelectorProviderFromConfig({
       local: {
