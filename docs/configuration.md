@@ -454,6 +454,9 @@ export TAKT_OPENAI_API_KEY=sk-...
 # For OpenCode
 export TAKT_OPENCODE_API_KEY=...
 
+# For Pi
+# Use the Pi SDK credential store or provider-native environment variables
+
 # For Cursor Agent (optional if cursor-agent login session exists)
 export TAKT_CURSOR_API_KEY=...
 
@@ -485,6 +488,7 @@ Environment variables take precedence over `config.yaml` settings.
 | Claude (Anthropic) | `TAKT_ANTHROPIC_API_KEY` | `anthropic_api_key` |
 | Codex (OpenAI) | `TAKT_OPENAI_API_KEY` | `openai_api_key` |
 | OpenCode | `TAKT_OPENCODE_API_KEY` | `opencode_api_key` |
+| Pi | Pi SDK credential store or provider-native environment variables | - |
 | Cursor Agent | `TAKT_CURSOR_API_KEY` | `cursor_api_key` |
 | GitHub Copilot CLI | `TAKT_COPILOT_GITHUB_TOKEN` | `copilot_github_token` |
 | Kiro CLI | `TAKT_KIRO_API_KEY` (`KIRO_API_KEY` fallback) | `kiro_api_key` |
@@ -560,6 +564,8 @@ In workflow YAML, `model: null` is an explicit model omission for a normal step,
 **Codex** uses the model string as-is via the Codex SDK. If unspecified, defaults to `codex`. Refer to Codex documentation for available models.
 
 **OpenCode** requires a model in `provider/model` format (e.g., `opencode/big-pickle`). Omitting the model for the OpenCode provider will result in a configuration error.
+
+**Pi** accepts `provider/model` references and bare model IDs that uniquely match a configured Pi model. A recognized `:<thinking-level>` suffix selects the Pi thinking level. If omitted, TAKT keeps the Pi session's current model.
 
 **Cursor Agent** forwards `model` directly to `cursor-agent --model <model>`. If omitted, Cursor CLI default is used.
 
@@ -1233,6 +1239,7 @@ provider:
 | `claude-terminal` | Yes | Replayed after the turn |
 | `mock` | Yes | Scenario-dependent |
 | `opencode` | No | Live |
+| `pi` | No | Live |
 | `cursor`, `copilot`, `kiro` | No | Unavailable |
 
 `No` means the workflow is rejected during loading; TAKT does not run a degraded, non-isolated companion.

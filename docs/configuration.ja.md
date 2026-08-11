@@ -444,6 +444,9 @@ export TAKT_OPENAI_API_KEY=sk-...
 # OpenCode 用
 export TAKT_OPENCODE_API_KEY=...
 
+# Pi 用
+# Pi SDK の credential store または provider-native 環境変数を使用
+
 # Cursor Agent 用（cursor-agent login 済みなら省略可）
 export TAKT_CURSOR_API_KEY=...
 
@@ -475,6 +478,7 @@ kiro_api_key: ...              # Kiro CLI 用
 | Claude (Anthropic) | `TAKT_ANTHROPIC_API_KEY` | `anthropic_api_key` |
 | Codex (OpenAI) | `TAKT_OPENAI_API_KEY` | `openai_api_key` |
 | OpenCode | `TAKT_OPENCODE_API_KEY` | `opencode_api_key` |
+| Pi | Pi SDK credential store または provider-native 環境変数 | - |
 | Cursor Agent | `TAKT_CURSOR_API_KEY` | `cursor_api_key` |
 | GitHub Copilot CLI | `TAKT_COPILOT_GITHUB_TOKEN` | `copilot_github_token` |
 | Kiro CLI | `TAKT_KIRO_API_KEY`（`KIRO_API_KEY` フォールバック） | `kiro_api_key` |
@@ -550,6 +554,8 @@ workflow YAML では、通常 step、parallel sub-step、`loop_monitors.judge` �
 **Codex** は Codex SDK を通じてモデル文字列をそのまま使用します。未指定の場合、デフォルトは `codex` です。利用可能なモデルについては Codex のドキュメントを参照してください。
 
 **OpenCode** は `provider/model` 形式のモデル（例: `opencode/big-pickle`）が必要です。OpenCode provider でモデルを省略すると設定エラーになります。
+
+**Pi** は `provider/model` 形式と、設定済みの Pi model に一意に一致する model ID を受け付けます。認識可能な `:<thinking-level>` サフィックスで Pi の thinking level を指定できます。省略時は Pi session の現在の model を維持します。
 
 **Cursor Agent** は `model` を `cursor-agent --model <model>` にそのまま渡します。省略時は Cursor CLI のデフォルトが使用されます。
 
@@ -1222,6 +1228,7 @@ provider:
 | `claude-terminal` | 可 | ターン後に再生 |
 | `mock` | 可 | scenario に依存 |
 | `opencode` | 不可 | ライブ |
+| `pi` | 不可 | ライブ |
 | `cursor`、`copilot`、`kiro` | 不可 | 利用不可 |
 
 `不可` の provider を指定した workflow はロード時に拒否され、隔離を弱めた縮退実行は行いません。

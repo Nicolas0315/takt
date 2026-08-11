@@ -173,7 +173,7 @@ This approach works with any CI system that supports Node.js, including GitLab C
 
 ## Environment Variables
 
-For authentication in CI environments, set the appropriate API key environment variable. These use TAKT-specific prefixes to avoid conflicts with other tools.
+For authentication in CI environments, set the appropriate API key environment variable where applicable. These use TAKT-specific prefixes to avoid conflicts with other tools.
 
 ```bash
 # For Claude (Anthropic)
@@ -184,6 +184,9 @@ export TAKT_OPENAI_API_KEY=sk-...
 
 # For OpenCode
 export TAKT_OPENCODE_API_KEY=...
+
+# For Pi
+# Use the Pi SDK credential store or provider-native environment variables
 
 # For Cursor Agent (optional if cursor-agent login session exists)
 export TAKT_CURSOR_API_KEY=...
