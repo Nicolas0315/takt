@@ -36,6 +36,7 @@ describe('compileLegacyProviderEnvironment', () => {
   it('passes the resolved legacy engine-options through unchanged', () => {
     const env = compileLegacyProviderEnvironment(legacyInput);
     expect(env).toEqual({
+      providerConfigMode: 'legacy',
       provider: 'codex',
       providerSource: 'global',
       model: 'gpt-x',
@@ -63,6 +64,7 @@ describe('compileRuntimeProviderEnvironment (profile path)', () => {
     const env = compileRuntimeProviderEnvironment(section);
     expect(env.provider).toBe('codex');
     expect(env.model).toBe('gpt-x');
+    expect(env.providerConfigMode).toBe('runtime-v1');
     expect(env.providerSource).toBe('runtime-v1');
     expect(env.modelSource).toBe('runtime-v1');
     expect(env.tagConflictPolicy).toBe('fail-fast');
