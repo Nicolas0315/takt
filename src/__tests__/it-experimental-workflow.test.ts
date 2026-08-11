@@ -153,6 +153,23 @@ function response(
   };
 }
 
+function responseForNext(
+  workflow: WorkflowConfig,
+  stepName: string,
+  persona: string,
+  nextStep: string,
+): ScenarioEntry {
+  const step = findWorkflowStep(workflow, stepName);
+  const rule = step.rules?.find((candidate) => candidate.next === nextStep);
+  const ruleLabel = rule === undefined
+    ? undefined
+    : semanticRuleCandidatesOf([rule], false)[0]?.label;
+  if (ruleLabel === undefined) {
+    throw new Error(`Semantic rule not found for transition "${stepName}" -> "${nextStep}"`);
+  }
+  return response(workflow, stepName, persona, ruleLabel);
+}
+
 function selection(selectedIds: string[], rationale: string): ScenarioEntry {
   return {
     persona: 'takt-internal',
@@ -349,6 +366,71 @@ steps:
       expect(getScenarioQueue()?.remaining).toBe(0);
       expect(companionSteps).toEqual(['implement']);
     },
+  );
+
+  it(
+    'should route blocked implementation and fix replanning through replan before reviewing again',
+    async () => {
+      const language = 'en';
+      writeFileSync(join(projectDir, '.takt', 'config.yaml'), `language: ${language}\n`);
+      invalidateAllResolvedConfigCache();
+      const workflow = loadWorkflowFromFile(
+        join(getBuiltinWorkflowsDir(language), 'takt-experimental.yaml'),
+        projectDir,
+      );
+      const scenarioWorkflow = loadCoreForWrapper(language, workflow, projectDir);
+      const reviewWorkflow = loadReviewForCore(language, scenarioWorkflow, projectDir);
+      setMockScenario([
+        responseForNext(scenarioWorkflow, 'plan', 'planner', 'write_tests'),
+        responseForNext(scenarioWorkflow, 'write_tests', 'coder', 'implement'),
+        selection(['testing'], 'Testing implementation facets are required.'),
+        responseForNext(scenarioWorkflow, 'implement', 'coder', 'replan'),
+        responseForNext(scenarioWorkflow, 'replan', 'planner', 'implement'),
+        selection(['testing'], 'The replanned implementation still changes test boundaries.'),
+        responseForNext(scenarioWorkflow, 'implement', 'coder', 'review'),
+        selection([], 'The fixed TAKT reviewers cover the changed path.'),
+        response(reviewWorkflow, 'coding-review', 'coding-reviewer', 'needs_fix'),
+        response(reviewWorkflow, 'ai-antipattern-review', 'ai-antipattern-reviewer', 'needs_fix'),
+        selection([], 'No additional remediation facets are needed.'),
+        responseForNext(scenarioWorkflow, 'fix', 'coder', 'replan'),
+        responseForNext(scenarioWorkflow, 'replan', 'planner', 'implement'),
+        selection(['testing'], 'The second replanned implementation changes test boundaries.'),
+        responseForNext(scenarioWorkflow, 'implement', 'coder', 'review'),
+        selection([], 'The fixed TAKT reviewers cover the replanned path.'),
+        response(reviewWorkflow, 'coding-review', 'coding-reviewer', 'approved'),
+        response(reviewWorkflow, 'ai-antipattern-review', 'ai-antipattern-reviewer', 'approved'),
+        responseForNext(scenarioWorkflow, 'supervise', 'supervisor', 'COMPLETE'),
+      ]);
+      const engine = new WorkflowEngine(workflow, projectDir, 'Implement a TAKT change that requires replanning', {
+        projectCwd: projectDir,
+        provider: 'mock',
+        selectorProvider: SELECTOR_PROVIDER,
+        selectorGitCommandRunner: SELECTOR_GIT_COMMAND_RUNNER,
+        companionProviders: {
+          'ai-antipattern-review-companion': { provider: 'mock' },
+        },
+        companionDiffReader: COMPANION_DIFF_READER,
+        structuredCaller: new DefaultStructuredCaller(),
+        workflowCallResolver: ({ parentWorkflow, step, projectCwd, lookupCwd }) =>
+          resolveWorkflowCallTarget(parentWorkflow, step, projectCwd, lookupCwd),
+      });
+      engines.push(engine);
+      const visitedSteps: string[] = [];
+      engine.on('step:start', (step) => visitedSteps.push(step.name));
+
+      const state = await engine.run();
+
+      expect(state.status, JSON.stringify({
+        currentStep: state.currentStep,
+        iteration: state.iteration,
+        remainingScenarios: getScenarioQueue()?.remaining,
+        visitedSteps,
+      })).toBe('completed');
+      expect(getScenarioQueue()?.remaining).toBe(0);
+      expect(visitedSteps.filter((step) => step === 'replan')).toHaveLength(2);
+      expect(visitedSteps.filter((step) => step === 'plan')).toHaveLength(1);
+    },
+    60_000,
   );
 
   it(

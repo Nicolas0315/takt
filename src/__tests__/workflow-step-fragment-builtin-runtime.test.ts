@@ -863,6 +863,17 @@ describe('builtin workflow step fragment migration', () => {
     expect(fcReplan?.instruction?.trim().length ?? 0).toBeGreaterThan(0);
   });
 
+  it.each(LANGUAGES)('routes %s experimental-core rework through replan instead of the initial plan', (lang) => {
+    const raw = readBuiltinWorkflow(lang, 'experimental-core');
+    const nextTargets = (stepName: string): (string | undefined)[] =>
+      (getStep(raw, stepName).rules as RawRule[]).map((rule) => rule.next);
+    for (const stepName of ['implement', 'fix', 'supervise']) {
+      expect(nextTargets(stepName), stepName).toContain('replan');
+      expect(nextTargets(stepName), stepName).not.toContain('plan');
+    }
+    expect(nextTargets('write_tests')).toContain('plan');
+  });
+
   it.each(LANGUAGES)('loads %s lightweight development routines with resolved runtime report contracts', (lang) => {
     mkdirSync(join(projectDir, '.takt'), { recursive: true });
     writeFileSync(join(projectDir, '.takt', 'config.yaml'), 'language: ' + lang + '\n', 'utf-8');
