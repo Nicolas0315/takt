@@ -56,9 +56,9 @@ const TARGETS = [
   {
     id: 'initial-review-contract-discovery',
     workflow: 'peer-review',
+    via: 'initial-reviewers',
     step: 'coding-review',
     fixture: 'eval/fixtures/initial-review-contract-discovery',
-    workflowCallVars: { review_mode: 'initial' },
   },
   {
     id: 'initial-plan-contract-closure',
@@ -154,11 +154,46 @@ const TARGETS = [
   {
     id: 'follow-up-review-repair-regression',
     workflow: 'peer-review',
+    via: 'reviewers',
     step: 'coding-review',
     fixture: 'eval/fixtures/follow-up-review-repair-regression',
-    workflowCallVars: { review_mode: 'follow_up' },
+  },
+  {
+    id: 'follow-up-testing-review-repair-regression',
+    workflow: 'peer-review',
+    via: 'reviewers',
+    step: 'testing-review',
+    fixture: 'eval/fixtures/follow-up-review-repair-regression',
   },
   { id: 'review-adjudication', workflow: 'peer-review', step: 'review-adjudication', fixture: 'eval/fixtures/review-adjudication' },
+  {
+    id: 'final-readiness-merge-review',
+    workflow: 'review-fix-default',
+    step: 'merge-readiness-review',
+    fixture: 'eval/fixtures/final-readiness-supervision',
+  },
+  {
+    id: 'final-readiness-supervision',
+    workflow: 'review-fix-default',
+    step: 'supervise',
+    fixture: 'eval/fixtures/final-readiness-supervision',
+  },
+  {
+    id: 'final-readiness-merge-review-phase2',
+    workflow: 'review-fix-default',
+    step: 'merge-readiness-review',
+    fixture: 'eval/fixtures/final-readiness-supervision',
+    phase: 'phase2',
+    targetFile: 'merge-readiness-review.md',
+  },
+  {
+    id: 'final-readiness-supervision-phase2',
+    workflow: 'review-fix-default',
+    step: 'supervise',
+    fixture: 'eval/fixtures/final-readiness-supervision',
+    phase: 'phase2',
+    targetFile: 'supervisor-validation.md',
+  },
 ];
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
@@ -232,9 +267,22 @@ function findStepTarget(workflow, stepName, depth = 0) {
   return null;
 }
 
+function findStepThroughCall(workflow, callStepName, stepName) {
+  const callStep = workflow.steps.find((step) => step.name === callStepName);
+  if (!callStep || callStep.kind !== 'workflow_call') {
+    throw new Error(`Workflow call "${callStepName}" not found while resolving step "${stepName}"`);
+  }
+  const child = resolveWorkflowCallTarget(workflow, callStep, repoRoot);
+  if (!child) {
+    throw new Error(`Workflow call "${callStepName}" could not be resolved`);
+  }
+  return findStepTarget(child, stepName, 1);
+}
+
 for (const {
   id,
   workflow: workflowName,
+  via,
   step: stepName,
   monitorCycle,
   fixture,
@@ -287,7 +335,9 @@ for (const {
     };
     stepIndex = config.steps.findIndex(({ name }) => name === monitor.cycle.at(-1));
   } else {
-    const found = findStepTarget(config, stepName);
+    const found = via === undefined
+      ? findStepTarget(config, stepName)
+      : findStepThroughCall(config, via, stepName);
     if (found) {
       config = found.workflow;
       target = found.target;

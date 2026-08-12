@@ -9,12 +9,15 @@
  *         cqrs-coder, fix-closure, fix-plan-fresh-findings,
  *         fix-plan-boundary-preflight, review-family-closure,
  *         initial-review-contract-discovery, follow-up-review-repair-regression,
+ *         follow-up-testing-review-repair-regression,
  *         initial-plan-contract-closure, replan-contract-closure,
  *         issue-plan-samples, plan-report-source-authority,
  *         write-tests-contract-traceability,
  *         implement-contract-traceability,
  *         implementation-report-contract-traceability,
- *         review-adjudication, task-instruction-gherkin
+ *         review-adjudication, final-readiness-supervision,
+ *         final-readiness-preservation,
+ *         task-instruction-gherkin
  *         (default: all except rescan suites,
  *         which need opencode auth)
  * Example: npm run eval:prompts -- arch --repeat 3
@@ -53,7 +56,10 @@ const SUITES = {
   'implement-contract-traceability': 'promptfooconfig.implement-contract-traceability.yaml',
   'implementation-report-contract-traceability': 'promptfooconfig.implementation-report-contract-traceability.yaml',
   'follow-up-review-repair-regression': 'promptfooconfig.follow-up-review-repair-regression.yaml',
+  'follow-up-testing-review-repair-regression': 'promptfooconfig.follow-up-testing-review-repair-regression.yaml',
   'review-adjudication': 'promptfooconfig.review-adjudication.yaml',
+  'final-readiness-supervision': 'promptfooconfig.final-readiness-supervision.yaml',
+  'final-readiness-preservation': 'promptfooconfig.final-readiness-preservation.yaml',
   'task-instruction-gherkin': 'promptfooconfig.task-instruction-gherkin.yaml',
 };
 
