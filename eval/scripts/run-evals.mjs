@@ -4,7 +4,8 @@
  * (promptfoo exits non-zero when a test fails, which would break `&&` chains).
  *
  * Usage: node eval/scripts/run-evals.mjs [suite...] [--promptfoo-flags...]
- * Suites: coding, arch, antipattern, frontend, cqrs, rescan, rescan-coding,
+ * Suites: coding, arch, arch-failure-aggregation, antipattern, frontend, cqrs,
+ *         rescan, rescan-coding,
  *         frontend-coder,
  *         cqrs-coder, fix-closure, fix-plan-fresh-findings,
  *         fix-plan-boundary-preflight, review-family-closure,
@@ -30,6 +31,7 @@ import { fileURLToPath } from 'node:url';
 const SUITES = {
   coding: 'promptfooconfig.coding.yaml',
   arch: 'promptfooconfig.arch.yaml',
+  'arch-failure-aggregation': 'promptfooconfig.arch-failure-aggregation.yaml',
   antipattern: 'promptfooconfig.antipattern.yaml',
   frontend: 'promptfooconfig.frontend.yaml',
   cqrs: 'promptfooconfig.cqrs.yaml',
@@ -59,6 +61,10 @@ const SUITES = {
   'implementation-report-contract-traceability': 'promptfooconfig.implementation-report-contract-traceability.yaml',
   'follow-up-review-repair-regression': 'promptfooconfig.follow-up-review-repair-regression.yaml',
   'follow-up-testing-review-repair-regression': 'promptfooconfig.follow-up-testing-review-repair-regression.yaml',
+  'review-mode-authority': 'promptfooconfig.review-mode-authority.yaml',
+  'fix-verifier-family-boundary': 'promptfooconfig.fix-verifier-family-boundary.yaml',
+  'companion-early-scan': 'promptfooconfig.companion-early-scan.yaml',
+  'companion-evidence-boundary': 'promptfooconfig.companion-evidence-boundary.yaml',
   'review-adjudication': 'promptfooconfig.review-adjudication.yaml',
   'final-readiness-supervision': 'promptfooconfig.final-readiness-supervision.yaml',
   'final-readiness-preservation': 'promptfooconfig.final-readiness-preservation.yaml',
