@@ -128,12 +128,11 @@ import {
   executeObservedPhase1Attempt,
   PHASE1_EMPTY_OUTPUT_ERROR,
   runPhase1WithEmptyRecovery,
+  type Phase1Attempt,
 } from './phase1-empty-recovery.js';
 import { buildCompanionMailboxDirectory } from '../companion/mailbox.js';
 import { runCompanionFixLoop } from '../companion/fix-loop.js';
 import { CompanionStepRuntime } from '../companion/step-runtime.js';
-import { buildCompanionEscalationSummary } from '../companion/evidence.js';
-import { guardCompanionCompletion } from '../companion/completion-gate.js';
 import {
   CompanionReviewStateStore,
   type CompanionReviewAuthority,
@@ -2237,11 +2236,6 @@ export class StepExecutor {
       return nextResponse;
     }
 
-    nextResponse = guardCompanionCompletion(step, state, nextResponse);
-    if (nextResponse.status === 'blocked') {
-      return nextResponse;
-    }
-
     const recordPhaseProviderAttempt = onProviderAttempt
       ?? ((providerInfo, success, usage) => {
         this.deps.recordSynthesizedAgentUsage(
@@ -2308,10 +2302,6 @@ export class StepExecutor {
     response: AgentResponse,
     phaseContext: () => StatusJudgmentPhaseContext,
   ): Promise<AgentResponse> {
-    const companionCompletion = guardCompanionCompletion(step, state, response);
-    if (companionCompletion.status === 'blocked') {
-      return companionCompletion;
-    }
     if (response.structuredOutput) {
       state.structuredOutputs.set(step.name, response.structuredOutput);
     }
@@ -2809,6 +2799,7 @@ export class StepExecutor {
     }
 
     if (activeCompanionRuntime !== undefined) {
+      let companionPhaseExecutionSequence = phase1Result.finalAttempt.sequence + 1;
       const fixLoop = await runCompanionFixLoop({
         initialResponse: response,
         phase1Options: agentOptions,
@@ -2817,61 +2808,179 @@ export class StepExecutor {
             afterFix,
             fixRound,
           });
-          requireActiveCompanionState(state, step.name);
           return review;
         },
         executeFix: async (attempt) => {
           activeCompanionRuntime.beginFixRound(
             attempt.sequence,
-            requireActiveCompanionState(state, step.name).openMustFixCount,
+            attempt.openMustFixCount,
           );
-          const phaseAttempt = {
-            sequence: attempt.sequence,
-            reason: 'companion_fix' as const,
-            instruction: attempt.instruction,
-            sessionId: attempt.sessionId,
+          const promptResolvedAttempts = new Set<number>();
+          const phaseAttempts = new Map<number, Phase1Attempt>();
+          const resolvePhaseAttempt = (recoveryAttempt: Phase1Attempt): Phase1Attempt => {
+            const existing = phaseAttempts.get(recoveryAttempt.sequence);
+            if (existing !== undefined) return existing;
+            const created = {
+              ...recoveryAttempt,
+              sequence: companionPhaseExecutionSequence++,
+              reason: recoveryAttempt.reason === 'initial'
+                ? 'companion_fix' as const
+                : recoveryAttempt.reason,
+            };
+            phaseAttempts.set(recoveryAttempt.sequence, created);
+            return created;
           };
-          const observed = await executeObservedPhase1Attempt({
-            enabled: this.deps.observabilityEnabled?.() === true,
-            runId: this.deps.getObservabilityRunId?.(),
-            workflowName: this.deps.getWorkflowName(),
-            eventStep: step,
-            spanStep: executableStep,
-            iteration: state.iteration,
-            attempt: phaseAttempt,
-            workflowStack: this.deps.getCurrentWorkflowStack?.(),
-            sanitizeText: this.deps.sanitizeObservabilityText,
-            providerInfo,
-            execute: (attemptInstruction, sessionId, onPromptResolved) => executeAgent(
-              executableStep.persona,
-              attemptInstruction,
-              {
-                ...attempt.options,
-                sessionId,
-                onPromptResolved,
-              },
-            ),
-            onPhaseStart: this.deps.onPhaseStart,
+          const recovery = await runPhase1WithEmptyRecovery({
+            instruction: attempt.instruction,
+            initialSessionId: attempt.sessionId,
+            retryProviderErrorFresh: false,
+            execute: async (recoveryAttempt) => {
+              const phaseAttempt = resolvePhaseAttempt(recoveryAttempt);
+              try {
+                const observed = await executeObservedPhase1Attempt({
+                  enabled: this.deps.observabilityEnabled?.() === true,
+                  runId: this.deps.getObservabilityRunId?.(),
+                  workflowName: this.deps.getWorkflowName(),
+                  eventStep: step,
+                  spanStep: executableStep,
+                  iteration: state.iteration,
+                  attempt: phaseAttempt,
+                  workflowStack: this.deps.getCurrentWorkflowStack?.(),
+                  sanitizeText: this.deps.sanitizeObservabilityText,
+                  providerInfo,
+                  execute: (attemptInstruction, sessionId, onPromptResolved) => executeAgent(
+                    executableStep.persona,
+                    attemptInstruction,
+                    {
+                      ...attempt.options,
+                      sessionId,
+                      onPromptResolved,
+                    },
+                  ),
+                  onPhaseStart: (
+                    phaseStep,
+                    phase,
+                    phaseName,
+                    instruction,
+                    promptParts,
+                    phaseExecutionId,
+                    iteration,
+                  ) => {
+                    promptResolvedAttempts.add(phaseAttempt.sequence);
+                    this.deps.onPhaseStart?.(
+                      phaseStep,
+                      phase,
+                      phaseName,
+                      instruction,
+                      promptParts,
+                      phaseExecutionId,
+                      iteration,
+                    );
+                  },
+                });
+                return observed.response;
+              } catch (error) {
+                const failedResponse: AgentResponse = {
+                  persona: executableStep.persona ?? executableStep.name,
+                  status: 'error',
+                  content: '',
+                  error: getErrorMessage(error),
+                  timestamp: new Date(),
+                };
+                if (promptResolvedAttempts.has(phaseAttempt.sequence)) {
+                  completeObservedPhase1Attempt({
+                    eventStep: step,
+                    iteration: state.iteration,
+                    attempt: phaseAttempt,
+                    response: failedResponse,
+                    onPhaseComplete: this.deps.onPhaseComplete,
+                  });
+                }
+                this.deps.recordSynthesizedAgentUsage(step.name, providerInfo, false, undefined);
+                throw error;
+              }
+            },
+            // A failed advisory repair must not invalidate the last successful main session.
+            discardSession: () => undefined,
+            recordSupersededAttempt: (supersededResponse, recoveryAttempt) => {
+              const phaseAttempt = resolvePhaseAttempt(recoveryAttempt);
+              if (promptResolvedAttempts.has(phaseAttempt.sequence)) {
+                completeObservedPhase1Attempt({
+                  eventStep: step,
+                  iteration: state.iteration,
+                  attempt: phaseAttempt,
+                  response: supersededResponse,
+                  onPhaseComplete: this.deps.onPhaseComplete,
+                });
+              }
+              this.deps.recordSynthesizedAgentUsage(
+                step.name,
+                providerInfo,
+                false,
+                supersededResponse.providerUsage,
+              );
+            },
           });
-          if (!observed.promptResolved) {
-            throw new Error(`Missing prompt parts for companion fix: ${step.name}:1:${attempt.sequence}`);
+          const finalAttempt = resolvePhaseAttempt(recovery.finalAttempt);
+          if (!promptResolvedAttempts.has(finalAttempt.sequence)) {
+            const error = new Error(
+              `Missing prompt parts for companion fix: ${step.name}:1:${finalAttempt.sequence}`,
+            );
+            throw error;
+          }
+          const normalized = this.normalizeStructuredOutputWithDiagnostics(
+            executableStep,
+            recovery.response,
+            executionRuntime,
+          );
+          if (normalized.invalidDetail !== undefined) {
+            const error = new Error(
+              `Companion fix for step "${executableStep.name}" produced invalid structured_output: ${normalized.invalidDetail}`,
+            );
+            completeObservedPhase1Attempt({
+              eventStep: step,
+              iteration: state.iteration,
+              attempt: finalAttempt,
+              response: {
+                ...recovery.response,
+                status: 'error',
+                error: error.message,
+              },
+              onPhaseComplete: this.deps.onPhaseComplete,
+            });
+            this.deps.recordSynthesizedAgentUsage(
+              step.name,
+              providerInfo,
+              false,
+              recovery.response.providerUsage,
+            );
+            throw error;
           }
           completeObservedPhase1Attempt({
             eventStep: step,
             iteration: state.iteration,
-            attempt: phaseAttempt,
-            response: observed.response,
+            attempt: finalAttempt,
+            response: normalized.response,
             onPhaseComplete: this.deps.onPhaseComplete,
           });
           this.deps.recordSynthesizedAgentUsage(
             step.name,
             providerInfo,
-            observed.response.status === 'done',
-            observed.response.providerUsage,
+            normalized.response.status === 'done',
+            normalized.response.providerUsage,
           );
-          return observed.response;
+          return normalized.response;
         },
         abortSignal: this.deps.abortSignal,
+        onAttemptFailure: (failure) => {
+          log.warn('Companion advisory attempt failed; continuing with the latest successful response', {
+            step: step.name,
+            stage: failure.stage,
+            fixRound: failure.fixRound,
+            sequence: failure.sequence,
+            reason: failure.reason,
+          });
+        },
       });
       if (fixLoop.latestSessionId !== undefined) {
         updatePersonaSession(sessionKey, fixLoop.latestSessionId);
@@ -2887,23 +2996,6 @@ export class StepExecutor {
         state.lastOutput = response;
         this.persistPreviousResponseSnapshot(state, step.name, stepIteration, response.content);
         return { response, instruction: phase1Instruction, providerInfo };
-      }
-      if (fixLoop.escalated) {
-        const companionState = requireActiveCompanionState(state, step.name);
-        if (companionState.reason === undefined) {
-          throw new Error(`Missing companion escalation reason for active step "${step.name}"`);
-        }
-        response = {
-          ...response,
-          content: [
-            response.content,
-            '',
-            buildCompanionEscalationSummary({
-              reason: companionState.reason,
-              openMustFix: companionState.openMustFix,
-            }),
-          ].join('\n'),
-        };
       }
     }
 
