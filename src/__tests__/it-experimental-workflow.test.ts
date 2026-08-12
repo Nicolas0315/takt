@@ -443,6 +443,90 @@ describe('experimental builtin workflow', () => {
   });
 
   it.each(['en', 'ja'] as const)(
+    'should opt requirement scenarios into every %s experimental stage and no normal wrapper stage',
+    (language) => {
+      writeFileSync(join(projectDir, '.takt', 'config.yaml'), `language: ${language}\n`);
+      invalidateAllResolvedConfigCache();
+      const scenarioSelection = {
+        plan_instruction: 'scenario-based-plan',
+        plan_report_format: 'scenario-based-plan',
+        replan_instruction: 'scenario-based-replan-implementation',
+        testing_instruction: 'scenario-based-write-tests-first',
+        testing_report_format: 'scenario-based-test-report',
+        fix_plan_instruction: 'scenario-based-fix-plan-from-review-resolution',
+        fix_plan_report_format: 'scenario-based-fix-plan',
+        final_gate_instruction: 'scenario-based-supervise-merge-readiness',
+      };
+      const reportFormatRef = (workflow: WorkflowConfig, stepName: string): string | undefined => {
+        const reports = findWorkflowStep(workflow, stepName).outputContracts;
+        expect(reports, `${workflow.name}.${stepName}`).toHaveLength(1);
+        return reports![0]!.formatRef;
+      };
+      const resolvedStages = (workflowName: string) => {
+        const wrapper = loadWorkflowFromFile(
+          join(getBuiltinWorkflowsDir(language), `${workflowName}.yaml`),
+          projectDir,
+        );
+        const core = loadCoreForWrapper(language, wrapper, projectDir);
+        const peerReview = loadPeerReviewForCore(language, core, projectDir);
+        const remediation = loadRemediationForPeerReview(language, peerReview, projectDir);
+        return { wrapper, core, peerReview, remediation };
+      };
+
+      for (const workflowName of ['experimental', 'takt-experimental']) {
+        const { wrapper, core, peerReview, remediation } = resolvedStages(workflowName);
+        expect(findWorkflowStep(wrapper, 'develop')).toMatchObject({
+          kind: 'workflow_call',
+          args: scenarioSelection,
+        });
+        expect(findWorkflowStep(core, 'peer-review')).toMatchObject({
+          kind: 'workflow_call',
+          args: {
+            fix_plan_instruction: scenarioSelection.fix_plan_instruction,
+            fix_plan_report_format: scenarioSelection.fix_plan_report_format,
+            final_gate_instruction: scenarioSelection.final_gate_instruction,
+          },
+        });
+        expect(findWorkflowStep(peerReview, 'remediation')).toMatchObject({
+          kind: 'workflow_call',
+          args: {
+            fix_plan_instruction: scenarioSelection.fix_plan_instruction,
+            fix_plan_report_format: scenarioSelection.fix_plan_report_format,
+          },
+        });
+        expect(reportFormatRef(core, 'plan')).toBe(scenarioSelection.plan_report_format);
+        expect(reportFormatRef(core, 'replan')).toBe(scenarioSelection.plan_report_format);
+        expect(reportFormatRef(core, 'write_tests')).toBe(scenarioSelection.testing_report_format);
+        expect(reportFormatRef(remediation, 'fix-plan'))
+          .toBe(scenarioSelection.fix_plan_report_format);
+      }
+
+      for (const workflowName of ['default', 'backend-maintenance', 'frontend-maintenance']) {
+        const { core, peerReview, remediation } = resolvedStages(workflowName);
+        expect(findWorkflowStep(core, 'peer-review')).toMatchObject({
+          kind: 'workflow_call',
+          args: {
+            fix_plan_instruction: 'fix-plan-from-review-resolution',
+            fix_plan_report_format: 'fix-plan',
+            final_gate_instruction: 'supervise-merge-readiness',
+          },
+        });
+        expect(findWorkflowStep(peerReview, 'remediation')).toMatchObject({
+          kind: 'workflow_call',
+          args: {
+            fix_plan_instruction: 'fix-plan-from-review-resolution',
+            fix_plan_report_format: 'fix-plan',
+          },
+        });
+        expect(reportFormatRef(core, 'plan')).toBe('plan');
+        expect(reportFormatRef(core, 'replan')).toBe('plan');
+        expect(reportFormatRef(core, 'write_tests')).toBe('test-report');
+        expect(reportFormatRef(remediation, 'fix-plan')).toBe('fix-plan');
+      }
+    },
+  );
+
+  it.each(['en', 'ja'] as const)(
     'should load the %s dynamic review wrappers through their consuming reviewer suites',
     (language) => {
       writeFileSync(join(projectDir, '.takt', 'config.yaml'), `language: ${language}\n`);
