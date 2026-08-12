@@ -15,6 +15,8 @@ import { WorkflowCallExecutor } from '../core/workflow/engine/WorkflowCallExecut
 import { resetDebugLogger, setVerboseConsole } from '../shared/utils/debug.js';
 import { normalizeRule } from '../infra/config/loaders/workflowRuleNormalizer.js';
 import type { ProviderType } from '../shared/types/provider.js';
+import { MAX_TERMINAL_OUTPUT_BYTES } from '../shared/utils/text.js';
+import { AGENT_FAILURE_CATEGORIES } from '../shared/types/agent-failure.js';
 
 class TestEngine extends EventEmitter {
   public abort = vi.fn();
@@ -579,16 +581,19 @@ describe('bindWorkflowExecutionEvents', () => {
       kind: 'interrupt',
       expectedStatus: 'aborted',
       failureError: 'terminal reason',
+      failureCategory: AGENT_FAILURE_CATEGORIES.EXTERNAL_ABORT,
     },
     {
       kind: 'step_error',
       expectedStatus: 'failed',
       failureError: 'NEEDS_ADJUDICATION: finding invariant failed',
+      failureCategory: AGENT_FAILURE_CATEGORIES.PROVIDER_STREAM_PARSE_ERROR,
     },
   ] as const)('publishes $kind as $expectedStatus', ({
     kind,
     expectedStatus,
     failureError,
+    failureCategory,
   }) => {
     const { bridge, engine, runMetaManager } = createBridgeHarness();
 
@@ -597,7 +602,13 @@ describe('bindWorkflowExecutionEvents', () => {
       { iteration: 3 },
       'terminal reason',
       kind,
-      { kind, step: 'reviewers', reason: 'terminal reason', error: failureError },
+      {
+        kind,
+        step: 'reviewers',
+        reason: 'terminal reason',
+        error: failureError,
+        failureCategory,
+      },
     );
     const payload = bridge.prepareTerminalPublicationPayload();
 
@@ -609,11 +620,17 @@ describe('bindWorkflowExecutionEvents', () => {
       failure: {
         step: 'reviewers',
         error: failureError,
+        failureCategory,
       },
     });
     expect(bridge.state.failure).toEqual({
       step: 'reviewers',
       error: failureError,
+      failureCategory,
+    });
+    expect(payload.sessionRecord).toMatchObject({
+      type: 'workflow_abort',
+      failureCategory,
     });
   });
 
@@ -1276,6 +1293,72 @@ describe('bindWorkflowExecutionEvents', () => {
       type: 'step_completed',
       step: 'review',
       status: 'done',
+    });
+  });
+
+  it('step error は端末表示だけをサニタイズし、event sink には元値を渡す', async () => {
+    const eventSink = vi.fn().mockResolvedValue(undefined);
+    const { bridge, engine, out } = createBridgeHarness({ eventSink });
+    const step = {
+      name: 'review',
+      personaDisplayName: 'Reviewer',
+      instruction: '',
+    } as WorkflowStep;
+    const unsafeError = 'provider failed\x1b]52;c;secret\x07\r\x00';
+
+    engine.emit('step:start', step, 1, 'instruction', { provider: 'mock', model: 'gpt-test' }, 'parent', step.name);
+    engine.emit('step:complete', step, {
+      persona: 'reviewer',
+      status: 'error',
+      content: '',
+      error: unsafeError,
+      timestamp: new Date(),
+    }, 'instruction', step.name);
+    await bridge.flushEventSink();
+
+    const terminalMessage = out.error.mock.calls[0]?.[0] as string;
+    expect(terminalMessage).not.toMatch(/[\u0000-\u001f\u007f-\u009f]/);
+    expect(terminalMessage).toContain('provider failed');
+    expect(terminalMessage).toContain('\\r\\x00');
+    expect(eventSink).toHaveBeenCalledWith({
+      type: 'error',
+      message: unsafeError,
+      step: 'review',
+    });
+  });
+
+  it(`step error の最終端末表示を${MAX_TERMINAL_OUTPUT_BYTES}バイト以内に収め、truncation markerを保持する`, async () => {
+    const eventSink = vi.fn().mockResolvedValue(undefined);
+    const { bridge, engine, out } = createBridgeHarness({ eventSink });
+    const step = {
+      name: 'review',
+      personaDisplayName: 'Reviewer',
+      instruction: '',
+    } as WorkflowStep;
+    const marker = '[TRUNCATED: 12000 bytes, full text: /tmp/failure.txt]';
+    const error = `${'x'.repeat(
+      MAX_TERMINAL_OUTPUT_BYTES - Buffer.byteLength(marker, 'utf8'),
+    )}${marker}`;
+
+    engine.emit('step:start', step, 1, 'instruction', { provider: 'mock', model: 'gpt-test' }, 'parent', step.name);
+    engine.emit('step:complete', step, {
+      persona: 'reviewer',
+      status: 'error',
+      content: '',
+      error,
+      timestamp: new Date(),
+    }, 'instruction', step.name);
+    await bridge.flushEventSink();
+
+    const terminalMessage = out.error.mock.calls[0]?.[0] as string;
+    expect(Buffer.byteLength(terminalMessage, 'utf8')).toBeLessThanOrEqual(
+      MAX_TERMINAL_OUTPUT_BYTES,
+    );
+    expect(terminalMessage).toContain(marker);
+    expect(eventSink).toHaveBeenCalledWith({
+      type: 'error',
+      message: error,
+      step: 'review',
     });
   });
 

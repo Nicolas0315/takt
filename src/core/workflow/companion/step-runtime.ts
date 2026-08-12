@@ -51,6 +51,7 @@ const log = createLogger('companion-step-runtime');
 interface CompanionStepRuntimeDeps {
   readonly cwd: string;
   readonly projectCwd: string;
+  readonly failureDir: string;
   readonly runSlug: string;
   readonly runPathNamespace: readonly string[];
   readonly language: 'en' | 'ja';
@@ -90,6 +91,7 @@ export class CompanionStepRuntime {
     this.structuredCaller = new CompanionStructuredCaller({
       cwd: deps.cwd,
       projectCwd: deps.projectCwd,
+      failureDir: deps.failureDir,
       language: deps.language,
       abortSignal: deps.abortSignal,
       recordUsage: deps.recordUsage,

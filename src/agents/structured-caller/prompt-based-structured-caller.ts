@@ -10,6 +10,7 @@ import { runAgent } from '../runner.js';
 import {
   isValidCandidateIndex,
   runJudgeFallbackStages,
+  throwOnProviderStreamParseFailure,
   type EvaluateConditionOptions,
   type JudgeStatusOptions,
   type JudgeStatusResult,
@@ -36,11 +37,19 @@ import {
   requestValidTeamLeaderDecomposition,
   TeamLeaderDecompositionValidationError,
 } from '../team-leader-decomposition-regeneration.js';
+import {
+  createAgentResponseFailureError,
+  isProviderStreamParseError,
+} from '../../shared/types/agent-failure.js';
 
 const log = createLogger('prompt-based-structured-caller');
 
 const RETRY_MAX_ATTEMPTS = 3;
 export const RETRY_DELAY_MS = 1000;
+
+function shouldRetryStructuredCall(error: unknown): boolean {
+  return !isProviderStreamParseError(error);
+}
 
 export class PromptBasedStructuredCaller implements StructuredCaller {
   async judgeStatus(
@@ -67,6 +76,7 @@ export class PromptBasedStructuredCaller implements StructuredCaller {
         onStream: options.onStream,
         childProcessEnv: options.childProcessEnv,
         abortSignal: options.abortSignal,
+        failureDir: options.failureDir,
         onPromptResolved: options.onStructuredPromptResolved,
       });
     } catch (error) {
@@ -92,6 +102,7 @@ export class PromptBasedStructuredCaller implements StructuredCaller {
     });
 
     options.abortSignal?.throwIfAborted();
+    throwOnProviderStreamParseFailure(structuredResponse);
 
     let structuredParseError: string | undefined;
     if (structuredResponse.status === 'done') {
@@ -136,6 +147,7 @@ export class PromptBasedStructuredCaller implements StructuredCaller {
         permissionMode: 'readonly',
         childProcessEnv: options.childProcessEnv,
         abortSignal: options.abortSignal,
+        failureDir: options.failureDir,
       });
     } catch (error) {
       options.onJudgeResponse?.({
@@ -156,6 +168,7 @@ export class PromptBasedStructuredCaller implements StructuredCaller {
     });
 
     options.abortSignal?.throwIfAborted();
+    throwOnProviderStreamParseFailure(response);
 
     if (response.status !== 'done') {
       return -1;
@@ -188,8 +201,7 @@ export class PromptBasedStructuredCaller implements StructuredCaller {
         );
 
         if (response.status !== 'done') {
-          const detail = response.error || response.content || response.status;
-          throw new Error(`Team leader failed: ${detail}`);
+          throw createAgentResponseFailureError(response, 'Team leader failed');
         }
 
         try {
@@ -227,15 +239,14 @@ export class PromptBasedStructuredCaller implements StructuredCaller {
     return withRetry(async () => {
       const response = await this.requestPromptBasedRawResponse(prompt, options, []);
       if (response.status !== 'done') {
-        const detail = response.error || response.content || response.status;
-        throw new Error(`Team leader feedback failed: ${detail}`);
+        throw createAgentResponseFailureError(response, 'Team leader feedback failed');
       }
       const raw = parseLastJsonBlock(response.content);
       return {
         ...toMorePartsResponse(raw, options.cancellablePartIds),
         ...(response.providerUsage !== undefined ? { providerUsage: response.providerUsage } : {}),
       };
-    }, options.abortSignal);
+    }, options.abortSignal, shouldRetryStructuredCall);
   }
 
   private async requestPromptBasedRawResponse(
@@ -261,6 +272,7 @@ export class PromptBasedStructuredCaller implements StructuredCaller {
         workflowMeta: options.workflowMeta,
         childProcessEnv: options.childProcessEnv,
         abortSignal: options.abortSignal,
+        failureDir: options.failureDir,
         ...('onPromptResolved' in options
           ? { onPromptResolved: options.onPromptResolved }
           : {}),

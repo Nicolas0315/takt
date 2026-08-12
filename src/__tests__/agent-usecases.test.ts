@@ -16,6 +16,7 @@ import {
 import { runTagJudgeStage } from '../agents/judge-status-usecase.js';
 import { requestMorePartsRawResponse } from '../agents/decompose-task-usecase.js';
 import { loadEvaluationSchema, loadJudgmentSchema } from '../infra/resources/schema-loader.js';
+import { AGENT_FAILURE_CATEGORIES } from '../shared/types/agent-failure.js';
 import { OpenCodeProvider } from '../infra/providers/opencode.js';
 
 vi.mock('../agents/runner.js', () => ({
@@ -62,6 +63,18 @@ function doneResponse(content: string, structuredOutput?: Record<string, unknown
   };
 }
 
+function parseFailureResponse() {
+  const message = 'provider stream parse error: Failed to parse item: invalid stdout line';
+  return {
+    persona: 'conductor',
+    status: 'error' as const,
+    content: message,
+    error: message,
+    failureCategory: AGENT_FAILURE_CATEGORIES.PROVIDER_STREAM_PARSE_ERROR,
+    timestamp: new Date('2026-02-12T00:00:00Z'),
+  };
+}
+
 const judgeOptions = { cwd: '/repo', stepName: 'review' };
 type JudgeStageLog = {
   stage: 1 | 2 | 3;
@@ -102,6 +115,7 @@ describe('agent-usecases', () => {
       schema,
       {
         cwd: '/tmp',
+        failureDir: '/tmp/failures',
         agentName: 'security-reviewer',
         sessionId: 'ambient-session',
         resolution: {
@@ -131,6 +145,7 @@ describe('agent-usecases', () => {
         mcpServers: {},
         bypassPermissions: false,
         sessionId: undefined,
+        failureDir: '/tmp/failures',
         outputSchema: schema,
         resolvedExecution: {
           provider: 'opencode',
@@ -188,6 +203,7 @@ describe('agent-usecases', () => {
         { type: 'object' },
         {
           cwd: '/tmp',
+          failureDir: '/tmp/failures',
           resolution: {
             provider,
             model: undefined,
@@ -352,6 +368,57 @@ describe('agent-usecases', () => {
     expect(runAgent).toHaveBeenNthCalledWith(2, 'conductor', 'tag', expect.not.objectContaining({
       outputSchema: expect.anything(),
     }));
+  });
+
+  it.each([1, 2, 3] as const)(
+    'judgeStatus は Stage %i の Codex stdout パース失敗後に後続ステージへ進まない',
+    async (failureStage) => {
+      const responses = [
+        doneResponse('no structured match'),
+        doneResponse('no tag match'),
+        parseFailureResponse(),
+      ];
+      responses[failureStage - 1] = parseFailureResponse();
+      vi.mocked(runAgent).mockImplementation(async () => {
+        const response = responses.shift();
+        if (response === undefined) {
+          throw new Error('unexpected provider call after parse failure');
+        }
+        return response;
+      });
+
+      await expect(judgeStatus('structured', 'tag', [
+        { label: 'a' },
+        { label: 'b' },
+      ], judgeOptions)).rejects.toMatchObject({
+        name: 'ProviderStreamParseError',
+        failureCategory: AGENT_FAILURE_CATEGORIES.PROVIDER_STREAM_PARSE_ERROR,
+        message: 'provider stream parse error: Failed to parse item: invalid stdout line',
+      });
+
+      expect(runAgent).toHaveBeenCalledTimes(failureStage);
+    },
+  );
+
+  it('judgeStatus は汎用 provider error では従来どおり Stage 2 fallback を使う', async () => {
+    vi.mocked(runAgent)
+      .mockResolvedValueOnce({
+        persona: 'conductor',
+        status: 'error',
+        content: 'provider error',
+        error: 'provider error',
+        failureCategory: AGENT_FAILURE_CATEGORIES.PROVIDER_ERROR,
+        timestamp: new Date('2026-02-12T00:00:00Z'),
+      })
+      .mockResolvedValueOnce(doneResponse('[REVIEW:2]'));
+
+    const result = await judgeStatus('structured', 'tag', [
+      { label: 'a' },
+      { label: 'b' },
+    ], judgeOptions);
+
+    expect(result).toEqual({ candidateIndex: 1, method: 'phase3_tag' });
+    expect(runAgent).toHaveBeenCalledTimes(2);
   });
 
   it.each([
@@ -782,6 +849,18 @@ describe('agent-usecases', () => {
       .rejects.toThrow('Team leader failed: bad output');
   });
 
+  it('decomposeTask は provider stream parse failure を typed error のまま即時伝播する', async () => {
+    vi.mocked(runAgent).mockResolvedValue(parseFailureResponse());
+
+    await expect(decomposeTask('instruction', 2, { cwd: '/repo' }))
+      .rejects.toMatchObject({
+        name: 'ProviderStreamParseError',
+        failureCategory: AGENT_FAILURE_CATEGORIES.PROVIDER_STREAM_PARSE_ERROR,
+        message: 'provider stream parse error: Failed to parse item: invalid stdout line',
+      });
+    expect(runAgent).toHaveBeenCalledOnce();
+  });
+
   it('decomposeTask は onPromptResolved を runAgent に伝搬する', async () => {
     vi.mocked(runAgent).mockResolvedValue(doneResponse('x', {
       parts: [
@@ -1098,6 +1177,22 @@ describe('agent-usecases', () => {
       ['p1'],
       { cwd: '/repo', persona: 'team-leader', cancellablePartIds: [] },
     )).rejects.toThrow('Team leader feedback failed: timeout');
+  });
+
+  it('requestMoreParts は provider stream parse failure を typed error のまま即時伝播する', async () => {
+    vi.mocked(runAgent).mockResolvedValue(parseFailureResponse());
+
+    await expect(requestMoreParts(
+      'instruction',
+      [{ id: 'p1', title: 'First', status: 'done', content: 'ok' }],
+      ['p1'],
+      { cwd: '/repo', persona: 'team-leader', cancellablePartIds: [] },
+    )).rejects.toMatchObject({
+      name: 'ProviderStreamParseError',
+      failureCategory: AGENT_FAILURE_CATEGORIES.PROVIDER_STREAM_PARSE_ERROR,
+      message: 'provider stream parse error: Failed to parse item: invalid stdout line',
+    });
+    expect(runAgent).toHaveBeenCalledOnce();
   });
 
   it('requestMoreParts は AbortSignal と provider usage を呼び出し境界へ伝搬する', async () => {

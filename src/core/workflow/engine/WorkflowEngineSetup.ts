@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync } from 'node:fs';
+import { join } from 'node:path';
 import type { StructuredCaller } from '../../../agents/structured-caller.js';
 import { createLogger } from '../../../shared/utils/index.js';
 import type {
@@ -184,6 +185,7 @@ export function createWorkflowEngineServices(params: WorkflowEngineSetupParams):
     getCwd: params.getCwd,
     getPrContext: () => params.options.prContext,
   });
+  const failureDir = join(params.runPaths.runRootAbs, 'failures');
 
   const optionsBuilder = new OptionsBuilder(
     params.options,
@@ -198,10 +200,12 @@ export function createWorkflowEngineServices(params: WorkflowEngineSetupParams):
     params.getCurrentWorkflowStack,
     () => params.task,
     getReviewScope,
+    () => failureDir,
   );
 
   const dynamicFacetSelector = new DynamicFacetSelectorCoordinator({
     engineOptions: params.options,
+    failureDir,
     selectionStore: params.sharedRuntime.dynamicFacetSelectionStore!,
     getCwd: params.getCwd,
     getReportDirectory: () => params.runPaths.reportsAbs,
@@ -231,6 +235,7 @@ export function createWorkflowEngineServices(params: WorkflowEngineSetupParams):
 
   const stepExecutor = new StepExecutor({
     optionsBuilder,
+    getFailureDir: () => failureDir,
     getCwd: params.getCwd,
     getProjectCwd: () => params.projectCwd,
     getReportDir: params.getReportDir,
@@ -290,6 +295,7 @@ export function createWorkflowEngineServices(params: WorkflowEngineSetupParams):
 
   const dynamicParallelSelector = new DynamicParallelSelectorCoordinator({
     engineOptions: params.options,
+    failureDir,
     selectionStore: params.sharedRuntime.dynamicParallelSelectionStore!,
     getCwd: params.getCwd,
     getReportDirectory: () => params.runPaths.reportsAbs,

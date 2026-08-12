@@ -67,7 +67,10 @@ import {
 import {
   providerSupportsStructuredOutput,
 } from '../../../infra/providers/provider-capabilities.js';
-import { AGENT_FAILURE_CATEGORIES } from '../../../shared/types/agent-failure.js';
+import {
+  AGENT_FAILURE_CATEGORIES,
+  createProviderStreamParseError,
+} from '../../../shared/types/agent-failure.js';
 import { buildStructuredJsonSchemaInstruction } from '../../../shared/prompts/index.js';
 import type {
   StructuredOutputFailureReason,
@@ -118,6 +121,7 @@ export interface StepExecutorDeps {
   readonly getProjectCwd: () => string;
   readonly getReportDir: () => string;
   readonly getRunPaths: () => RunPaths;
+  readonly getFailureDir: () => string;
   readonly getLanguage: () => Language | undefined;
   readonly getInteractive: () => boolean;
   readonly getWorkflowSteps: () => ReadonlyArray<{ name: string; description?: string }>;
@@ -207,6 +211,10 @@ interface StructuredOutputNormalizationResult {
 }
 
 export class StepExecutor {
+  private static isProviderStreamParseFailure(response: AgentResponse): boolean {
+    return response.failureCategory === AGENT_FAILURE_CATEGORIES.PROVIDER_STREAM_PARSE_ERROR;
+  }
+
   private readonly structuredOutputNormalizers: StructuredOutputNormalizerRegistry;
   private readonly companionReviewState: CompanionReviewStateStore | undefined;
 
@@ -453,6 +461,9 @@ export class StepExecutor {
     response: AgentResponse,
     runtime?: RuntimeStepResolution,
   ): StructuredOutputNormalizationResult {
+    if (StepExecutor.isProviderStreamParseFailure(response)) {
+      return { response };
+    }
     if (!step.structuredOutput) {
       return { response };
     }
@@ -737,6 +748,9 @@ export class StepExecutor {
         }
       } catch (reportError) {
         if (reportError instanceof ReportPhaseGenerationError) {
+          if (reportError.failureCategory === AGENT_FAILURE_CATEGORIES.PROVIDER_STREAM_PARSE_ERROR) {
+            throw createProviderStreamParseError(reportError.failureMessage ?? getErrorMessage(reportError));
+          }
           log.info('Report phase failed, continuing to status judgment', {
             step: step.name,
             error: getErrorMessage(reportError),
@@ -879,6 +893,7 @@ export class StepExecutor {
         companionRuntime = await CompanionStepRuntime.create({
           cwd: this.deps.getCwd(),
           projectCwd: this.deps.getProjectCwd(),
+          failureDir: this.deps.getFailureDir(),
           runSlug: this.deps.getRunId(),
           runPathNamespace: this.deps.getRunPathNamespace(),
           language: this.deps.getLanguage() ?? 'en',

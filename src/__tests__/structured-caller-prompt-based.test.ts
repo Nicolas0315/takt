@@ -28,6 +28,21 @@ vi.mock('../agents/runner.js', () => ({
 import { PromptBasedStructuredCaller } from '../agents/structured-caller.js';
 import { RETRY_DELAY_MS } from '../agents/structured-caller/prompt-based-structured-caller.js';
 import { resolveStructuredStep } from '../agents/structured-caller/shared.js';
+import { MAX_AGENT_FAILURE_MESSAGE_BYTES } from '../shared/types/agent-failure.js';
+
+function createBoundedParseFailure(fullTextPath: string): string {
+  const prefix = 'provider stream parse error: Failed to parse item: ';
+  const truncationMarker = `[TRUNCATED: 428000 bytes, full text: ${fullTextPath}]`;
+  return [
+    prefix,
+    'x'.repeat(
+      MAX_AGENT_FAILURE_MESSAGE_BYTES
+      - Buffer.byteLength(prefix)
+      - Buffer.byteLength(truncationMarker),
+    ),
+    truncationMarker,
+  ].join('');
+}
 
 describe('PromptBasedStructuredCaller', () => {
   beforeEach(() => {
@@ -371,6 +386,7 @@ describe('PromptBasedStructuredCaller', () => {
 
   it('should pass childProcessEnv through decomposeTask to runAgent', async () => {
     const childProcessEnv = { TAKT_OBSERVABILITY: '{"enabled":true}' };
+    const failureDir = '/tmp/project/.takt/runs/sample/failures';
     mockRunAgent.mockResolvedValue({
       persona: 'leader',
       status: 'done',
@@ -390,12 +406,13 @@ describe('PromptBasedStructuredCaller', () => {
       provider: 'cursor',
       persona: 'team-leader',
       childProcessEnv,
+      failureDir,
     });
 
     expect(mockRunAgent).toHaveBeenCalledWith(
       'team-leader',
       expect.stringContaining('```json'),
-      expect.objectContaining({ childProcessEnv }),
+      expect.objectContaining({ childProcessEnv, failureDir }),
     );
   });
 
@@ -1219,6 +1236,64 @@ describe('PromptBasedStructuredCaller', () => {
     expect(mockRunAgent).toHaveBeenCalledTimes(3);
   });
 
+  it('should stop requestMoreParts immediately for a provider stream parse error', async () => {
+    const fullTextPath = '/tmp/project/.takt/runs/sample/failures/team-leader-provider-failure-1.txt';
+    const boundedParseFailure = createBoundedParseFailure(fullTextPath);
+    mockRunAgent.mockResolvedValue({
+      persona: 'leader',
+      status: 'error',
+      content: '',
+      error: boundedParseFailure,
+      failureCategory: 'provider_stream_parse_error',
+      timestamp: new Date(),
+    });
+
+    const caller = new PromptBasedStructuredCaller();
+    const promise = caller.requestMoreParts(
+      'original task',
+      [{ id: 'p1', title: 'First', status: 'done', content: 'done' }],
+      ['p1'],
+      { cwd: '/tmp/project', provider: 'cursor' },
+    );
+
+    await expect(promise).rejects.toMatchObject({
+      name: 'ProviderStreamParseError',
+      failureCategory: 'provider_stream_parse_error',
+      message: boundedParseFailure,
+    });
+    expect(Buffer.byteLength(boundedParseFailure)).toBe(MAX_AGENT_FAILURE_MESSAGE_BYTES);
+    expect(mockRunAgent).toHaveBeenCalledOnce();
+    expect(infoMock).not.toHaveBeenCalled();
+  });
+
+  it('should preserve a bounded provider stream parse error during decomposition', async () => {
+    const fullTextPath = '/tmp/project/.takt/runs/sample/failures/team-leader-provider-failure-2.txt';
+    const boundedParseFailure = createBoundedParseFailure(fullTextPath);
+    mockRunAgent.mockResolvedValue({
+      persona: 'leader',
+      status: 'error',
+      content: '',
+      error: boundedParseFailure,
+      failureCategory: 'provider_stream_parse_error',
+      timestamp: new Date(),
+    });
+
+    const caller = new PromptBasedStructuredCaller();
+    const promise = caller.decomposeTask(
+      'original task',
+      2,
+      { cwd: '/tmp/project', provider: 'cursor' },
+    );
+
+    await expect(promise).rejects.toMatchObject({
+      name: 'ProviderStreamParseError',
+      failureCategory: 'provider_stream_parse_error',
+      message: boundedParseFailure,
+    });
+    expect(Buffer.byteLength(boundedParseFailure)).toBe(MAX_AGENT_FAILURE_MESSAGE_BYTES);
+    expect(mockRunAgent).toHaveBeenCalledOnce();
+  });
+
   it('should stop requestMoreParts retries immediately after cancellation', async () => {
     const abortController = new AbortController();
     mockRunAgent.mockImplementationOnce(async () => {
@@ -1399,6 +1474,31 @@ describe('PromptBasedStructuredCaller', () => {
 
     expect(result).toEqual({ candidateIndex: 0, method: 'phase3_tag' });
     expect(mockRunAgent).toHaveBeenCalledTimes(2);
+  });
+
+  it('should stop judgeStatus immediately for a provider stream parse error', async () => {
+    mockRunAgent.mockResolvedValueOnce({
+      persona: 'conductor',
+      status: 'error',
+      content: '',
+      error: 'Failed to parse item: invalid stdout line',
+      failureCategory: 'provider_stream_parse_error',
+      timestamp: new Date(),
+    });
+
+    const caller = new PromptBasedStructuredCaller();
+    await expect(caller.judgeStatus(
+      'structured instruction',
+      'tag instruction',
+      [{ label: 'approved' }, { label: 'rejected' }],
+      { cwd: '/tmp/project', stepName: 'review', provider: 'cursor' },
+    )).rejects.toMatchObject({
+      name: 'ProviderStreamParseError',
+      failureCategory: 'provider_stream_parse_error',
+      message: 'provider stream parse error: Failed to parse item: invalid stdout line',
+    });
+
+    expect(mockRunAgent).toHaveBeenCalledOnce();
   });
 
   it('should pass structured prompt resolution callback to Stage 2', async () => {

@@ -65,6 +65,7 @@ function dependencies(input: {
   return {
     cwd: '/project',
     projectCwd: '/project',
+    failureDir: '/project/.takt/runs/run/failures',
     runSlug: 'run',
     runPathNamespace: [],
     language: 'en' as const,

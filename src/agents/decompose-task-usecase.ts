@@ -20,6 +20,9 @@ import {
   TeamLeaderDecompositionValidationError,
   type RejectedTeamLeaderDecomposition,
 } from './team-leader-decomposition-regeneration.js';
+import {
+  createAgentResponseFailureError,
+} from '../shared/types/agent-failure.js';
 
 export interface TeamLeaderPartFeedbackResult {
   id: string;
@@ -42,6 +45,7 @@ export interface DecomposeTaskOptions {
   workflowMeta?: RunAgentOptions['workflowMeta'];
   childProcessEnv?: RunAgentOptions['childProcessEnv'];
   abortSignal?: RunAgentOptions['abortSignal'];
+  failureDir?: RunAgentOptions['failureDir'];
   mcpServers?: RunAgentOptions['mcpServers'];
   inspectTools?: string[];
   onPromptResolved?: (promptParts: {
@@ -105,6 +109,7 @@ async function requestDecompositionResponse(
       workflowMeta: options.workflowMeta,
       childProcessEnv: options.childProcessEnv,
       abortSignal: options.abortSignal,
+      failureDir: options.failureDir,
       onPromptResolved: options.onPromptResolved,
     });
   } catch (error) {
@@ -143,8 +148,7 @@ function parseDecomposition(
   maxInitialParts: number | undefined,
 ): DecomposeTaskResponse {
   if (response.status !== 'done') {
-    const detail = response.error || response.content || response.status;
-    throw new Error(`Team leader failed: ${detail}`);
+    throw createAgentResponseFailureError(response, 'Team leader failed');
   }
 
   const parts = response.structuredOutput?.parts;
@@ -197,6 +201,7 @@ export async function requestMorePartsRawResponse(
       workflowMeta: options.workflowMeta,
       childProcessEnv: options.childProcessEnv,
       abortSignal: options.abortSignal,
+      failureDir: options.failureDir,
     });
   } catch (error) {
     if (options.abortSignal?.aborted !== true) {
@@ -224,8 +229,7 @@ export async function requestMoreParts(
   );
 
   if (response.status !== 'done') {
-    const detail = response.error || response.content || response.status;
-    throw new Error(`Team leader feedback failed: ${detail}`);
+    throw createAgentResponseFailureError(response, 'Team leader feedback failed');
   }
 
   return {

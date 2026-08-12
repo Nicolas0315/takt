@@ -15,11 +15,13 @@ import { USAGE_MISSING_REASONS } from '../../core/logging/contracts.js';
 import type { AgentResponse, ProviderUsageSnapshot } from '../../core/models/index.js';
 import { buildEnvWithNestedObservabilitySnapshot } from '../../shared/telemetry/index.js';
 import { createLogger, getErrorMessage, createStreamDiagnostics, parseStructuredOutput, type StreamDiagnostics } from '../../shared/utils/index.js';
+import { truncateUtf8 } from '../../shared/utils/utf8.js';
 import { sanitizeSensitiveText } from '../../shared/utils/sensitiveText.js';
 import {
   AGENT_FAILURE_CATEGORIES,
   classifyAbortSignalReason,
   createProviderErrorFailure,
+  createProviderStreamParseFailure,
   createStreamIdleTimeoutFailure,
   formatAgentFailure,
   type AgentFailureCategory,
@@ -42,6 +44,10 @@ import {
 } from './CodexStreamHandler.js';
 import { buildRateLimitedResponseFields, containsRateLimitError } from '../rate-limit/detection.js';
 import { executeIsolatedCodex } from './isolated-executor.js';
+import {
+  boundCodexFailureMessage,
+  type CodexFailureMessageOptions,
+} from './failure-message.js';
 
 export type { CodexCallOptions } from './types.js';
 
@@ -53,6 +59,8 @@ const CODEX_REFUSAL_MAX_RETRIES = 2;
 const CODEX_RETRY_MAX_RETRIES = 8;
 const CODEX_RETRY_BASE_DELAY_MS = 1000;
 const CODEX_RETRY_MAX_DELAY_MS = 30_000;
+const CODEX_ERROR_MATCH_PREFIX_BYTES = 4 * 1024;
+const CODEX_PARSE_FAILURE_PREFIX = 'Failed to parse item:';
 const CODEX_RECONNECT_ERROR_PATTERNS = [
   'reconnecting...',
   'timeout waiting for child process to exit',
@@ -84,6 +92,10 @@ function isCodexSafetyRefusal(content: string): boolean {
   }
   const lower = content.toLowerCase();
   return CODEX_SAFETY_REFUSAL_PATTERNS.some((pattern) => lower.includes(pattern));
+}
+
+function getCodexErrorMatchPrefix(message: string): string {
+  return truncateUtf8(message, CODEX_ERROR_MATCH_PREFIX_BYTES).value.toLowerCase();
 }
 
 function toNumber(value: unknown): number | undefined {
@@ -155,12 +167,12 @@ function buildCodexInput(
  */
 export class CodexClient {
   private isRetriableError(message: string): boolean {
-    const lower = message.toLowerCase();
+    const lower = getCodexErrorMatchPrefix(message);
     return CODEX_RETRYABLE_ERROR_PATTERNS.some((pattern) => lower.includes(pattern));
   }
 
   private isReconnectFailure(message: string): boolean {
-    const lower = message.toLowerCase();
+    const lower = getCodexErrorMatchPrefix(message);
     return CODEX_RECONNECT_ERROR_PATTERNS.some((pattern) => lower.includes(pattern));
   }
 
@@ -243,6 +255,9 @@ export class CodexClient {
     if (streamSignal.aborted) {
       return classifyAbortSignalReason(streamSignal.reason);
     }
+    if (message.startsWith(CODEX_PARSE_FAILURE_PREFIX)) {
+      return createProviderStreamParseFailure(message);
+    }
     return createProviderErrorFailure(message);
   }
 
@@ -251,6 +266,9 @@ export class CodexClient {
     standardRetryCount: number,
     timeoutRetryCount: number,
   ): boolean {
+    if (failure.category === AGENT_FAILURE_CATEGORIES.PROVIDER_STREAM_PARSE_ERROR) {
+      return false;
+    }
     if (failure.category === AGENT_FAILURE_CATEGORIES.STREAM_IDLE_TIMEOUT) {
       return timeoutRetryCount < CODEX_TIMEOUT_MAX_RETRIES;
     }
@@ -282,8 +300,9 @@ export class CodexClient {
     agentType: string,
     sessionId: string | undefined,
     failure: AgentFailureDetail,
+    options: CodexCallOptions,
   ): AgentResponse {
-    const message = formatAgentFailure(failure);
+    const message = boundCodexFailureMessage(formatAgentFailure(failure), options, true);
     return {
       persona: agentType,
       status: 'error',
@@ -299,12 +318,15 @@ export class CodexClient {
     agentType: string,
     sessionId: string | undefined,
     message: string,
+    options: CodexFailureMessageOptions,
   ): AgentResponse {
+    const response = buildRateLimitedResponseFields('codex', 'sdk_error', message);
     return {
       persona: agentType,
       timestamp: new Date(),
       sessionId,
-      ...buildRateLimitedResponseFields('codex', 'sdk_error', message),
+      ...response,
+      error: boundCodexFailureMessage(response.error, options, true),
     };
   }
 
@@ -319,7 +341,7 @@ export class CodexClient {
       const failure = createProviderErrorFailure(
         'Strict read-only Codex execution cannot resume a session',
       );
-      const errorResponse = this.buildErrorResponse(agentType, options.sessionId, failure);
+      const errorResponse = this.buildErrorResponse(agentType, options.sessionId, failure, options);
       emitResult(
         options.onStream,
         false,
@@ -353,7 +375,7 @@ export class CodexClient {
       input = buildCodexInput(fullPrompt, options.imageAttachments);
     } catch (error) {
       const failure = createProviderErrorFailure(getErrorMessage(error));
-      const errorResponse = this.buildErrorResponse(agentType, threadId, failure);
+      const errorResponse = this.buildErrorResponse(agentType, threadId, failure, options);
       emitResult(options.onStream, false, errorResponse.error ?? errorResponse.content, threadId, failure.category);
       return errorResponse;
     }
@@ -373,7 +395,7 @@ export class CodexClient {
       const failure = createProviderErrorFailure(
         `Failed to discover Codex Skills: ${getErrorMessage(error)}`,
       );
-      const errorResponse = this.buildErrorResponse(agentType, threadId, failure);
+      const errorResponse = this.buildErrorResponse(agentType, threadId, failure, options);
       emitResult(
         options.onStream,
         false,
@@ -589,15 +611,12 @@ export class CodexClient {
           failureMessage = streamErrorFailureMessage;
         }
 
-        diag.onCompleted(success ? 'normal' : 'error', success ? undefined : failureMessage);
+        const boundedStreamFailureMessage = success
+          ? undefined
+          : boundCodexFailureMessage(failureMessage, options, false);
+        diag.onCompleted(success ? 'normal' : 'error', boundedStreamFailureMessage);
 
         if (!success) {
-          if (containsRateLimitError(failureMessage)) {
-            const rateLimitedResponse = this.buildRateLimitedResponse(agentType, currentThreadId, failureMessage);
-            emitResult(options.onStream, false, rateLimitedResponse.error ?? rateLimitedResponse.content, currentThreadId);
-            return rateLimitedResponse;
-          }
-
           const failure = this.resolveFailureDetail(
             failureMessage || 'Codex execution failed',
             streamAbortController.signal,
@@ -605,8 +624,27 @@ export class CodexClient {
             abortCause,
             timeoutMessage,
           );
+          if (
+            failure.category !== AGENT_FAILURE_CATEGORIES.PROVIDER_STREAM_PARSE_ERROR
+            && containsRateLimitError(failureMessage)
+          ) {
+            const rateLimitedResponse = this.buildRateLimitedResponse(
+              agentType,
+              currentThreadId,
+              failureMessage,
+              options,
+            );
+            emitResult(options.onStream, false, rateLimitedResponse.error ?? rateLimitedResponse.content, currentThreadId);
+            return rateLimitedResponse;
+          }
+
           if (!failedAfterStreamError && this.shouldRetry(failure, standardRetryCount, timeoutRetryCount)) {
-            log.info('Retrying Codex call after transient failure', { agentType, attempt, message: failure.reason });
+            const boundedFailureMessage = boundCodexFailureMessage(failure.reason, options, true);
+            log.info('Retrying Codex call after transient failure', {
+              agentType,
+              attempt,
+              message: boundedFailureMessage,
+            });
             threadId = isolated ? undefined : currentThreadId;
             const retryState = this.recordRetry(failure.category, standardRetryCount, timeoutRetryCount);
             standardRetryCount = retryState.standardRetryCount;
@@ -616,7 +654,7 @@ export class CodexClient {
           }
 
           const finalFailure = this.withReconnectFailureDiagnostics(failure, state.activeTool);
-          const errorResponse = this.buildErrorResponse(agentType, currentThreadId, finalFailure);
+          const errorResponse = this.buildErrorResponse(agentType, currentThreadId, finalFailure, options);
           emitResult(
             options.onStream,
             false,
@@ -650,7 +688,7 @@ export class CodexClient {
           const failure = createProviderErrorFailure(
             `Codex safety filter refused the request after ${CODEX_REFUSAL_MAX_RETRIES + 1} attempts: ${trimmed.slice(0, 200)}`,
           );
-          const errorResponse = this.buildErrorResponse(agentType, currentThreadId, failure);
+          const errorResponse = this.buildErrorResponse(agentType, currentThreadId, failure, options);
           emitResult(
             options.onStream,
             false,
@@ -678,12 +716,6 @@ export class CodexClient {
         return response;
       } catch (error) {
         const rawErrorMessage = getErrorMessage(error);
-        if (containsRateLimitError(rawErrorMessage)) {
-          const rateLimitedResponse = this.buildRateLimitedResponse(agentType, currentThreadId, rawErrorMessage);
-          emitResult(options.onStream, false, rateLimitedResponse.error ?? rateLimitedResponse.content, currentThreadId);
-          return rateLimitedResponse;
-        }
-
         const failure = this.resolveFailureDetail(
           rawErrorMessage,
           streamAbortController.signal,
@@ -691,8 +723,23 @@ export class CodexClient {
           abortCause,
           timeoutMessage,
         );
+        if (
+          failure.category !== AGENT_FAILURE_CATEGORIES.PROVIDER_STREAM_PARSE_ERROR
+          && containsRateLimitError(rawErrorMessage)
+        ) {
+          const rateLimitedResponse = this.buildRateLimitedResponse(
+            agentType,
+            currentThreadId,
+            rawErrorMessage,
+            options,
+          );
+          emitResult(options.onStream, false, rateLimitedResponse.error ?? rateLimitedResponse.content, currentThreadId);
+          return rateLimitedResponse;
+        }
+
         const errorMessage = formatAgentFailure(failure);
 
+        const boundedErrorMessage = boundCodexFailureMessage(errorMessage, options, false);
         diagRef?.onCompleted(
           failure.category === AGENT_FAILURE_CATEGORIES.STREAM_IDLE_TIMEOUT
             ? 'timeout'
@@ -700,11 +747,16 @@ export class CodexClient {
               || failure.category === AGENT_FAILURE_CATEGORIES.PART_TIMEOUT
               ? 'abort'
               : 'error',
-          errorMessage,
+          boundedErrorMessage,
         );
 
         if (this.shouldRetry(failure, standardRetryCount, timeoutRetryCount)) {
-          log.info('Retrying Codex call after transient exception', { agentType, attempt, errorMessage });
+          const retryErrorMessage = boundCodexFailureMessage(errorMessage, options, true);
+          log.info('Retrying Codex call after transient exception', {
+            agentType,
+            attempt,
+            errorMessage: retryErrorMessage,
+          });
           threadId = isolated ? undefined : currentThreadId;
           const retryState = this.recordRetry(failure.category, standardRetryCount, timeoutRetryCount);
           standardRetryCount = retryState.standardRetryCount;
@@ -714,7 +766,7 @@ export class CodexClient {
         }
 
         const finalFailure = this.withReconnectFailureDiagnostics(failure, state.activeTool);
-        const errorResponse = this.buildErrorResponse(agentType, currentThreadId, finalFailure);
+        const errorResponse = this.buildErrorResponse(agentType, currentThreadId, finalFailure, options);
         emitResult(
           options.onStream,
           false,

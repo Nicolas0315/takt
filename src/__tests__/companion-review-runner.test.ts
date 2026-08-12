@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { AgentResponse } from '../core/models/index.js';
 import { executeCompanionStructuredAgent } from '../core/workflow/companion/review-runner.js';
+import {
+  AGENT_FAILURE_CATEGORIES,
+  createProviderStreamParseError,
+} from '../shared/types/agent-failure.js';
 
 function response(status: AgentResponse['status']): AgentResponse {
   return {
@@ -33,6 +37,7 @@ describe('CT-COMP-06 and CT-COMP-11 structured internal agent execution', () => 
         outputSchema: { type: 'object' },
         cwd: '/worktree',
         projectCwd: '/project',
+        failureDir: '/project/.takt/runs/run/failures',
         language: 'en',
         resolution: { provider: 'mock', model: 'mock-model', providerOptions: {} },
         call,
@@ -46,6 +51,7 @@ describe('CT-COMP-06 and CT-COMP-11 structured internal agent execution', () => 
         expect.objectContaining({
           cwd: '/worktree',
           projectCwd: '/project',
+          failureDir: '/project/.takt/runs/run/failures',
           language: 'en',
           resolution: { provider: 'mock', model: 'mock-model', providerOptions: {} },
           permissionMode: 'readonly',
@@ -75,6 +81,7 @@ describe('CT-COMP-06 and CT-COMP-11 structured internal agent execution', () => 
       outputSchema: { type: 'object' },
       cwd: '/worktree',
       projectCwd: '/project',
+      failureDir: '/project/.takt/runs/run/failures',
       language: 'en',
       resolution: { provider: 'mock', model: 'mock-model', providerOptions: {} },
       call,
@@ -118,6 +125,65 @@ describe('CT-COMP-06 and CT-COMP-11 structured internal agent execution', () => 
       purpose: 'moderator',
       success: true,
     }));
+  });
+
+  it('should not retry a resolved provider stream parse failure', async () => {
+    const failureMessage = 'Failed to parse item: invalid companion response';
+    const recordUsage = vi.fn();
+    const call = vi.fn().mockResolvedValue({
+      ...response('error'),
+      error: failureMessage,
+      failureCategory: AGENT_FAILURE_CATEGORIES.PROVIDER_STREAM_PARSE_ERROR,
+    });
+
+    await expect(executeCompanionStructuredAgent({
+      purpose: 'reviewer',
+      agentName: 'security-reviewer',
+      systemPrompt: 'system',
+      prompt: 'prompt',
+      outputSchema: { type: 'object' },
+      cwd: '/worktree',
+      projectCwd: '/project',
+      failureDir: '/project/.takt/runs/run/failures',
+      language: 'en',
+      resolution: { provider: 'mock' },
+      call,
+      recordUsage,
+    })).rejects.toMatchObject({
+      name: 'ProviderStreamParseError',
+      failureCategory: AGENT_FAILURE_CATEGORIES.PROVIDER_STREAM_PARSE_ERROR,
+      reason: failureMessage,
+      message: `provider stream parse error: ${failureMessage}`,
+    });
+
+    expect(call).toHaveBeenCalledOnce();
+    expect(recordUsage).toHaveBeenCalledOnce();
+  });
+
+  it('should not retry a thrown provider stream parse failure', async () => {
+    const failure = createProviderStreamParseError(
+      'Failed to parse item: invalid companion response',
+    );
+    const recordUsage = vi.fn();
+    const call = vi.fn().mockRejectedValue(failure);
+
+    await expect(executeCompanionStructuredAgent({
+      purpose: 'reviewer',
+      agentName: 'security-reviewer',
+      systemPrompt: 'system',
+      prompt: 'prompt',
+      outputSchema: { type: 'object' },
+      cwd: '/worktree',
+      projectCwd: '/project',
+      failureDir: '/project/.takt/runs/run/failures',
+      language: 'en',
+      resolution: { provider: 'mock' },
+      call,
+      recordUsage,
+    })).rejects.toBe(failure);
+
+    expect(call).toHaveBeenCalledOnce();
+    expect(recordUsage).toHaveBeenCalledOnce();
   });
 
   it('should retry a provider AbortError while the parent signal remains active', async () => {
@@ -210,6 +276,7 @@ describe('CT-COMP-06 and CT-COMP-11 structured internal agent execution', () => 
         outputSchema: { type: 'object' },
         cwd: '/worktree',
         projectCwd: '/project',
+        failureDir: '/project/.takt/runs/run/failures',
         language: 'en',
         resolution: { provider: 'mock' },
         call,
@@ -238,6 +305,7 @@ describe('CT-COMP-06 and CT-COMP-11 structured internal agent execution', () => 
       outputSchema: { type: 'object' },
       cwd: '/worktree',
       projectCwd: '/project',
+      failureDir: '/project/.takt/runs/run/failures',
       language: 'en',
       resolution: { provider: 'mock' },
       abortSignal: controller.signal,
@@ -273,6 +341,7 @@ describe('CT-COMP-06 and CT-COMP-11 structured internal agent execution', () => 
         outputSchema: { type: 'object' },
         cwd: '/worktree',
         projectCwd: '/project',
+        failureDir: '/project/.takt/runs/run/failures',
         language: 'en',
         resolution: { provider: 'mock', model: 'mock-model', providerOptions: {} },
         timeoutMs: 100,

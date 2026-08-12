@@ -15,6 +15,7 @@ function createStep(overrides: Partial<WorkflowStep> = {}): WorkflowStep {
 
 type BuilderEngineOverrides = Partial<WorkflowEngineOptions> & {
   workflowName?: string;
+  failureDir?: string;
 };
 
 function createProcessSafetyByStep(parentRunPid: number): WorkflowEngineOptions['phase1ProcessSafetyByStep'] {
@@ -47,6 +48,8 @@ function createBuilder(step: WorkflowStep, engineOverrides: BuilderEngineOverrid
     () => 'test workflow',
     undefined,
     () => 'Original workflow task',
+    undefined,
+    engineOverrides.failureDir === undefined ? undefined : () => engineOverrides.failureDir,
   );
 }
 
@@ -69,6 +72,36 @@ describe('OptionsBuilder.buildBaseOptions', () => {
         codex: { defaultPermissionMode: 'full' },
       },
     });
+  });
+
+  it('propagates the run failure directory to every agent phase option set', () => {
+    const step = createStep();
+    const failureDir = '/project/.takt/runs/sample/failures';
+    const builder = createBuilder(step, {
+      failureDir,
+      structuredCaller: {
+        judgeStatus: vi.fn(),
+      },
+    });
+
+    const phase1Options = builder.buildAgentOptions(step);
+    const resumeOptions = builder.buildResumeOptions(step, 'session-123', { maxTurns: 3 });
+    const newSessionOptions = builder.buildNewSessionReportOptions(step, {
+      allowedTools: [],
+      maxTurns: 3,
+    });
+    const state = {
+      currentStep: step.name,
+      stepCount: 1,
+      history: [],
+      personaSessions: new Map<string, string>(),
+    };
+    const phaseContext = builder.buildPhaseRunnerContext(step, state, 'response', vi.fn());
+
+    expect(phase1Options).toHaveProperty('failureDir', failureDir);
+    expect(resumeOptions).toHaveProperty('failureDir', failureDir);
+    expect(newSessionOptions).toHaveProperty('failureDir', failureDir);
+    expect(phaseContext).toHaveProperty('failureDir', failureDir);
   });
 
   it('includes requiredPermissionMode in permission resolution context', () => {

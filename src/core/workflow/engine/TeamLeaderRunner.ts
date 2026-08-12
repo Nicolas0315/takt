@@ -10,6 +10,14 @@ import type {
 import { ParallelLogger } from './parallel-logger.js';
 import { incrementStepIteration } from './state-manager.js';
 import { createLogger, getErrorMessage } from '../../../shared/utils/index.js';
+import { sanitizeSensitiveText } from '../../../shared/utils/sensitiveText.js';
+import { truncateUtf8PreservingMarker, truncateUtf8WithMarker } from '../../../shared/utils/text.js';
+import {
+  AGENT_FAILURE_CATEGORIES,
+  MAX_AGENT_FAILURE_MESSAGE_BYTES,
+  createProviderStreamParseError,
+  isProviderStreamParseError,
+} from '../../../shared/types/agent-failure.js';
 import { runTeamLeaderExecution } from './team-leader-execution.js';
 import { buildTeamLeaderAggregatedContent } from './team-leader-aggregation.js';
 import { createPartStep, createTeamLeaderPlanningStep, resolvePartErrorDetail, summarizeParts } from './team-leader-common.js';
@@ -55,6 +63,40 @@ import { createAbortScope } from './abort-signal.js';
 import { isTeamLeaderPartCancellation } from './team-leader-part-cancellation.js';
 
 const log = createLogger('team-leader-runner');
+
+function truncateTeamLeaderFailureContent(text: string): string {
+  if (Buffer.byteLength(text, 'utf8') <= MAX_AGENT_FAILURE_MESSAGE_BYTES) {
+    return text;
+  }
+
+  const markers = text.match(/\[TRUNCATED: [^\]]+\]/gu);
+  if (markers === null || markers.length < 2) {
+    return truncateUtf8PreservingMarker(text, MAX_AGENT_FAILURE_MESSAGE_BYTES);
+  }
+
+  const markerSuffix = markers.join(' ');
+  const textWithoutMarkers = text.replace(/\[TRUNCATED: [^\]]+\]/gu, '').trimEnd();
+  const textWithMarkersAtEnd = textWithoutMarkers.length === 0
+    ? markerSuffix
+    : `${textWithoutMarkers} ${markerSuffix}`;
+  return truncateUtf8WithMarker(
+    textWithMarkersAtEnd,
+    MAX_AGENT_FAILURE_MESSAGE_BYTES,
+    () => markerSuffix,
+  );
+}
+
+function selectPrimaryTeamLeaderFailure(failedResults: readonly PartResult[]): PartResult {
+  const primaryFailure = failedResults.find(
+    (result) => result.response.failureCategory === AGENT_FAILURE_CATEGORIES.PROVIDER_ERROR,
+  )
+    ?? failedResults.find((result) => result.response.failureCategory !== undefined)
+    ?? failedResults[0];
+  if (primaryFailure === undefined) {
+    throw new Error('Team leader failure aggregation requires at least one failed part');
+  }
+  return primaryFailure;
+}
 
 export interface TeamLeaderRunnerDeps {
   readonly optionsBuilder: OptionsBuilder;
@@ -174,6 +216,7 @@ export class TeamLeaderRunner {
       mcpServers: leaderMcpServers,
       workflowMeta: leaderWorkflowMeta,
       childProcessEnv: this.deps.engineOptions.childProcessEnv,
+      failureDir: leaderBaseOptions.failureDir,
       abortSignal: leaderBaseOptions.abortSignal,
       onStream: leaderBaseOptions.onStream,
       onAgentResponse: (response: AgentResponse) => {
@@ -367,6 +410,7 @@ export class TeamLeaderRunner {
             mcpServers: leaderMcpServers,
             workflowMeta: leaderWorkflowMeta,
             childProcessEnv: this.deps.engineOptions.childProcessEnv,
+            failureDir: leaderBaseOptions.failureDir,
             cancellablePartIds: cancellablePartIdsCopy,
             abortSignal,
             onStream: leaderBaseOptions.onStream,
@@ -394,6 +438,9 @@ export class TeamLeaderRunner {
           return moreParts;
         } catch (error) {
           if (feedbackAbortSignal.aborted) {
+            throw error;
+          }
+          if (isProviderStreamParseError(error)) {
             throw error;
           }
           const timeoutFallback = createTimeoutContinuationFeedback({
@@ -437,6 +484,7 @@ export class TeamLeaderRunner {
         publicationFence,
         ).catch((error) => {
           if (isTeamLeaderPartCancellation(error)) throw error;
+          if (isProviderStreamParseError(error)) throw error;
           return buildTeamLeaderErrorPartResult(step, part, error);
         }),
       });
@@ -473,12 +521,22 @@ export class TeamLeaderRunner {
         : timeoutContinuationFailed
           ? `Team leader timeout continuation failed: ${errors}`
           : `Team leader part failed: ${errors}`;
+      const primaryFailure = selectPrimaryTeamLeaderFailure(failedResults);
+      const boundedError = truncateTeamLeaderFailureContent(
+        sanitizeSensitiveText(resolvePartErrorDetail(primaryFailure)),
+      );
+      const boundedContent = truncateTeamLeaderFailureContent(
+        sanitizeSensitiveText(errorMessage),
+      );
       const errorResponse: AgentResponse = {
         persona: step.name,
         status: 'error',
-        content: errorMessage,
-        error: errorMessage,
+        content: boundedContent,
+        error: boundedError,
         timestamp: new Date(),
+        ...(primaryFailure.response.failureCategory === undefined
+          ? {}
+          : { failureCategory: primaryFailure.response.failureCategory }),
       };
       state.stepOutputs.set(step.name, errorResponse);
       state.lastOutput = errorResponse;
@@ -669,6 +727,9 @@ export class TeamLeaderRunner {
         result.response.status === 'done',
         result.response.providerUsage,
       );
+    }
+    if (result.response.failureCategory === AGENT_FAILURE_CATEGORIES.PROVIDER_STREAM_PARSE_ERROR) {
+      throw createProviderStreamParseError(resolvePartErrorDetail(result));
     }
     return {
       ...result,

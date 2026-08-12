@@ -9,6 +9,7 @@ import {
   TeamLeaderExecutionTerminalGate,
   type TeamLeaderExecutionPublicationFence,
 } from './team-leader-execution-terminal.js';
+import { isProviderStreamParseError } from '../../../shared/types/agent-failure.js';
 
 type DeepReadonly<T> = T extends object
   ? { readonly [Key in keyof T]: DeepReadonly<T[Key]> }
@@ -231,6 +232,9 @@ export async function runTeamLeaderExecution(
       feedbackAbortScope.abort(error);
       void feedbackPromise.catch(() => undefined);
       if (options.abortSignal?.aborted) {
+        throw error;
+      }
+      if (isProviderStreamParseError(error)) {
         throw error;
       }
       options.onPlanningError?.(error);
