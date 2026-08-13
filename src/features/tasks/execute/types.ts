@@ -41,6 +41,11 @@ export interface ExceededInfo {
   resumePoint?: WorkflowResumePoint;
 }
 
+export interface WorkflowCompletion {
+  readonly kind: 'deferred';
+  readonly report: string;
+}
+
 export type WorkflowExecutionEvent =
   | {
       type: 'run_started';
@@ -112,6 +117,7 @@ export type WorkflowExecutionEvent =
       type: 'completed';
       success: true;
       reportDirectory?: string;
+      completion?: WorkflowCompletion;
     }
   | {
       type: 'completed';
@@ -189,6 +195,7 @@ export type WorkflowExecutionEventSink = (event: WorkflowExecutionEvent) => void
 /** Result of workflow execution */
 export interface WorkflowExecutionResult {
   success: boolean;
+  completion?: WorkflowCompletion;
   reason?: string;
   retryable?: boolean;
   lastStep?: string;

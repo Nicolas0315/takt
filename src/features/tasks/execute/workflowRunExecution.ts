@@ -4,6 +4,7 @@ import type {
 import type {
   WorkflowTerminalPublicationPayload,
 } from './workflowTerminalPayload.js';
+import type { WorkflowCompletion } from './types.js';
 
 export interface WorkflowRunExecutionHandle {
   run<T>(
@@ -24,6 +25,7 @@ export interface WorkflowRunTerminalOutcome {
   readonly status: WorkflowRunTerminalStatus;
   readonly iteration: number;
   readonly reason?: string;
+  readonly completion?: WorkflowCompletion;
 }
 
 export interface RunFinalization {

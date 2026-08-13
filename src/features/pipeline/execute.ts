@@ -8,6 +8,7 @@ import {
   EXIT_WORKFLOW_FAILED,
   EXIT_GIT_OPERATION_FAILED,
   EXIT_PR_CREATION_FAILED,
+  EXIT_DEFERRED_HANDOFF_REQUIRED,
 } from '../../shared/exitCodes.js';
 import {
   resolveTaskContent,
@@ -56,8 +57,11 @@ async function runPipeline(options: PipelineExecutionOptions): Promise<PipelineO
   }
 
   log.info('Pipeline workflow execution starting', { workflow, branch: context.branch, skipGit, issueNumber: options.issueNumber });
-  const workflowOk = await runWorkflow(cwd, workflow, taskContent.task, context.execCwd, options, context);
-  if (!workflowOk) return { exitCode: EXIT_WORKFLOW_FAILED, result: buildResult({ branch: context.branch }) };
+  const workflowResult = await runWorkflow(cwd, workflow, taskContent.task, context.execCwd, options, context);
+  if (!workflowResult.success) {
+    return { exitCode: EXIT_WORKFLOW_FAILED, result: buildResult({ branch: context.branch }) };
+  }
+  const isDeferred = workflowResult.completion?.kind === 'deferred';
 
   if (!skipGit && context.branch) {
     const commitMessage = buildCommitMessage(pipelineConfig, taskContent.issue, options.task);
@@ -66,9 +70,41 @@ async function runPipeline(options: PipelineExecutionOptions): Promise<PipelineO
     }
   }
 
+  if (isDeferred && skipGit) {
+    info('Deferred workflow handoff requires Git commit, push, and pull request creation; --skip-git prevents handoff');
+    return {
+      exitCode: EXIT_DEFERRED_HANDOFF_REQUIRED,
+      result: buildResult({ branch: context.branch }),
+    };
+  }
+  if (isDeferred && (!context.branch || !context.baseBranch)) {
+    error('Deferred workflow handoff requires both a branch and a base branch');
+    return {
+      exitCode: EXIT_DEFERRED_HANDOFF_REQUIRED,
+      result: buildResult({ branch: context.branch }),
+    };
+  }
+  if (isDeferred && !autoPr) {
+    error('Deferred workflow handoff requires --auto-pr after commit and push');
+    return {
+      exitCode: EXIT_DEFERRED_HANDOFF_REQUIRED,
+      result: buildResult({ branch: context.branch }),
+    };
+  }
+
   let prUrl: string | undefined;
   if (autoPr && !skipGit && context.branch) {
-    prUrl = submitPullRequest(cwd, context.branch, context.baseBranch, taskContent, workflow, pipelineConfig, options);
+    prUrl = submitPullRequest(
+      cwd,
+      context.branch,
+      context.baseBranch,
+      taskContent,
+      workflow,
+      pipelineConfig,
+      options,
+      workflowResult.completion,
+      context.execCwd,
+    );
     if (!prUrl) return { exitCode: EXIT_PR_CREATION_FAILED, result: buildResult({ branch: context.branch }) };
   } else if (autoPr && skipGit) {
     info('--auto-pr is ignored when --skip-git is specified (no push was performed)');
@@ -83,7 +119,7 @@ async function runPipeline(options: PipelineExecutionOptions): Promise<PipelineO
   status('Issue', issueStatus);
   status('Branch', branchStatus);
   status('Workflow', safeWorkflow);
-  status('Result', 'Success', 'green');
+  status('Result', isDeferred ? 'Success (deferred handoff)' : 'Success', 'green');
 
   return { exitCode: 0, result: buildResult({ success: true, branch: context.branch, prUrl }) };
 }

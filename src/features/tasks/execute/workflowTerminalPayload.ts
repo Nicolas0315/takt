@@ -14,6 +14,7 @@ import {
   buildWorkflowSuccessSessionFinalization,
 } from './workflowExecutionReporting.js';
 import { sanitizeTextForStorage } from './traceReportRedaction.js';
+import type { WorkflowCompletion } from './types.js';
 
 type TerminalSessionRecord = Extract<
   NdjsonRecord,
@@ -42,6 +43,7 @@ export interface WorkflowTerminalPublicationPayload {
   readonly iterations: number;
   readonly reason?: string;
   readonly failure?: RunFailure;
+  readonly completion?: WorkflowCompletion;
   readonly endTime: string;
   readonly sessionLog: SessionLog;
   readonly sessionState: SessionState;
@@ -58,6 +60,7 @@ export interface WorkflowTerminalPayloadFactory {
     readonly iterations: number;
     readonly reason?: string;
     readonly failure?: RunFailure;
+    readonly completion?: WorkflowCompletion;
     readonly lastStepContent: string | undefined;
     readonly lastStepName: string | undefined;
     readonly sessionLog?: SessionLog;
@@ -105,6 +108,7 @@ function assembleWorkflowTerminalPublicationPayload(
     readonly iterations: number;
     readonly reason?: string;
     readonly failure?: RunFailure;
+    readonly completion?: WorkflowCompletion;
     readonly lastStepContent: string | undefined;
     readonly lastStepName: string | undefined;
     readonly endTime: string;
@@ -154,6 +158,7 @@ function assembleWorkflowTerminalPublicationPayload(
     iterations: input.iterations,
     ...(input.reason === undefined ? {} : { reason: input.reason }),
     ...(input.failure === undefined ? {} : { failure: input.failure }),
+    ...(input.completion === undefined ? {} : { completion: input.completion }),
     endTime: input.endTime,
     sessionLog: finalization.sessionLog,
     sessionState: finalization.sessionState,
@@ -194,6 +199,7 @@ function assertWorkflowTerminalPublicationPayload(
     'iterations',
     'reason',
     'failure',
+    'completion',
     'endTime',
     'sessionLog',
     'sessionState',
@@ -233,6 +239,17 @@ function assertWorkflowTerminalPublicationPayload(
     if (failure.failureCategory !== undefined) {
       requireAgentFailureCategory(failure.failureCategory, '$.failure.failureCategory');
     }
+  }
+  if (payload.completion !== undefined) {
+    if (payload.status !== 'completed') {
+      throw new TypeError('Non-completed workflow terminal payload cannot contain completion');
+    }
+    const completion = requireRecord(payload.completion, '$.completion');
+    assertAllowedKeys(completion, ['kind', 'report'], '$.completion');
+    if (completion.kind !== 'deferred') {
+      throw new TypeError('Workflow terminal payload completion kind is invalid');
+    }
+    requireNonEmptyString(completion.report, '$.completion.report');
   }
   requireIsoTimestamp(payload.endTime, '$.endTime');
   assertTerminalSessionLog(payload.sessionLog, payload);

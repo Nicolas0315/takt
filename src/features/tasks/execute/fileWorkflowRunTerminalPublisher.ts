@@ -50,6 +50,9 @@ export function createFileWorkflowRunTerminalPublisher(input: {
         ...(payload.failure === undefined
           ? {}
           : { failure: payload.failure }),
+        ...(payload.completion === undefined
+          ? {}
+          : { completion: payload.completion }),
         endTime: payload.endTime,
       });
       persistWorkflowSessionState(
@@ -118,6 +121,8 @@ function assertTerminalIdentity(
     || payload.status !== expectedPayloadStatus
     || payload.iterations !== outcome.iteration
     || payload.reason !== outcome.reason
+    || payload.completion?.kind !== outcome.completion?.kind
+    || payload.completion?.report !== outcome.completion?.report
   ) {
     throw new Error(
       `File terminal payload does not match run "${runPaths.slug}"`,

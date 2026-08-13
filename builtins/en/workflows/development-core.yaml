@@ -3,6 +3,7 @@ description: Shared development flow with injectable planning, testing, implemen
 subworkflow:
   callable: true
   visibility: internal
+  returns: [deferred]
   params:
     implementation_pool:
       type: facet_pool_ref
@@ -233,5 +234,7 @@ steps:
         next: COMPLETE
       - condition: need_replan
         next: replan
+      - condition: deferred
+        return: deferred
       - condition: ABORT
         next: ABORT

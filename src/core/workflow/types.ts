@@ -522,7 +522,7 @@ export interface WorkflowEvents {
     iteration: number | undefined,
     workflowStack: WorkflowResumePointEntry[],
   ) => void;
-  'workflow:complete': (state: WorkflowState) => void;
+  'workflow:complete': (state: WorkflowState, returnValue?: string) => void;
   'workflow:abort': (
     state: WorkflowState,
     reason: string,

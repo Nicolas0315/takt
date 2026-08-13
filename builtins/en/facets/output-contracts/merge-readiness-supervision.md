@@ -20,6 +20,26 @@
 
 ## Unresolved Premises and Environmental Constraints
 - {None, or the reason replanning or an environment change is required and the unverified scope}
+
+## Unverified Gate Classification
+| Gate ID / target | Result | Relation to changed contracts | Classification basis | Successful direct evidence | Four environmental conditions | Downstream gate and reachability |
+|------------------|--------|------------------------------|----------------------|----------------------------|------------------------------|---------------------------------|
+| {Configured gate name and command} | {success / failure / unverified / not_applicable} | {Contract ID, SCN ID, or none} | {Basis in the mapping for change_direct / cross_cutting / unknown} | {Test path, declaration name, execution evidence} | {Basis for each condition or failed condition} | {Configuration file, trigger, target, required check, or owner} |
+
+## Deferred Decision
+| Condition | Decision | Basis |
+|-----------|----------|-------|
+| Zero unresolved actionable findings | {yes / no} | {...} |
+| Successful direct evidence exists for every changed contract | {yes / no} | {...} |
+| Zero failed gates | {yes / no} | {...} |
+| Exactly one mandatory gate is unverified | {yes / no} | {...} |
+| The unverified gate is cross_cutting | {yes / no} | {...} |
+| All four environmental conditions hold | {yes / no} | {...} |
+| A downstream gate exists and the changed diff reaches it | {yes / no} | {...} |
+
+## deferred disposition: eligible / ineligible / not_applicable
+
+The mapping between disposition and result label is fixed: eligible corresponds to `BLOCKED BY ENVIRONMENT (DEFERRABLE)`, ineligible to `BLOCKED BY ENVIRONMENT (NOT DEFERRABLE)`, and not_applicable to every other result. A mismatched mapping is a report defect.
 ```
 
 **Cognitive-load rules:**

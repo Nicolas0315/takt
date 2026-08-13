@@ -5,6 +5,7 @@ subworkflow:
   visibility: internal
   returns:
     - need_replan
+    - deferred
   params:
     reviewer_suite:
       type: workflow_ref
@@ -189,7 +190,9 @@ steps:
         next: remediation
       - condition: タスク全体の再計画が必要
         return: need_replan
-      - condition: 実行環境により判定不能
+      - condition: 実行環境により判定不能（外部ゲートへ委譲可能）
+        return: deferred
+      - condition: 実行環境により判定不能（委譲不可）
         next: ABORT
   - name: remediation
     kind: workflow_call

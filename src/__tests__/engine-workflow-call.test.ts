@@ -237,6 +237,62 @@ describe('WorkflowEngine workflow_call integration', () => {
     ]);
   });
 
+  it('3段の workflow_call で deferred returnValue と terminal event を失わない', async () => {
+    writeWorkflow(tmpDir, 'deferred-leaf.yaml', `name: deferred-leaf
+subworkflow:
+  callable: true
+  returns: [deferred]
+initial_step: final-gate
+max_steps: 2
+steps:
+  - name: final-gate
+    persona: final-gate-reviewer
+    instruction: Return the deferred gate result
+    rules:
+      - condition: deferred
+        return: deferred
+`);
+    writeWorkflow(tmpDir, 'deferred-middle.yaml', `name: deferred-middle
+subworkflow:
+  callable: true
+  returns: [deferred]
+initial_step: delegate
+max_steps: 2
+steps:
+  - name: delegate
+    kind: workflow_call
+    call: deferred-leaf
+    rules:
+      - condition: deferred
+        return: deferred
+`);
+
+    const config = createParentWorkflow(tmpDir, {
+      name: 'deferred-root',
+      subworkflow: { callable: true, returns: ['deferred'] },
+      initial_step: 'delegate',
+      max_steps: 2,
+      steps: [{
+        name: 'delegate',
+        kind: 'workflow_call',
+        call: 'deferred-middle',
+        rules: [{ condition: 'deferred', return: 'deferred' }],
+      }],
+    });
+    mockPersonaResponses({ 'final-gate-reviewer': '[DEFERRED:1]\nThe external gate is unavailable.' });
+    vi.mocked(mockRuleEvaluation).mockReturnValue({ index: 0, method: 'phase3_tag' });
+    engine = new WorkflowEngine(config, tmpDir, 'Preserve deferred return', createWorkflowCallOptions(tmpDir));
+    const complete = vi.fn();
+    engine.on('workflow:complete', complete);
+
+    const state = await engine.run();
+
+    expect(state.status).toBe('completed');
+    expect(state.returnValue).toBe('deferred');
+    expect(complete).toHaveBeenCalledOnce();
+    expect(complete.mock.calls[0]?.[1]).toBe('deferred');
+  });
+
   it('workflow_call concrete provider override replaces child provider entries and clears stale models', () => {
     const personaProviders = applyWorkflowCallOverridesToPersonaProviders({
       reviewer: {

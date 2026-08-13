@@ -23,5 +23,7 @@ steps:
     rules:
       - condition: COMPLETE
         next: COMPLETE
+      - condition: deferred
+        next: ABORT
       - condition: ABORT
         next: ABORT

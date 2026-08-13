@@ -998,7 +998,7 @@ async function runWorkflowToCompletionCore(deps: WorkflowRunLoopDeps): Promise<W
           returnValue: transition.returnValue,
         });
         returnValue = transition.returnValue;
-        deps.emit('workflow:complete', deps.state);
+        deps.emit('workflow:complete', deps.state, returnValue);
         break;
       }
 
@@ -1303,6 +1303,7 @@ async function runSingleWorkflowIterationCore(deps: WorkflowRunLoopDeps): Promis
       kind: 'return',
       returnValue: transition.returnValue,
     });
+    deps.emit('workflow:complete', deps.state, transition.returnValue);
     return {
       response,
       nextStep: COMPLETE_STEP,

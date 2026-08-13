@@ -10,6 +10,7 @@ import {
   readRunMeta,
   type RunMeta,
   type RunFailure,
+  type RunCompletion,
   type RunResumeSource,
 } from '../../../core/workflow/run/run-meta.js';
 import { parseWorkflowResumePoint } from '../../../core/workflow/resume-point-codec.js';
@@ -86,6 +87,7 @@ export function finalizeFileRunMeta(input: {
   readonly iterations: number;
   readonly reason?: string;
   readonly failure?: RunFailure;
+  readonly completion?: RunCompletion;
   readonly endTime: string;
 }): void {
   const current = readRunMeta(input.runPaths.metaAbs);
@@ -104,9 +106,13 @@ export function finalizeFileRunMeta(input: {
     iterations: input.iterations,
     ...(input.reason === undefined ? {} : { reason: input.reason }),
     ...(input.failure === undefined ? {} : { failure: input.failure }),
+    ...(input.completion === undefined ? {} : { completion: input.completion }),
   };
   if (input.failure === undefined) {
     delete finalized.failure;
+  }
+  if (input.completion === undefined) {
+    delete finalized.completion;
   }
   writeFileAtomic(
     input.runPaths.metaAbs,
@@ -183,6 +189,7 @@ export class RunMetaManager {
     readonly iterations: number;
     readonly reason?: string;
     readonly failure?: RunFailure;
+    readonly completion?: RunCompletion;
     readonly endTime: string;
   }): void {
     if (this.runMeta.status !== 'running') {
@@ -194,6 +201,8 @@ export class RunMetaManager {
         && this.runMeta.failure?.step === input.failure?.step
         && this.runMeta.failure?.error === input.failure?.error
         && this.runMeta.failure?.failureCategory === input.failure?.failureCategory
+        && this.runMeta.completion?.kind === input.completion?.kind
+        && this.runMeta.completion?.report === input.completion?.report
       ) {
         return;
       }
@@ -211,6 +220,11 @@ export class RunMetaManager {
       delete this.runMeta.failure;
     } else {
       this.runMeta.failure = input.failure;
+    }
+    if (input.completion === undefined) {
+      delete this.runMeta.completion;
+    } else {
+      this.runMeta.completion = input.completion;
     }
     this.writeRunMeta(this.runMeta);
   }

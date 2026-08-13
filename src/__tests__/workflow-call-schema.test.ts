@@ -924,7 +924,7 @@ describe('workflow_call schema', () => {
       subworkflow: {
         callable: true,
         visibility: 'internal',
-        returns: ['ok', 'retry_plan'],
+        returns: ['ok', 'retry_plan', 'deferred'],
         params: {
           review_policy: {
             type: 'facet_ref[]',
@@ -1005,6 +1005,10 @@ describe('workflow_call schema', () => {
             {
               condition: 'retry_plan',
               next: 'plan',
+            },
+            {
+              condition: 'deferred',
+              next: 'COMPLETE',
             },
             {
               condition: 'ABORT',

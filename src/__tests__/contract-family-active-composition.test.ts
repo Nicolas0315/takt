@@ -339,6 +339,21 @@ describe('contract-family active composition', () => {
     }
   });
 
+  it.each(LANGUAGES)('expands deferred final-gate entry criteria in normal and scenario instructions in %s', (lang) => {
+    const projectDir = projectDirs[lang];
+    for (const instruction of ['supervise-merge-readiness', 'scenario-based-supervise-merge-readiness']) {
+      const content = resolveRefToContent(instruction, undefined, projectDir, 'instructions', {
+        projectDir,
+        lang,
+      });
+      expect(content, instruction).toContain('cross_cutting');
+      expect(content, instruction).toContain('deferred');
+      expect(content, instruction).toContain(
+        lang === 'ja' ? '環境要因による実証不能の4条件' : 'All four environmental inability conditions',
+      );
+    }
+  });
+
   it.each(LANGUAGES)('rejects role-wrapper swaps independently of actual prompt markers in %s', (lang) => {
     const projectDir = projectDirs[lang];
     const swaps = [

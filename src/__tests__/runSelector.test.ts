@@ -45,7 +45,14 @@ describe('selectRun', () => {
 
   it('should present run options and return selected slug', async () => {
     mockListRecentRuns.mockReturnValue([
-      { slug: 'run-1', task: 'First task', workflow: 'default', status: 'completed', startTime: '2026-02-01T10:00:00Z' },
+      {
+        slug: 'run-1',
+        task: 'First task',
+        workflow: 'default',
+        status: 'completed',
+        completion: { kind: 'deferred', report: '.takt/runs/run-1/reports/final-gate.md' },
+        startTime: '2026-02-01T10:00:00Z',
+      },
       { slug: 'run-2', task: 'Second task', workflow: 'custom', status: 'aborted', startTime: '2026-01-15T08:00:00Z' },
     ]);
     mockSelectOption.mockResolvedValue('run-1');
@@ -61,6 +68,7 @@ describe('selectRun', () => {
     expect(options).toHaveLength(2);
     expect(options[0].value).toBe('run-1');
     expect(options[0].label).toBe('First task');
+    expect(options[0].description).toContain('completed (deferred)');
     expect(options[1].value).toBe('run-2');
     expect(options[1].label).toBe('Second task');
   });

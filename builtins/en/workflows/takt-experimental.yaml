@@ -1,5 +1,8 @@
 name: takt-experimental
 description: Inject TAKT-specific facets and implementation companions into the shared core's adjudicated, verified peer-review remediation loop and merge-readiness gate.
+subworkflow:
+  callable: true
+  returns: [deferred]
 max_steps: 51
 initial_step: develop
 
@@ -35,5 +38,7 @@ steps:
     rules:
       - condition: COMPLETE
         next: COMPLETE
+      - condition: deferred
+        return: deferred
       - condition: ABORT
         next: ABORT

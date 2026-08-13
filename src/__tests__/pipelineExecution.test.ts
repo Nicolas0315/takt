@@ -1,4 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+const mockReadFileSync = vi.hoisted(() => vi.fn());
+
+vi.mock('node:fs', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('node:fs')>()),
+  readFileSync: mockReadFileSync,
+}));
 import { info, error, success, status } from '../shared/ui/index.js';
 
 const mockFetchIssue = vi.fn();
@@ -47,7 +54,10 @@ vi.mock('../infra/task/git.js', async (importOriginal) => ({
 const mockExecuteTask = vi.fn();
 const mockConfirmAndCreateWorktree = vi.fn();
 vi.mock('../features/tasks/index.js', () => ({
-  executeTask: mockExecuteTask,
+  executeTaskWithResult: async (...args: unknown[]) => {
+    const result = await mockExecuteTask(...args);
+    return typeof result === 'boolean' ? { success: result } : result;
+  },
   confirmAndCreateWorktree: mockConfirmAndCreateWorktree,
 }));
 
@@ -109,6 +119,7 @@ const mockStatus = vi.mocked(status);
 describe('executePipeline', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockReadFileSync.mockReturnValue('Unverified gates: full CI\nFollow-up gate: PR CI\n');
     mockBuildTaktManagedPrOptions.mockImplementation((body: string) => ({
       body: `${body}\n\n<!-- takt:managed -->`,
     }));
@@ -254,6 +265,101 @@ describe('executePipeline', () => {
       baseBranch: expect.any(String),
     }));
     expect(executeArg.traceTaskContext?.branch).toMatch(/^takt\/issue-99-/);
+  });
+
+  it('should commit, push, and create a PR in order for deferred workflow completion', async () => {
+    const cwd = '/tmp/test';
+    const report = '.takt/runs/deferred/final-gate.md';
+    mockExecuteTask.mockResolvedValueOnce({
+      success: true,
+      completion: { kind: 'deferred', report },
+    });
+    mockCreatePullRequest.mockReturnValueOnce({ success: true, url: 'https://github.com/test/pr/deferred' });
+
+    const exitCode = await executePipeline({
+      task: 'Defer external gate',
+      workflow: 'takt-experimental',
+      branch: 'fix/deferred',
+      autoPr: true,
+      cwd,
+    });
+
+    expect(exitCode).toBe(0);
+    const commitCall = mockExecFileSync.mock.calls.find(
+      (call: unknown[]) => call[0] === 'git' && (call[1] as string[])[0] === 'commit',
+    );
+    expect(commitCall).toBeDefined();
+    const commitOrder = mockExecFileSync.mock.invocationCallOrder[
+      mockExecFileSync.mock.calls.indexOf(commitCall!)
+    ];
+    const pushOrder = mockPushBranch.mock.invocationCallOrder[0];
+    const prOrder = mockCreatePullRequest.mock.invocationCallOrder[0];
+    expect(commitOrder).toBeLessThan(pushOrder!);
+    expect(pushOrder).toBeLessThan(prOrder!);
+    const body = (mockCreatePullRequest.mock.calls[0]?.[0] as { body?: string }).body;
+    expect(body).toContain('TAKT Deferred Handoff');
+    expect(body).toContain('Unverified gates');
+    expect(body).toContain('Follow-up gate');
+    expect(body).toContain(report);
+    expect(body).not.toContain('completed successfully');
+  });
+
+  it('should fail the pipeline handoff when deferred completion has no auto PR', async () => {
+    mockExecuteTask.mockResolvedValueOnce({
+      success: true,
+      completion: { kind: 'deferred', report: 'final-gate.md' },
+    });
+
+    const exitCode = await executePipeline({
+      task: 'Missing deferred PR',
+      workflow: 'takt-experimental',
+      branch: 'fix/deferred-no-pr',
+      autoPr: false,
+      cwd: '/tmp/test',
+    });
+
+    expect(exitCode).toBe(6);
+    expect(mockPushBranch).toHaveBeenCalled();
+    expect(mockCreatePullRequest).not.toHaveBeenCalled();
+  });
+
+  it('should fail the pipeline handoff when deferred completion skips Git', async () => {
+    mockExecuteTask.mockResolvedValueOnce({
+      success: true,
+      completion: { kind: 'deferred', report: 'final-gate.md' },
+    });
+
+    const exitCode = await executePipeline({
+      task: 'Skipped deferred handoff',
+      workflow: 'takt-experimental',
+      autoPr: true,
+      skipGit: true,
+      cwd: '/tmp/test',
+    });
+
+    expect(exitCode).toBe(6);
+    expect(mockPushBranch).not.toHaveBeenCalled();
+    expect(mockCreatePullRequest).not.toHaveBeenCalled();
+  });
+
+  it('should report PR creation failure for a deferred handoff', async () => {
+    const cwd = '/tmp/test';
+    const report = 'final-gate.md';
+    mockExecuteTask.mockResolvedValueOnce({
+      success: true,
+      completion: { kind: 'deferred', report },
+    });
+    mockCreatePullRequest.mockReturnValueOnce({ success: false, error: 'PR failed' });
+
+    const exitCode = await executePipeline({
+      task: 'Deferred PR failure',
+      workflow: 'takt-experimental',
+      branch: 'fix/deferred-pr-fail',
+      autoPr: true,
+      cwd,
+    });
+
+    expect(exitCode).toBe(5);
   });
 
   it('should sanitize workflow names before terminal output', async () => {

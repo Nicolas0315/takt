@@ -33,7 +33,10 @@ export async function selectRun(
   const options: SelectOptionItem<string>[] = runs.map((run: RunSummary) => {
     const label = truncateForLabel(run.task, MAX_TASK_LABEL_LENGTH);
     const dateStr = formatDateForSelector(run.startTime, lang);
-    const description = `${dateStr} | ${run.workflow} | ${run.status}`;
+    const status = run.completion?.kind === 'deferred'
+      ? `${run.status} (deferred)`
+      : run.status;
+    const description = `${dateStr} | ${run.workflow} | ${status}`;
 
     return {
       label,

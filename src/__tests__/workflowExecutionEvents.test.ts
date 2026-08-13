@@ -41,7 +41,9 @@ function createBridgeHarness(options?: {
   display?: { flush: ReturnType<typeof vi.fn> };
   engine?: TestEngine;
   sessionLogger?: SessionLogger;
+  projectCwd?: string;
 }) {
+  const projectCwd = options?.projectCwd ?? '/tmp/project';
   const resumePoint = options?.resumePoint ?? {
     version: 2,
     stack: [{
@@ -105,7 +107,7 @@ function createBridgeHarness(options?: {
   };
   const sessionLog = {
     task: 'task',
-    projectDir: '/tmp/project',
+    projectDir: projectCwd,
     workflowName: 'parent',
     iterations: 0,
     startTime: new Date().toISOString(),
@@ -114,12 +116,12 @@ function createBridgeHarness(options?: {
   };
   const terminalPayloads = createWorkflowTerminalPayloadFactory({
     runSlug: 'run-1',
-    projectCwd: '/tmp/project',
+    projectCwd,
     task: 'task',
     workflowName: 'parent',
     sessionLog,
     sessionId: 'session',
-    ndjsonLogPath: '/tmp/project/run/logs/session.jsonl',
+    ndjsonLogPath: `${projectCwd}/run/logs/session.jsonl`,
     traceReportMode: 'redacted',
     ...(options?.traceDiscovery === undefined
       ? {}
@@ -139,6 +141,7 @@ function createBridgeHarness(options?: {
       maxSteps: 5,
       steps: [{ name: 'review' }],
     },
+    reportCwd: projectCwd,
     currentProvider: options?.currentProvider ?? 'mock',
     configuredModel: options?.configuredModel ?? 'gpt-test',
     out: out as never,
@@ -506,6 +509,50 @@ describe('bindWorkflowExecutionEvents', () => {
     expect(bridge.state.lastStepName).toBe('review');
     expect(bridge.state.lastStepContent).toBe('approved');
     expect(bridge.state.sessionLog.iterations).toBe(1);
+  });
+
+  it('deferred return は final-gate の実パスを terminal payload へ引き継ぐ', () => {
+    const projectCwd = mkdtempSync(join(tmpdir(), 'takt-deferred-event-'));
+    try {
+      const { bridge, engine } = createBridgeHarness({ projectCwd });
+      const reportPath = join(projectCwd, 'final-gate-report.md');
+      writeFileSync(reportPath, '## Unverified Gate Classification\n', 'utf8');
+      const reportStep = { name: 'final-gate' } as WorkflowStep;
+
+      engine.emit(
+        'step:report',
+        reportStep,
+        reportPath,
+        'final-gate-report.md',
+        {
+          iteration: 2,
+          workflowName: 'peer-review',
+          resumeStepName: 'final-gate',
+          stepIteration: 1,
+          providerInfo: { provider: 'mock', model: 'gpt-test' },
+          provider: 'mock',
+          model: 'gpt-test',
+          workflowStack: [],
+        },
+      );
+      engine.emit('workflow:complete', { iteration: 2 }, 'deferred');
+
+      const payload = bridge.prepareTerminalPublicationPayload();
+      expect(payload).toMatchObject({
+        status: 'completed',
+        completion: {
+          kind: 'deferred',
+          report: 'final-gate-report.md',
+        },
+      });
+      expect(bridge.state.completion).toEqual({
+        kind: 'deferred',
+        report: 'final-gate-report.md',
+      });
+      expect(bridge.prepareTerminalPublicationPayload()).toBe(payload);
+    } finally {
+      rmSync(projectCwd, { recursive: true, force: true });
+    }
   });
 
   it('内部 step は観測名を維持しつつ再開可能な実 step を run meta に保存する', () => {

@@ -449,6 +449,7 @@ async function executeWorkflowInternal(
       eventBridge = bindWorkflowExecutionEvents({
         engine,
         workflowConfig: bootstrap.effectiveWorkflowConfig,
+        reportCwd: cwd,
         currentProvider: bootstrap.currentProvider!,
         configuredModel: bootstrap.configuredModel,
         out: bootstrap.out,
@@ -476,8 +477,16 @@ async function executeWorkflowInternal(
       abortHandler.install();
       const finalState = await engine.run();
       await eventBridge.flushEventSink();
+      const completion = eventBridge.state.completion;
+      if (finalState.returnValue === 'deferred' && completion === undefined) {
+        throw new Error('Deferred workflow return did not produce completion metadata');
+      }
+      if (finalState.returnValue !== 'deferred' && completion !== undefined) {
+        throw new Error('Completion metadata was produced without a deferred workflow return');
+      }
       executionResult = {
         success: finalState.status === 'completed',
+        ...(completion === undefined ? {} : { completion }),
         reason: eventBridge.state.failure?.error ?? eventBridge.state.abortReason,
         lastStep: eventBridge.state.failure?.step ?? eventBridge.state.lastStepName,
         lastMessage: eventBridge.state.lastStepContent,
@@ -551,6 +560,9 @@ async function executeWorkflowInternal(
             ...(terminalPublication.reason === undefined
               ? {}
               : { reason: terminalPublication.reason }),
+            ...(terminalPublication.completion === undefined
+              ? {}
+              : { completion: terminalPublication.completion }),
           },
           terminalPublication,
         );
@@ -781,6 +793,7 @@ async function publishTerminalLiveFeedback(input: {
         join(input.runPaths.logsAbs, input.payload.ndjsonLogFile),
         input.shouldNotifyWorkflowComplete,
         input.payload.traceDiscovery,
+        input.payload.completion,
       );
     } else {
       reportWorkflowFailure(
@@ -804,6 +817,9 @@ async function publishTerminalLiveFeedback(input: {
             type: 'completed',
             success: true,
             reportDirectory: input.runPaths.reportsAbs,
+            ...(input.payload.completion === undefined
+              ? {}
+              : { completion: input.payload.completion }),
           }
         : {
             type: 'completed',

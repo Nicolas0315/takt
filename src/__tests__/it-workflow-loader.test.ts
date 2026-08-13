@@ -242,6 +242,82 @@ describe('Workflow Loader IT: builtin workflow loading', () => {
     },
   );
 
+  it.each(['en', 'ja'] as const)(
+    'should propagate deferred through the %s final-gate call chain and keep other callers aborting',
+    (language) => {
+      languageState.value = language;
+      const resourceRoot = getLanguageResourcesDir(language);
+      const readRaw = (name: string): Record<string, unknown> => parseYaml(
+        readFileSync(join(resourceRoot, 'workflows', `${name}.yaml`), 'utf-8'),
+      ) as Record<string, unknown>;
+      const findStep = (workflow: Record<string, unknown>, name: string): Record<string, unknown> => {
+        const steps = workflow.steps as Array<Record<string, unknown>>;
+        const step = steps.find((candidate) => candidate.name === name);
+        expect(step, `${language}/${name}`).toBeDefined();
+        return step!;
+      };
+      const rulesOf = (step: Record<string, unknown>): Array<Record<string, unknown>> => (
+        step.rules as Array<Record<string, unknown>>
+      );
+
+      const peerReview = readRaw('peer-review');
+      expect((peerReview.subworkflow as Record<string, unknown>).returns).toEqual([
+        'need_replan',
+        'deferred',
+      ]);
+      expect(rulesOf(findStep(peerReview, 'final-gate'))).toContainEqual({
+        condition: language === 'ja'
+          ? '実行環境により判定不能（外部ゲートへ委譲可能）'
+          : 'BLOCKED BY ENVIRONMENT (DEFERRABLE)',
+        return: 'deferred',
+      });
+      expect(rulesOf(findStep(peerReview, 'final-gate'))).toContainEqual({
+        condition: language === 'ja'
+          ? '実行環境により判定不能（委譲不可）'
+          : 'BLOCKED BY ENVIRONMENT (NOT DEFERRABLE)',
+        next: 'ABORT',
+      });
+
+      const developmentCore = readRaw('development-core');
+      expect((developmentCore.subworkflow as Record<string, unknown>).returns).toEqual(['deferred']);
+      expect(rulesOf(findStep(developmentCore, 'peer-review'))).toContainEqual({
+        condition: 'deferred',
+        return: 'deferred',
+      });
+
+      const experimental = readRaw('takt-experimental');
+      expect((experimental.subworkflow as Record<string, unknown>).returns).toEqual(['deferred']);
+      expect(rulesOf(findStep(experimental, 'develop'))).toContainEqual({
+        condition: 'deferred',
+        return: 'deferred',
+      });
+
+      const abortingCallers = [
+        'backend-cqrs',
+        'backend-maintenance',
+        'backend',
+        'cli',
+        'default-high',
+        'default',
+        'dual-cqrs',
+        'dual',
+        'experimental',
+        'frontend-maintenance',
+        'frontend',
+        'review-fix-takt-default',
+        'takt-default',
+      ];
+      for (const name of abortingCallers) {
+        const workflow = readRaw(name);
+        expect(rulesOf(findStep(workflow, 'develop'))).toContainEqual({
+          condition: 'deferred',
+          next: 'ABORT',
+        });
+        expect((workflow.subworkflow as Record<string, unknown> | undefined)?.returns ?? []).not.toContain('deferred');
+      }
+    },
+  );
+
   it('should return null for non-existent workflow', () => {
     const config = loadWorkflow('non-existent-workflow-xyz', testDir);
     expect(config).toBeNull();

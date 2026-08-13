@@ -5,6 +5,7 @@ subworkflow:
   visibility: internal
   returns:
     - need_replan
+    - deferred
   params:
     reviewer_suite:
       type: workflow_ref
@@ -189,7 +190,9 @@ steps:
         next: remediation
       - condition: TASK REPLAN REQUIRED
         return: need_replan
-      - condition: BLOCKED BY ENVIRONMENT
+      - condition: BLOCKED BY ENVIRONMENT (DEFERRABLE)
+        return: deferred
+      - condition: BLOCKED BY ENVIRONMENT (NOT DEFERRABLE)
         next: ABORT
   - name: remediation
     kind: workflow_call

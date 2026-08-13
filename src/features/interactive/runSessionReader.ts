@@ -2,6 +2,7 @@ import { Dirent, existsSync, readdirSync, readFileSync, type Stats } from 'node:
 import { join, relative, resolve } from 'node:path';
 import { readRunContextOrderContent } from '../../core/workflow/run/order-content.js';
 import { readRunMetaBySlug } from '../../core/workflow/run/run-meta.js';
+import type { RunCompletion } from '../../core/workflow/run/run-meta.js';
 import {
   OTEL_SESSION_SHADOW_LOG_FILE_SUFFIX,
   PHASE_USAGE_EVENTS_LOG_FILE_SUFFIX,
@@ -28,6 +29,7 @@ export interface RunSummary {
   readonly task: string;
   readonly workflow: string;
   readonly status: string;
+  readonly completion?: RunCompletion;
   readonly startTime: string;
 }
 
@@ -51,6 +53,7 @@ export interface RunSessionContext {
   readonly task: string;
   readonly workflow: string;
   readonly status: string;
+  readonly completion?: RunCompletion;
   readonly stepLogs: readonly StepLogEntry[];
   readonly reports: readonly ReportEntry[];
 }
@@ -285,6 +288,7 @@ export function listRecentRuns(cwd: string): RunSummary[] {
       task: meta.task,
       workflow: meta.workflow,
       status: meta.status,
+      ...(meta.completion === undefined ? {} : { completion: meta.completion }),
       startTime: meta.startTime,
     });
   }
@@ -339,6 +343,7 @@ export function loadRunSessionContext(
     task: meta.task,
     workflow: meta.workflow,
     status: meta.status,
+    ...(meta.completion === undefined ? {} : { completion: meta.completion }),
     stepLogs,
     reports,
   };
@@ -384,7 +389,9 @@ export function formatRunSessionForPrompt(ctx: RunSessionContext): {
   return {
     runTask: ctx.task,
     runWorkflow: ctx.workflow,
-    runStatus: ctx.status,
+    runStatus: ctx.completion?.kind === 'deferred'
+      ? `${ctx.status} (deferred)`
+      : ctx.status,
     runStepLogs: logLines.join('\n\n'),
     runReports: reportLines.join('\n\n'),
   };

@@ -1,5 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+const mockReadFileSync = vi.hoisted(() => vi.fn());
+
+vi.mock('node:fs', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('node:fs')>()),
+  readFileSync: mockReadFileSync,
+}));
+
 const mockBuildPrBody = vi.fn(() => 'Default PR body');
 const mockBuildTaktManagedPrOptions = vi.fn((body: string) => ({
   body: `${body}\n\n<!-- takt:managed -->`,
@@ -47,6 +54,7 @@ const { submitPullRequest } = await import('../features/pipeline/prSubmission.js
 describe('submitPullRequest', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockReadFileSync.mockReturnValue('Unverified gates: full CI\nFollow-up gate: PR CI\n');
     mockBuildPrBody.mockReturnValue('Default PR body');
     mockExpandPipelineTemplate.mockImplementation(
       (template: string, vars: Record<string, string>) => template
@@ -150,5 +158,31 @@ describe('submitPullRequest', () => {
       title: '[#43] Fix pipeline marker',
     }, '/repo');
     expect(mockBuildTaktManagedPrOptions).not.toHaveBeenCalled();
+  });
+
+  it('should append the mandatory deferred handoff section after a custom template', () => {
+    const projectCwd = '/repo';
+    const report = '.takt/runs/deferred/final-gate.md';
+    mockCreatePullRequest.mockReturnValueOnce({ success: true, url: 'https://example.com/pr/deferred' });
+
+    const prUrl = submitPullRequest(
+      projectCwd,
+      'takt/deferred',
+      'main',
+      { issue: { number: 44, title: 'Deferred work', body: 'Body', labels: [], comments: [] } },
+      'takt-experimental',
+      { prBodyTemplate: 'Custom summary only' },
+      { draftPr: false, repo: 'owner/repo', task: undefined },
+      { kind: 'deferred', report },
+    );
+
+    expect(prUrl).toBe('https://example.com/pr/deferred');
+    const body = (mockCreatePullRequest.mock.calls[0]?.[0] as { body: string }).body;
+    expect(body).toContain('Custom summary only');
+    expect(body).toContain('## TAKT Deferred Handoff');
+    expect(body).toContain('Unverified gates: full CI');
+    expect(body).toContain('Follow-up gate: PR CI');
+    expect(body).toContain(report);
+    expect(body).not.toContain('completed successfully');
   });
 });

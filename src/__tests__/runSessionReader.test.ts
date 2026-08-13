@@ -135,6 +135,46 @@ describe('listRecentRuns', () => {
     expect(result).toHaveLength(10);
   });
 
+  it('should expose persisted deferred completion in recent run summaries', () => {
+    const slug = 'run-deferred';
+    createRunDir(tmpDir, slug, {
+      task: 'Deferred task',
+      workflow: 'takt-experimental',
+      status: 'completed',
+      completion: {
+        kind: 'deferred',
+        report: `.takt/runs/${slug}/reports/final-gate.md`,
+      },
+      startTime: '2026-03-01T00:00:00.000Z',
+      logsDirectory: `.takt/runs/${slug}/logs`,
+      reportDirectory: `.takt/runs/${slug}/reports`,
+      runSlug: slug,
+    });
+
+    expect(listRecentRuns(tmpDir)[0]).toMatchObject({
+      status: 'completed',
+      completion: {
+        kind: 'deferred',
+        report: `.takt/runs/${slug}/reports/final-gate.md`,
+      },
+    });
+  });
+
+  it('should ignore runs with malformed completion metadata', () => {
+    createRunDir(tmpDir, 'run-broken-completion', {
+      task: 'Broken completion task',
+      workflow: 'takt-experimental',
+      status: 'completed',
+      completion: { kind: 'unknown', report: 'final-gate.md' },
+      startTime: '2026-03-02T00:00:00.000Z',
+      logsDirectory: '.takt/runs/run-broken-completion/logs',
+      reportDirectory: '.takt/runs/run-broken-completion/reports',
+      runSlug: 'run-broken-completion',
+    });
+
+    expect(listRecentRuns(tmpDir)).toEqual([]);
+  });
+
   afterEach(() => {
     rmSync(tmpDir, { recursive: true, force: true });
   });
@@ -603,6 +643,30 @@ describe('loadRunSessionContext', () => {
     const context = loadRunSessionContext(tmpDir, slug);
     expect(context.stepLogs).toEqual([]);
     expect(context.reports).toEqual([]);
+  });
+
+  it('should read deferred completion and format its status distinctly', () => {
+    const slug = 'deferred-context';
+    createRunDir(tmpDir, slug, {
+      task: 'Deferred context task',
+      workflow: 'takt-experimental',
+      status: 'completed',
+      completion: {
+        kind: 'deferred',
+        report: `.takt/runs/${slug}/reports/final-gate.md`,
+      },
+      startTime: '2026-03-01T00:00:00.000Z',
+      logsDirectory: `.takt/runs/${slug}/logs`,
+      reportDirectory: `.takt/runs/${slug}/reports`,
+      runSlug: slug,
+    });
+
+    const context = loadRunSessionContext(tmpDir, slug);
+    expect(context.completion).toEqual({
+      kind: 'deferred',
+      report: `.takt/runs/${slug}/reports/final-gate.md`,
+    });
+    expect(formatRunSessionForPrompt(context).runStatus).toBe('completed (deferred)');
   });
 
   it('should exclude provider-events log files', () => {

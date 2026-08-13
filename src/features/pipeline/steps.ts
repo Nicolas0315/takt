@@ -15,7 +15,14 @@ import {
   getCurrentBranch,
   materializePullRequestBase,
 } from '../../infra/task/index.js';
-import { executeTask, confirmAndCreateWorktree, type ExecuteTaskOptions, type TaskExecutionOptions, type PipelineExecutionOptions } from '../tasks/index.js';
+import {
+  executeTaskWithResult,
+  confirmAndCreateWorktree,
+  type ExecuteTaskOptions,
+  type TaskExecutionOptions,
+  type PipelineExecutionOptions,
+  type WorkflowExecutionResult,
+} from '../tasks/index.js';
 import { info, error, success } from '../../shared/ui/index.js';
 import { statusLine } from '../../shared/ui/StatusLine.js';
 import { getErrorMessage } from '../../shared/utils/index.js';
@@ -338,7 +345,7 @@ export async function runWorkflow(
   execCwd: string,
   options: Pick<PipelineExecutionOptions, 'provider' | 'model' | 'autoStrategy' | 'issueNumber' | 'prNumber'>,
   context: ExecutionContext,
-): Promise<boolean> {
+): Promise<WorkflowExecutionResult> {
   const safeWorkflow = sanitizeTerminalText(workflow);
   info(`Running workflow: ${safeWorkflow}`);
   const agentOverrides: TaskExecutionOptions | undefined = (options.provider || options.model || options.autoStrategy)
@@ -350,9 +357,9 @@ export async function runWorkflow(
     : undefined;
 
   statusLine.start('Running...');
-  let taskSuccess: boolean;
+  let taskResult: WorkflowExecutionResult;
   try {
-    taskSuccess = await executeTask({
+    taskResult = await executeTaskWithResult({
       task,
       cwd: execCwd,
       workflowIdentifier: workflow,
@@ -365,12 +372,16 @@ export async function runWorkflow(
     statusLine.stop();
   }
 
-  if (!taskSuccess) {
+  if (!taskResult.success) {
     error(`Workflow '${safeWorkflow}' failed`);
-    return false;
+    return taskResult;
   }
-  success(`Workflow '${safeWorkflow}' completed`);
-  return true;
+  success(
+    taskResult.completion?.kind === 'deferred'
+      ? `Workflow '${safeWorkflow}' completed (deferred)`
+      : `Workflow '${safeWorkflow}' completed`,
+  );
+  return taskResult;
 }
 
 function buildPipelineTraceTaskContext(

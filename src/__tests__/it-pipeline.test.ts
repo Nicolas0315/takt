@@ -156,8 +156,12 @@ vi.mock('../core/workflow/quality-gates/commandGateRunner.js', () => ({
 
 import { executePipeline } from '../features/pipeline/index.js';
 import { loadGlobalConfig } from '../infra/config/global/globalConfig.js';
+import { checkGhCli } from '../infra/github/issue.js';
+import { createPullRequest } from '../infra/github/pr.js';
 
 const mockExecFileSync = vi.mocked(execFileSync);
+const mockCheckGhCli = vi.mocked(checkGhCli);
+const mockCreatePullRequest = vi.mocked(createPullRequest);
 
 /** Create a minimal test workflow YAML + agent files in a temp directory */
 function createTestWorkflowDir(): { dir: string; workflowPath: string } {
@@ -213,6 +217,29 @@ steps:
   writeFileSync(workflowPath, workflowYaml);
 
   return { dir, workflowPath };
+}
+
+function writeDeferredWorkflow(dir: string): string {
+  const workflowPath = join(dir, 'deferred.yaml');
+  writeFileSync(workflowPath, `name: it-deferred
+subworkflow:
+  callable: true
+  returns: [deferred]
+initial_step: final-gate
+max_steps: 2
+steps:
+  - name: final-gate
+    persona: ./.takt/personas/reviewer.md
+    output_contracts:
+      report:
+        - name: review-resolution.md
+          format: review-resolution
+    instruction: Review the change and record the external gate disposition.
+    rules:
+      - condition: External gate is unverified
+        return: deferred
+`);
+  return workflowPath;
 }
 
 function writeChildAutoRoutingWorkflow(dir: string, parallel: boolean): string {
@@ -337,6 +364,100 @@ describe('Pipeline Integration Tests', () => {
     });
 
     expect(exitCode).toBe(0);
+  });
+
+  it('should hand off a deferred workflow through commit, push, and PR creation', async () => {
+    workflowPath = writeDeferredWorkflow(testDir);
+    setMockScenario([
+      { persona: 'reviewer', status: 'done', content: '[FINAL-GATE:1]\n\nExternal gate is unverified.\n\n## Unverified Gate Classification\n- PR CI: unverified' },
+    ]);
+    mockCheckGhCli.mockReturnValue({ available: true });
+    mockCreatePullRequest.mockImplementation(() => ({ success: true, url: 'https://example.test/pull/1' }));
+
+    const events: string[] = [];
+    mockExecFileSync.mockImplementation((_command, args) => {
+      const renderedArgs = Array.isArray(args) ? args.map(String).join(' ') : '';
+      events.push(`git ${renderedArgs}`);
+      if (Array.isArray(args) && args[0] === 'rev-parse' && args[1] === '--abbrev-ref') {
+        return 'test/current\n' as never;
+      }
+      if (Array.isArray(args) && args[0] === 'symbolic-ref' && args[1] === 'refs/remotes/origin/HEAD') {
+        return 'refs/remotes/origin/main\n' as never;
+      }
+      if (Array.isArray(args) && args[0] === 'status' && args[1] === '--porcelain') {
+        return ' M implementation.ts\n' as never;
+      }
+      if (Array.isArray(args) && args[0] === 'rev-parse' && args[1] === '--short') {
+        return 'abc123\n' as never;
+      }
+      return '' as never;
+    });
+    mockCreatePullRequest.mockImplementation((options) => {
+      events.push('pr:create');
+      expect(options.body).toContain('TAKT Deferred Handoff');
+      expect(options.body).toContain('Merge readiness: unconfirmed');
+      expect(options.body).toContain('Unverified Gate Classification');
+      expect(options.body).toContain('review-resolution.md');
+      return { success: true, url: 'https://example.test/pull/1' };
+    });
+
+    const exitCode = await executePipeline({
+      task: 'Defer until the external gate is verified',
+      workflow: workflowPath,
+      autoPr: true,
+      skipGit: false,
+      cwd: testDir,
+      provider: 'mock',
+      branch: 'takt/deferred-test',
+    });
+
+    expect(exitCode).toBe(0);
+    expect(events.findIndex((event) => event.includes('commit --no-verify'))).toBeGreaterThanOrEqual(0);
+    expect(events.findIndex((event) => event === 'git push origin takt/deferred-test'))
+      .toBeGreaterThan(events.findIndex((event) => event.includes('commit --no-verify')));
+    expect(events.indexOf('pr:create')).toBeGreaterThan(events.findIndex((event) => event === 'git push origin takt/deferred-test'));
+  });
+
+  it('should return a non-zero exit code when deferred PR creation fails after push', async () => {
+    workflowPath = writeDeferredWorkflow(testDir);
+    setMockScenario([
+      { persona: 'reviewer', status: 'done', content: '[FINAL-GATE:1]\n\nExternal gate is unverified.' },
+    ]);
+    mockCheckGhCli.mockReturnValue({ available: true });
+    mockCreatePullRequest.mockReturnValue({ success: false, error: 'PR service unavailable' });
+
+    const events: string[] = [];
+    mockExecFileSync.mockImplementation((_command, args) => {
+      const renderedArgs = Array.isArray(args) ? args.map(String).join(' ') : '';
+      events.push(`git ${renderedArgs}`);
+      if (Array.isArray(args) && args[0] === 'rev-parse' && args[1] === '--abbrev-ref') {
+        return 'test/current\n' as never;
+      }
+      if (Array.isArray(args) && args[0] === 'symbolic-ref' && args[1] === 'refs/remotes/origin/HEAD') {
+        return 'refs/remotes/origin/main\n' as never;
+      }
+      if (Array.isArray(args) && args[0] === 'status' && args[1] === '--porcelain') {
+        return ' M implementation.ts\n' as never;
+      }
+      if (Array.isArray(args) && args[0] === 'rev-parse' && args[1] === '--short') {
+        return 'abc123\n' as never;
+      }
+      return '' as never;
+    });
+
+    const exitCode = await executePipeline({
+      task: 'Defer until the external gate is verified',
+      workflow: workflowPath,
+      autoPr: true,
+      skipGit: false,
+      cwd: testDir,
+      provider: 'mock',
+      branch: 'takt/deferred-test',
+    });
+
+    expect(exitCode).toBe(5);
+    expect(events).toContain('git push origin takt/deferred-test');
+    expect(mockCreatePullRequest).toHaveBeenCalledTimes(1);
   });
 
   it('should handle ABORT transition from workflow', async () => {

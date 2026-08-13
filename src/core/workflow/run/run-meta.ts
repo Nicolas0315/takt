@@ -33,6 +33,11 @@ export interface RunFailure {
   readonly failureCategory?: AgentFailureCategory;
 }
 
+export interface RunCompletion {
+  readonly kind: 'deferred';
+  readonly report: string;
+}
+
 export interface RunMeta {
   task: string;
   workflow: string;
@@ -44,6 +49,7 @@ export interface RunMeta {
   status: 'running' | 'completed' | 'aborted' | 'failed';
   reason?: string;
   failure?: RunFailure;
+  completion?: RunCompletion;
   startTime: string;
   endTime?: string;
   iterations?: number;
@@ -189,6 +195,9 @@ function parseRawRunMeta(value: unknown): RawRunMeta {
     ...(raw.failure === undefined
       ? {}
       : { failure: parseRunFailure(raw.failure) }),
+    ...(raw.completion === undefined
+      ? {}
+      : { completion: parseRunCompletion(raw.completion) }),
     ...(optionalString(raw.endTime, 'endTime')),
     ...(optionalInteger(raw.iterations, 'iterations')),
     ...(optionalString(raw.currentStep, 'currentStep')),
@@ -216,6 +225,9 @@ function parseRawRunMeta(value: unknown): RawRunMeta {
     ...(optionalString(raw.operation_claim_token, 'operation_claim_token')),
     ...(raw.pr_context === undefined ? {} : { pr_context: raw.pr_context }),
   };
+  if (result.completion !== undefined && status !== 'completed') {
+    throw new Error('Run metadata completion requires completed status');
+  }
   return result;
 }
 
@@ -295,6 +307,23 @@ function parseRunFailure(value: unknown): RunFailure {
     ...(failure.failureCategory === undefined
       ? {}
       : { failureCategory: requiredAgentFailureCategory(failure.failureCategory) }),
+  };
+}
+
+function parseRunCompletion(value: unknown): RunCompletion {
+  const completion = requireRecord(value, 'completion');
+  const unsupportedKey = Object.keys(completion).find(
+    (key) => key !== 'kind' && key !== 'report',
+  );
+  if (unsupportedKey !== undefined) {
+    throw new Error(`Run metadata completion.${unsupportedKey} is not supported`);
+  }
+  if (completion.kind !== 'deferred') {
+    throw new Error('Run metadata completion.kind is invalid');
+  }
+  return {
+    kind: 'deferred',
+    report: requiredString(completion.report, 'completion.report'),
   };
 }
 

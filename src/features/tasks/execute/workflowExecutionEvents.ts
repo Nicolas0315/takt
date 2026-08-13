@@ -1,4 +1,5 @@
 import { interruptAllQueries } from '../../../infra/claude/query-manager.js';
+import { isAbsolute, relative } from 'node:path';
 import type { WorkflowState } from '../../../core/models/index.js';
 import { formatWorkflowRuleCondition } from '../../../core/models/workflow-rule-condition.js';
 import type { WorkflowEngine } from '../../../core/workflow/index.js';
@@ -21,7 +22,12 @@ import {
 import { isDebugEnabled, isVerboseConsole } from '../../../shared/utils/debug.js';
 import { createLogger, notifyWarning, playWarningSound } from '../../../shared/utils/index.js';
 import { safeExternalErrorMessage } from '../../../shared/utils/safeExternalErrorMessage.js';
-import type { ExceededInfo, WorkflowExecutionEvent, WorkflowExecutionOptions } from './types.js';
+import type {
+  ExceededInfo,
+  WorkflowCompletion,
+  WorkflowExecutionEvent,
+  WorkflowExecutionOptions,
+} from './types.js';
 import type { AnalyticsStepContext } from './analyticsEmitter.js';
 import { detectStepType, isQuietMode } from './workflowExecutionBootstrap.js';
 import {
@@ -57,6 +63,8 @@ export interface WorkflowExecutionEventState {
   lastResumePoint?: WorkflowExecutionOptions['resumePoint'];
   currentIteration: number;
   sessionLog: SessionLog;
+  finalGateReportPath?: string;
+  completion?: WorkflowCompletion;
 }
 
 interface WorkflowExecutionEventBridgeDeps {
@@ -66,6 +74,7 @@ interface WorkflowExecutionEventBridgeDeps {
     steps: Array<{ name: string }>;
     maxSteps: number | 'infinite';
   };
+  reportCwd: string;
   currentProvider: ProviderType;
   configuredModel: string | undefined;
   out: ReturnType<typeof import('./outputFns.js').createOutputFns>;
@@ -116,6 +125,7 @@ type WorkflowTerminalIntent =
   | {
       readonly kind: 'completed';
       readonly workflowState: WorkflowState;
+      readonly completion?: WorkflowCompletion;
       readonly endTime: string;
     }
   | {
@@ -153,6 +163,19 @@ function resolveStepProviderContext(
       ?? (provider === currentProvider ? configuredModel : undefined)
       ?? '(default)';
   return { provider, model };
+}
+
+function requireReportPath(reportCwd: string, reportPath: string): string {
+  const projectRelativePath = relative(reportCwd, reportPath);
+  if (
+    projectRelativePath.length === 0
+    || isAbsolute(projectRelativePath)
+    || projectRelativePath === '..'
+    || projectRelativePath.startsWith('../')
+  ) {
+    throw new Error(`Final-gate report path is invalid: ${reportPath}`);
+  }
+  return projectRelativePath;
 }
 
 function emitWorkflowExecutionEvent(
@@ -792,6 +815,9 @@ export function bindWorkflowExecutionEvents(
   });
 
   deps.engine.on('step:report', (step, filePath, fileName, context) => {
+    if (step.name === 'final-gate') {
+      state.finalGateReportPath = requireReportPath(deps.reportCwd, filePath);
+    }
     reportStepFile(filePath, fileName, deps.out);
     const scopeIdentity = buildWorkflowScopeIdentity(
       context.workflowName,
@@ -898,11 +924,23 @@ export function bindWorkflowExecutionEvents(
     persistCompanionAudit('companion_review_skipped', () => deps.sessionLogger.onCompanionReviewSkipped(payload));
   });
 
-  deps.engine.on('workflow:complete', (workflowState) => {
+  deps.engine.on('workflow:complete', (workflowState, returnValue) => {
     if (terminalIntent === undefined) {
+      let completion: WorkflowCompletion | undefined;
+      if (returnValue === 'deferred') {
+        if (state.finalGateReportPath === undefined) {
+          throw new Error('Deferred workflow completion requires a final-gate report');
+        }
+        completion = {
+          kind: 'deferred',
+          report: state.finalGateReportPath,
+        };
+      }
+      state.completion = completion;
       terminalIntent = {
         kind: 'completed',
         workflowState,
+        ...(completion === undefined ? {} : { completion }),
         endTime: new Date().toISOString(),
       };
     }
@@ -1016,6 +1054,9 @@ export function bindWorkflowExecutionEvents(
         iterations,
         ...(reason === undefined ? {} : { reason }),
         ...(failure === undefined ? {} : { failure }),
+        ...(terminalIntent.kind === 'completed' && terminalIntent.completion !== undefined
+          ? { completion: terminalIntent.completion }
+          : {}),
         lastStepContent: state.lastStepContent,
         lastStepName: state.lastStepName,
         sessionLog: state.sessionLog,

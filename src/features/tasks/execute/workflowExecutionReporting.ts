@@ -17,6 +17,7 @@ import { USAGE_MISSING_REASONS } from '../../../core/logging/contracts.js';
 import type { WorkflowTraceDiscovery } from '../../../core/workflow/observability/traceDiscovery.js';
 import { createOutputFns } from './outputFns.js';
 import { formatElapsedTime, truncate } from './workflowExecutionUtils.js';
+import type { WorkflowCompletion } from './types.js';
 
 export interface WorkflowSessionFinalization {
   readonly sessionLog: SessionLog;
@@ -93,9 +94,14 @@ export function reportWorkflowCompletion(
   ndjsonLogPath: string,
   shouldNotifyWorkflowComplete: boolean,
   traceDiscovery?: Pick<WorkflowTraceDiscovery, 'queries'>,
+  completion?: WorkflowCompletion,
 ): void {
   const elapsed = sessionLog.endTime ? formatElapsedTime(sessionLog.startTime, sessionLog.endTime) : '';
-  out.success(`Workflow completed (${iteration} iterations${elapsed ? `, ${elapsed}` : ''})`);
+  if (completion?.kind === 'deferred') {
+    out.success('Workflow completed (deferred)');
+  } else {
+    out.success(`Workflow completed (${iteration} iterations${elapsed ? `, ${elapsed}` : ''})`);
+  }
   out.info(`Session log: ${ndjsonLogPath}`);
   reportTraceDiscovery(out, traceDiscovery);
   if (shouldNotifyWorkflowComplete) {

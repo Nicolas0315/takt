@@ -4,12 +4,13 @@ import {
   readFileSync,
   rmSync,
   writeFileSync,
+  mkdirSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { WorkflowConfig } from '../core/models/index.js';
-import type { RunResumeSource } from '../core/workflow/run/run-meta.js';
+import { isResumableRunStatus, readRunMetaBySlug, type RunResumeSource } from '../core/workflow/run/run-meta.js';
 import { buildRunPaths } from '../core/workflow/run/run-paths.js';
 import {
   createWorkflowRunLifecycle,
@@ -102,12 +103,14 @@ async function bindRun(input: {
 async function finishRun(
   run: Awaited<ReturnType<typeof bindRun>>,
   status: 'completed' | 'failed' = 'completed',
+  completion?: { kind: 'deferred'; report: string },
 ): Promise<void> {
   const reason = status === 'failed' ? 'injected failure' : undefined;
   const payload = run.terminalPayloads.create({
     status,
     iterations: 1,
     ...(reason === undefined ? {} : { reason }),
+    ...(completion === undefined ? {} : { completion }),
     lastStepContent: status === 'completed' ? 'done' : undefined,
     lastStepName: 'done',
     endTime: '2026-08-01T00:00:00.000Z',
@@ -116,6 +119,7 @@ async function finishRun(
     status,
     iteration: 1,
     ...(reason === undefined ? {} : { reason }),
+    ...(completion === undefined ? {} : { completion }),
   }, payload);
   expect(finalization.issues).toEqual([]);
 }
@@ -178,6 +182,29 @@ describe('workflow run lifecycle composition', () => {
 
     await finishRun(target);
     expect(readFileSync(residualDatabasePath)).toEqual(residualBytes);
+  });
+
+  it('persists completed deferred metadata with the real report path and keeps it non-resumable', async () => {
+    const cwd = createRoot();
+    const run = await bindRun({
+      cwd,
+      runSlug: 'deferred-run',
+      workflowConfig: workflow('deferred-run'),
+    });
+    mkdirSync(run.handle.runPaths.reportsAbs, { recursive: true });
+    const reportPath = join(run.handle.runPaths.reportsAbs, 'final-gate.md');
+    writeFileSync(reportPath, 'Unverified gates: PR CI\n', 'utf8');
+    const report = '.takt/runs/deferred-run/reports/final-gate.md';
+
+    await finishRun(run, 'completed', { kind: 'deferred', report });
+
+    const meta = readRunMetaBySlug(cwd, 'deferred-run');
+    expect(meta).toMatchObject({
+      status: 'completed',
+      completion: { kind: 'deferred', report },
+    });
+    expect(meta).not.toBeNull();
+    expect(isResumableRunStatus(meta!.status)).toBe(false);
   });
 
 

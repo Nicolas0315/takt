@@ -203,6 +203,49 @@ describe('RunMetaManager', () => {
     });
   });
 
+  it('should persist deferred completion and reject a conflicting terminal projection', () => {
+    const manager = new RunMetaManager(createRunPaths(), 'Deferred task', 'takt-experimental');
+    const completion = {
+      kind: 'deferred' as const,
+      report: '.takt/runs/20260409-force-fail-test/reports/final-gate.md',
+    };
+
+    manager.projectTerminal({
+      status: 'completed',
+      iterations: 4,
+      completion,
+      endTime: '2026-08-02T15:26:51.000Z',
+    });
+
+    const terminalMeta = JSON.parse(String(vi.mocked(writeFileAtomic).mock.calls[1]![1])) as {
+      status: string;
+      completion?: typeof completion;
+    };
+    expect(terminalMeta.status).toBe('completed');
+    expect(terminalMeta.completion).toEqual(completion);
+
+    expect(() => manager.projectTerminal({
+      status: 'completed',
+      iterations: 4,
+      completion: { ...completion, report: 'other-report.md' },
+      endTime: '2026-08-02T15:26:51.000Z',
+    })).toThrow('terminal projection conflicts');
+  });
+
+  it('should omit completion from an ordinary completed run', () => {
+    const manager = new RunMetaManager(createRunPaths(), 'Complete task', 'default');
+
+    manager.projectTerminal({
+      status: 'completed',
+      iterations: 2,
+      endTime: '2026-08-02T15:26:51.000Z',
+    });
+
+    const terminalMeta = JSON.parse(String(vi.mocked(writeFileAtomic).mock.calls[1]![1])) as Record<string, unknown>;
+    expect(terminalMeta.status).toBe('completed');
+    expect(terminalMeta).not.toHaveProperty('completion');
+  });
+
   it('should persist direct resume source metadata for resumed runs', () => {
     const manager = new RunMetaManager(
       createRunPaths(),
