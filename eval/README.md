@@ -30,9 +30,12 @@ results, not one pass/fail summary.
 The `write-tests-default-priority` suite runs on the Claude headless CLI with
 model `opus` because it reproduces a requirement-priority miss observed in an
 Opus-driven TAKT run. It is excluded from the default Codex suite and runs
-through `npm run eval:prompts:default-priority`. The suite uses a disposable
-work copy, so rerun the complete command for each trial. Run
-`npm run eval:prompts:default-priority:codex` to cross-check it with Codex.
+through `npm run eval:prompts:default-priority`. It verifies the primary manual
+Requeue-to-runner path from failed-leaf selection and initial cursor through
+pending persistence, normal runner claim, and fresh execution; checkpoint
+preservation is checked only as an explicit independent behavior. The suite
+uses a disposable work copy, so rerun the complete command for each trial.
+Run `npm run eval:prompts:default-priority:codex` to cross-check it with Codex.
 
 The `fix-loop-convergence` suite probes the remediation-loop convergence
 rules with 11 decision scenarios, each run on **two providers** — the
@@ -71,7 +74,7 @@ machine-readable `JUDGEMENT:` line — invoke it explicitly
 | `issue-plan-samples` | default / plan | nrslib/takt repository (read-only) | whether planning preserves explicit breadth, allowed design choices, and explicitly required architecture across Issues #1127, #1155, and #1136 |
 | `plan-report-source-authority` | default / plan report phase | synthetic Phase 1 draft (tool-less) | whether the final `plan.md` keeps the original task authoritative and demotes unsupported design details from requirements |
 | `write-tests-contract-traceability` | default / write_tests | write-tests-contract-traceability | whether generated tests accept the intended local contract, reject plausible mutations, and avoid inventing irrelevant impact paths |
-| `write-tests-default-priority` | default / write_tests | write-tests-default-priority | whether tests exercise coexistence of an explicit failed-leaf default and a preserved Resume action, rejecting the old Resume-first priority |
+| `write-tests-default-priority` | default / write_tests | write-tests-default-priority | whether tests trace manual Requeue from failed-leaf selection and initial cursor through pending persistence to a normal-runner fresh start, while retaining an explicit checkpoint action |
 | `scope-default-write-tests` | default / write_tests | scope-discipline-tests | whether tests observe behavior and remove an invalid internal-structure test instead of replacing it with another proxy |
 | `scope-maintenance-write-tests` | backend-maintenance / write_tests | scope-discipline-tests | whether the shared maintenance path applies the same behavioral test discipline |
 | `scope-architecture-search{,-none,-unrelated}` | peer-review / arch-review | scope-architecture-search | whether the same shared instruction discovers an unhinted second implementation and avoids an unrelated defect with relevant, absent, or unrelated Policy/Knowledge composition |
