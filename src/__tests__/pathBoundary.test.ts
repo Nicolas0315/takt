@@ -128,4 +128,9 @@ describe('isProjectRelativePath', () => {
     expect(isProjectRelativePath('reports/../../outside.md')).toBe(false);
     expect(isProjectRelativePath('reports\\..\\..\\outside.md')).toBe(false);
   });
+
+  it('should reject drive segments that survive normalization', () => {
+    expect(isProjectRelativePath('./C:/reports/final-gate.md')).toBe(false);
+    expect(isProjectRelativePath('reports/../C:/reports/final-gate.md')).toBe(false);
+  });
 });

@@ -18,16 +18,18 @@ export function isPathInside(basePath: string, candidatePath: string): boolean {
 
 // Lexical check only: the referenced file may not exist yet when the value is
 // validated, so symlinks are out of scope here (isRealPathInside covers reads).
-// Both platform rule sets apply regardless of the host: a meta file written on
-// one platform must not smuggle an absolute or escaping path onto the other.
+// win32 rules are a superset of posix here (both separators, drive prefixes),
+// and they apply regardless of the host: a meta file written on one platform
+// must not smuggle an absolute or escaping path onto the other. Everything is
+// checked against one normalized form so no rule sees a different spelling.
 export function isProjectRelativePath(candidatePath: string): boolean {
-  if (path.posix.isAbsolute(candidatePath) || path.win32.isAbsolute(candidatePath)) {
+  const normalized = path.win32.normalize(candidatePath);
+  if (path.win32.isAbsolute(normalized)) {
     return false;
   }
-  if (/^[A-Za-z]:/.test(candidatePath)) {
-    return false;
-  }
-  return path.win32.normalize(candidatePath).split(/[\\/]/, 1)[0] !== '..';
+  return !normalized
+    .split('\\')
+    .some((segment) => segment === '..' || /^[A-Za-z]:/.test(segment));
 }
 
 export function lstatIfExists(targetPath: string): Stats | null {
