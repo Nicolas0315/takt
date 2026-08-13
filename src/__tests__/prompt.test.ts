@@ -11,6 +11,7 @@ import {
   renderMenu,
   countRenderedLines,
   handleKeyInput,
+  firstSelectableIndex,
   readMultilineFromStream,
 } from '../shared/prompt/index.js';
 
@@ -54,6 +55,21 @@ describe('prompt', () => {
       expect(lines[1]).not.toContain('❯');
       expect(lines[2]).toContain('❯');
       expect(lines[2]).toContain('Option C');
+    });
+
+    it('should render a non-selectable heading without a cursor even if index matches', () => {
+      const treeOptions: SelectOptionItem<string>[] = [
+        { label: 'group:', value: 'h', selectable: false },
+        { label: 'plan', value: 'p' },
+      ];
+      const lines = renderMenu(treeOptions, 0, false);
+
+      expect(lines).toHaveLength(2);
+      // Heading never carries the cursor marker.
+      expect(lines[0]).not.toContain('❯');
+      expect(lines[0]).toContain('group:');
+      // Leaves still render normally.
+      expect(lines[1]).toContain('plan');
     });
 
     it('should include Cancel option when hasCancelOption is true', () => {
@@ -185,6 +201,61 @@ describe('prompt', () => {
 
     it('should return 1 for empty options with cancel', () => {
       expect(countRenderedLines([], true)).toBe(1);
+    });
+  });
+
+  describe('non-selectable heading rows', () => {
+    // index 0 = heading, 1 = leaf, 2 = heading, 3 = leaf, plus cancel (index 4)
+    const options: SelectOptionItem<string>[] = [
+      { label: 'group-a', value: 'ha', selectable: false },
+      { label: 'plan', value: 'la' },
+      { label: 'group-b', value: 'hb', selectable: false },
+      { label: 'review', value: 'lb' },
+    ];
+    const totalItems = options.length + 1; // includes Cancel
+    const optionCount = options.length;
+
+    it('should skip a heading when moving down', () => {
+      // From leaf index 1, down should skip heading index 2 and land on leaf 3.
+      const result = handleKeyInput('\x1B[B', 1, totalItems, true, optionCount, options);
+      expect(result).toEqual({ action: 'move', newIndex: 3 });
+    });
+
+    it('should skip a heading when moving up', () => {
+      // From leaf index 1, up should skip heading index 0 and wrap to Cancel (4).
+      const result = handleKeyInput('\x1B[A', 1, totalItems, true, optionCount, options);
+      expect(result).toEqual({ action: 'move', newIndex: 4 });
+    });
+
+    it('should land on the Cancel row, which is always selectable', () => {
+      const result = handleKeyInput('\x1B[B', 3, totalItems, true, optionCount, options);
+      expect(result).toEqual({ action: 'move', newIndex: 4 });
+    });
+
+    it('should ignore Enter on a heading row', () => {
+      const result = handleKeyInput('\r', 0, totalItems, true, optionCount, options);
+      expect(result).toEqual({ action: 'none' });
+    });
+
+    it('should confirm Enter on a leaf row', () => {
+      const result = handleKeyInput('\r', 1, totalItems, true, optionCount, options);
+      expect(result).toEqual({ action: 'confirm', selectedIndex: 1 });
+    });
+
+    it('firstSelectableIndex should advance past a leading heading', () => {
+      expect(firstSelectableIndex(options, 0, true)).toBe(1);
+    });
+
+    it('firstSelectableIndex should keep an already-selectable start', () => {
+      expect(firstSelectableIndex(options, 3, true)).toBe(3);
+    });
+
+    it('firstSelectableIndex should fall back to Cancel when no option is selectable', () => {
+      const allHeadings: SelectOptionItem<string>[] = [
+        { label: 'group-a', value: 'ha', selectable: false },
+        { label: 'group-b', value: 'hb', selectable: false },
+      ];
+      expect(firstSelectableIndex(allHeadings, 0, true)).toBe(allHeadings.length);
     });
   });
 

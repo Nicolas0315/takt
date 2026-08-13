@@ -254,11 +254,11 @@ When you select **Retry** on a failed task, TAKT:
 
 1. Displays failure details (failed step, error message, last agent message)
 2. Prompts you to select a workflow
-3. Prompts you to choose a start position: **Resume failed position** or **Restart from**
+3. Prompts you to choose a start position from a single tree
 4. Opens a retry conversation pre-loaded with failure context, run session data, and workflow structure
 5. Lets you refine instructions with AI assistance
 
-**Requeue** uses the same workflow and start-position selection, but saves the task as `pending` without opening a conversation. With Retry and Requeue you choose between **Resume** (continue from the failure point, preserving execution state) and **Restart** (start a new execution from any step of your choice). Steps nested under `workflow_call` sub-workflows can also be selected as the start position.
+**Requeue** uses the same workflow and start-position selection, but saves the task as `pending` without opening a conversation. The start-position prompt presents the workflow as a tree: the top row is **Resume failed position** (continue from the failure point, preserving execution state), and every authored step is listed below as a selectable leaf. `workflow_call` sub-workflows appear as non-selectable headings that indent their child steps, so you always confirm a leaf step — a sub-workflow itself cannot be chosen. The failed step is marked `(default)` and pre-selected. Choosing any leaf restarts a new execution from that step.
 
 After `/go`, the retry conversation offers the same choices as Instruct mode (**Save as Task** / **Continue editing**), with `/accept` and `/replay` for immediate re-execution and `/cancel` to abort. Both saving and immediate re-execution use the selected Resume or Restart position. Retry notes are appended to the task record, accumulating across multiple retry attempts.
 
