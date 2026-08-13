@@ -178,6 +178,9 @@ export async function selectTaskRetryStart(
       }
       tree.toggleNavigation(navigation);
       projected = projectTree(rootWorkflow, tree.getVisibleNodes(), resumePath);
+      if (projected.selections.size === 0) {
+        throw new Error(`Workflow "${rootWorkflow.name}" has no selectable retry positions`);
+      }
       continue;
     }
 

@@ -276,9 +276,16 @@ export class TaskRetryRestartTree {
     const nodes = this.getVisibleNodes();
     const resume = nodes.find((node) => node.kind === 'leaf' && node.isResumeCandidate);
     if (resume !== undefined) return resume.value;
-    const preferred = nodes.find((node) => node.kind === 'leaf' && node.isDefaultCandidate);
+    const preferred = nodes.find((node) => (
+      node.kind === 'leaf'
+      && (node.isRestartable || node.isResumeCandidate)
+      && node.isDefaultCandidate
+    ));
     if (preferred !== undefined) return preferred.value;
-    const leaf = nodes.find((node) => node.kind === 'leaf');
+    const leaf = nodes.find((node) => (
+      node.kind === 'leaf'
+      && (node.isRestartable || node.isResumeCandidate)
+    ));
     if (leaf !== undefined) return leaf.value;
     return nodes.find((node) => node.kind === 'navigation' && !node.expanded)?.value;
   }
@@ -342,7 +349,7 @@ export class TaskRetryRestartTree {
     node.frame.expandedCallKeys.add(node.key);
     const activeWindow = node.frame.activeStepWindow;
     const visibleNodes = this.getVisibleNodes();
-    const childHasVisibleNode = this.getVisibleNodesForFrame(child).length > 0;
+    const childHasVisibleNode = this.getVisibleNodesForFrame(child, 1).length > 0;
     const childIsProjected = visibleNodes.some((visibleNode) => visibleNode.frame === child);
     if (
       activeWindow !== undefined
@@ -492,27 +499,20 @@ export class TaskRetryRestartTree {
   }
 
   private pruneFrameState(frame: TaskRetryRestartTreeFrameState): void {
-    for (const [parentStepIndex, window] of frame.activeParallelWindows) {
+    for (const parentStepIndex of frame.activeParallelWindows.keys()) {
       if (!this.isStepIndexActive(frame, parentStepIndex)) {
         frame.activeParallelWindows.delete(parentStepIndex);
-        continue;
-      }
-      for (const key of frame.childFrames.keys()) {
-        if (this.isParallelNodeKeyForParent(key, parentStepIndex)
-          && !this.isParallelIndexActive(window, this.getParallelNodeIndex(key))) {
-          frame.childFrames.delete(key);
-          frame.expandedCallKeys.delete(key);
-          frame.nodeIds.delete(key);
-        }
       }
     }
 
-    for (const key of frame.childFrames.keys()) {
-      if (this.isStepNodeKey(key) && !this.isStepIndexActive(frame, this.getStepNodeIndex(key))) {
+    for (const [key, child] of frame.childFrames) {
+      if (!this.isNodeKeyActive(frame, key)) {
         frame.childFrames.delete(key);
         frame.expandedCallKeys.delete(key);
         frame.nodeIds.delete(key);
+        continue;
       }
+      this.pruneFrameState(child);
     }
 
     for (const key of frame.expandedCallKeys) {
@@ -547,14 +547,6 @@ export class TaskRetryRestartTree {
 
   private getStepNodeIndex(key: string): number {
     return Number(key.slice('step:'.length));
-  }
-
-  private getParallelNodeIndex(key: string): number {
-    return Number(key.split(':').at(-1));
-  }
-
-  private isParallelNodeKeyForParent(key: string, parentStepIndex: number): boolean {
-    return key.startsWith(`parallel:${parentStepIndex}:`);
   }
 
   private isStepIndexActive(frame: TaskRetryRestartTreeFrameState, index: number): boolean {
@@ -954,6 +946,7 @@ export class TaskRetryRestartTree {
     }
 
     let frame: TaskRetryRestartTreeFrameState | undefined = node.frame;
+    let fromChildFrame = false;
     let currentStepIndex = node.kind === 'navigation'
       ? node.parentStepIndex
       : frame.workflow.steps.indexOf(node.step);
@@ -961,11 +954,14 @@ export class TaskRetryRestartTree {
       const window = frame.activeStepWindow;
       if (window !== undefined && currentStepIndex >= 0) {
         const windowSize = Math.max(1, window.end - window.start);
+        const adjacentIndex = direction === 'up'
+          ? currentStepIndex - windowSize + (fromChildFrame ? 0 : 1)
+          : currentStepIndex + (fromChildFrame ? 1 : 0);
         const changed = direction === 'up'
           ? currentStepIndex > 0
-            && this.loadWindow(frame, currentStepIndex - windowSize + 1, windowSize)
+            && this.loadWindow(frame, adjacentIndex, windowSize)
           : currentStepIndex + 1 < frame.workflow.steps.length
-            && this.loadWindow(frame, currentStepIndex, windowSize);
+            && this.loadWindow(frame, adjacentIndex, windowSize);
         if (changed) return true;
       }
 
@@ -978,11 +974,13 @@ export class TaskRetryRestartTree {
           parentStepIndex,
           frame.parentParallelStepIndex,
           direction,
+          true,
         );
         if (changed) return true;
       }
       frame = parent;
       currentStepIndex = parentStepIndex;
+      fromChildFrame = true;
     }
     return false;
   }
@@ -992,6 +990,7 @@ export class TaskRetryRestartTree {
     parentStepIndex: number,
     currentIndex: number,
     direction: 'up' | 'down',
+    fromChildFrame = false,
   ): boolean {
     const window = frame.activeParallelWindows.get(parentStepIndex);
     if (window === undefined) {
@@ -1000,8 +999,8 @@ export class TaskRetryRestartTree {
 
     const windowSize = Math.max(1, window.end - window.start);
     const adjacentIndex = direction === 'up'
-      ? currentIndex - windowSize + 1
-      : currentIndex;
+      ? currentIndex - windowSize + (fromChildFrame ? 0 : 1)
+      : currentIndex + (fromChildFrame ? 1 : 0);
     return direction === 'up'
       ? currentIndex > 0
         && this.loadParallelWindow(frame, parentStepIndex, adjacentIndex, windowSize)

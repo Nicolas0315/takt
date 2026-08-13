@@ -261,6 +261,44 @@ describe('task retry start tree selection', () => {
     expect(result?.selection).toEqual({ kind: 'resume', resumePoint });
   });
 
+  it('should retain the Resume leaf after expanding a non-target workflow call', async () => {
+    const child = makeWorkflow({
+      name: 'child',
+      ref: 'project:child',
+      callable: true,
+      steps: [agentStep('review')],
+    });
+    const resumePoint = rootResumePoint('step-49', 'agent');
+    const root = makeWorkflow({
+      name: 'default',
+      ref: 'project:root',
+      steps: [
+        ...Array.from({ length: 48 }, (_, index) => agentStep(`step-${index}`)),
+        callStep('delegate', 'child'),
+        agentStep('step-49'),
+      ],
+    });
+    mockResolveWorkflowCallTarget.mockReturnValue(child);
+    let promptCount = 0;
+
+    const result = await selectTaskRetryStart(root, {
+      ...pathContext,
+      resumePoint,
+    }, async (_message, options, defaultValue) => {
+      promptCount += 1;
+      if (promptCount === 1) {
+        return findLeaf(options, 'delegate').value;
+      }
+
+      expect(options.some((option) => option.value === 'resume-checkpoint')).toBe(true);
+      expect(defaultValue).toBe('resume-checkpoint');
+      return 'resume-checkpoint';
+    });
+
+    expect(promptCount).toBe(2);
+    expect(result?.selection).toEqual({ kind: 'resume', resumePoint });
+  });
+
   it('should reserve the late preferred child leaf when earlier root leaves fill the window', async () => {
     const child = makeWorkflow({
       name: 'child',
@@ -567,6 +605,75 @@ describe('task retry start tree selection', () => {
     expect(observedOptions.some((option) => option.value === 'resume-checkpoint')).toBe(true);
     expect(observedDefault).toBe('resume-checkpoint');
     expect(result?.selection).toEqual({ kind: 'resume', resumePoint });
+  });
+
+  it('should replace a static parallel window after moving down from its first child', async () => {
+    const child = makeWorkflow({
+      name: 'child',
+      ref: 'project:child',
+      callable: true,
+      steps: [agentStep('review')],
+    });
+    const root = makeWorkflow({
+      name: 'default',
+      ref: 'project:root',
+      steps: [
+        parallelStep(
+          'reviewers',
+          Array.from({ length: 100 }, (_, index) => callStep(`delegate-${index}`, 'child')),
+        ),
+        agentStep('finish'),
+      ],
+    });
+    const resumePoint = resumePointWithStack([
+      {
+        workflow: 'default',
+        workflow_ref: 'project:root',
+        step: 'reviewers',
+        kind: 'parallel',
+        occurrence: 1,
+      },
+      {
+        workflow: 'default',
+        workflow_ref: 'project:root',
+        step: 'delegate-0',
+        kind: 'workflow_call',
+        occurrence: 1,
+        call_instance: 1,
+      },
+      {
+        workflow: 'child',
+        workflow_ref: 'project:child',
+        step: 'review',
+        kind: 'agent',
+        occurrence: 1,
+      },
+    ]);
+    mockResolveWorkflowCallTarget.mockReturnValue(child);
+
+    const result = await selectTaskRetryStart(root, {
+      ...pathContext,
+      resumePoint,
+    }, async (_message, options, _defaultValue, callbacks) => {
+      const resumeOption = options.find((option) => option.value === 'resume-checkpoint')!;
+      const updatedOptions = callbacks?.onKeyPress?.(
+        '\x1B[B',
+        resumeOption.value,
+        options.indexOf(resumeOption),
+      );
+      expect(updatedOptions).not.toBeNull();
+      expect(updatedOptions!.length).toBeLessThanOrEqual(50);
+      expect(new Set(updatedOptions!.map((option) => option.value)).size)
+        .toBe(updatedOptions!.length);
+      expect(updatedOptions!.some((option) => option.label.trim() === 'delegate-0')).toBe(false);
+      expect(updatedOptions!.some((option) => option.label.trim() === 'delegate-1')).toBe(true);
+      return findLeaf(updatedOptions!, 'reviewers').value;
+    });
+
+    expect(result?.selection.kind).toBe('restart');
+    expect(result?.selection.kind === 'restart'
+      ? result.selection.restartPoint.stack.at(-1)?.step
+      : undefined).toBe('reviewers');
   });
 
   it('should choose a single initial window when Resume and default target different windows', async () => {
@@ -1120,6 +1227,64 @@ describe('task retry start tree selection', () => {
       : undefined).toBe('step-9999');
   });
 
+  it('should keep active windows bounded while moving repeatedly in both directions', async () => {
+    const root = makeWorkflow({
+      name: 'default',
+      ref: 'project:root',
+      steps: Array.from({ length: 1_000 }, (_, index) => agentStep(`step-${index}`)),
+    });
+    const assertBoundedAndUnique = (options: SelectOptionItem<string>[]): void => {
+      expect(options.length).toBeLessThanOrEqual(50);
+      expect(new Set(options.map((option) => option.value)).size).toBe(options.length);
+    };
+
+    const result = await selectTaskRetryStart(root, pathContext, async (
+      _message,
+      options,
+      _defaultValue,
+      callbacks,
+    ) => {
+      let currentOptions = options;
+      assertBoundedAndUnique(currentOptions);
+      expect(callbacks?.onKeyPress).toBeDefined();
+      let downMoves = 0;
+      for (let index = 0; index < 1_000; index += 1) {
+        const lastIndex = currentOptions.length - 1;
+        const updatedOptions = callbacks!.onKeyPress!(
+          '\x1B[B',
+          currentOptions[lastIndex]!.value,
+          lastIndex,
+        );
+        if (updatedOptions === null) break;
+        expect(updatedOptions).not.toBeUndefined();
+        currentOptions = updatedOptions!;
+        assertBoundedAndUnique(currentOptions);
+        downMoves += 1;
+      }
+      expect(downMoves).toBeGreaterThan(0);
+      let upMoves = 0;
+      for (let index = 0; index < 1_000; index += 1) {
+        const updatedOptions = callbacks!.onKeyPress!(
+          '\x1B[A',
+          currentOptions[0]!.value,
+          0,
+        );
+        if (updatedOptions === null) break;
+        expect(updatedOptions).not.toBeUndefined();
+        currentOptions = updatedOptions!;
+        assertBoundedAndUnique(currentOptions);
+        upMoves += 1;
+      }
+      expect(upMoves).toBeGreaterThan(0);
+      return findLeaf(currentOptions, 'step-0').value;
+    });
+
+    expect(result?.selection.kind).toBe('restart');
+    expect(result?.selection.kind === 'restart'
+      ? result.selection.restartPoint.stack.at(-1)?.step
+      : undefined).toBe('step-0');
+  });
+
   it('should load the parent window after reaching the end of an expanded child', async () => {
     const child = makeWorkflow({
       name: 'child',
@@ -1164,6 +1329,55 @@ describe('task retry start tree selection', () => {
     expect(result?.selection.kind === 'restart'
       ? result.selection.restartPoint.stack.at(-1)?.step
       : undefined).toBe('step-50');
+  });
+
+  it('should advance the parent window after moving down from the first child frame', async () => {
+    const child = makeWorkflow({
+      name: 'child',
+      ref: 'project:child',
+      callable: true,
+      steps: [agentStep('child-review')],
+    });
+    const root = makeWorkflow({
+      name: 'default',
+      ref: 'project:root',
+      initialStep: 'step-0',
+      steps: [
+        callStep('delegate', 'child'),
+        ...Array.from({ length: 100 }, (_, index) => agentStep(`step-${index}`)),
+      ],
+    });
+    mockResolveWorkflowCallTarget.mockReturnValue(child);
+    let promptCount = 0;
+
+    const result = await selectTaskRetryStart(root, pathContext, async (
+      _message,
+      options,
+      _defaultValue,
+      callbacks,
+    ) => {
+      promptCount += 1;
+      if (promptCount === 1) {
+        return options.find((option) => option.label.trim() === 'delegate')!.value;
+      }
+
+      const childReview = findLeaf(options, 'child-review');
+      const updatedOptions = callbacks?.onKeyPress?.(
+        '\x1B[B',
+        childReview.value,
+        options.indexOf(childReview),
+      );
+      expect(updatedOptions).not.toBeNull();
+      expect(updatedOptions?.some((option) => option.label.trim() === 'child-review')).toBe(false);
+      expect(updatedOptions?.some((option) => option.label.trim() === 'step-49')).toBe(true);
+      return findLeaf(updatedOptions!, 'step-0').value;
+    });
+
+    expect(promptCount).toBe(2);
+    expect(result?.selection.kind).toBe('restart');
+    expect(result?.selection.kind === 'restart'
+      ? result.selection.restartPoint.stack.at(-1)?.step
+      : undefined).toBe('step-0');
   });
 
   it('should load the parent next window when a child ends before the parent window', async () => {
