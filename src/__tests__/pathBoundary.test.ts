@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { assertPathSegmentsAreSafe, type BoundaryViolation } from '../shared/utils/index.js';
+import { assertPathSegmentsAreSafe, isProjectRelativePath, type BoundaryViolation } from '../shared/utils/index.js';
 
 function buildTestError(violation: BoundaryViolation, segmentPath: string): Error {
   return new Error(`${violation}: ${segmentPath}`);
@@ -107,5 +107,25 @@ describe('assertPathSegmentsAreSafe', () => {
     expect(stats).not.toBeNull();
     expect(stats?.isSymbolicLink()).toBe(false);
     expect(stats?.isFile()).toBe(true);
+  });
+});
+
+describe('isProjectRelativePath', () => {
+  it('should accept a normalized project-relative report path', () => {
+    expect(isProjectRelativePath('.takt/runs/slug/reports/final-gate.md')).toBe(true);
+    expect(isProjectRelativePath('reports/nested/../final-gate.md')).toBe(true);
+  });
+
+  it('should reject absolute paths on both platform rule sets', () => {
+    expect(isProjectRelativePath('/etc/passwd')).toBe(false);
+    expect(isProjectRelativePath('C:\\reports\\final-gate.md')).toBe(false);
+    expect(isProjectRelativePath('\\reports\\final-gate.md')).toBe(false);
+  });
+
+  it('should reject drive-relative and escaping paths', () => {
+    expect(isProjectRelativePath('C:reports/final-gate.md')).toBe(false);
+    expect(isProjectRelativePath('../outside.md')).toBe(false);
+    expect(isProjectRelativePath('reports/../../outside.md')).toBe(false);
+    expect(isProjectRelativePath('reports\\..\\..\\outside.md')).toBe(false);
   });
 });
