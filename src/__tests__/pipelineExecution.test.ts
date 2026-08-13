@@ -54,10 +54,7 @@ vi.mock('../infra/task/git.js', async (importOriginal) => ({
 const mockExecuteTask = vi.fn();
 const mockConfirmAndCreateWorktree = vi.fn();
 vi.mock('../features/tasks/index.js', () => ({
-  executeTaskWithResult: async (...args: unknown[]) => {
-    const result = await mockExecuteTask(...args);
-    return typeof result === 'boolean' ? { success: result } : result;
-  },
+  executeTaskWithResult: (...args: unknown[]) => mockExecuteTask(...args),
   confirmAndCreateWorktree: mockConfirmAndCreateWorktree,
 }));
 
@@ -186,7 +183,7 @@ describe('executePipeline', () => {
       labels: [],
       comments: [],
     });
-    mockExecuteTask.mockResolvedValueOnce(false);
+    mockExecuteTask.mockResolvedValueOnce({ success: false });
 
     const exitCode = await executePipeline({
       issueNumber: 99,
@@ -201,7 +198,7 @@ describe('executePipeline', () => {
   });
 
   it('should return exit code 0 on successful task-only execution', async () => {
-    mockExecuteTask.mockResolvedValueOnce(true);
+    mockExecuteTask.mockResolvedValueOnce({ success: true });
 
     const exitCode = await executePipeline({
       task: 'Fix the bug',
@@ -239,7 +236,7 @@ describe('executePipeline', () => {
       labels: [],
       comments: [],
     });
-    mockExecuteTask.mockResolvedValueOnce(true);
+    mockExecuteTask.mockResolvedValueOnce({ success: true });
 
     const exitCode = await executePipeline({
       issueNumber: 99,
@@ -363,7 +360,7 @@ describe('executePipeline', () => {
   });
 
   it('should sanitize workflow names before terminal output', async () => {
-    mockExecuteTask.mockResolvedValueOnce(true);
+    mockExecuteTask.mockResolvedValueOnce({ success: true });
 
     const exitCode = await executePipeline({
       task: 'Fix the bug',
@@ -386,7 +383,7 @@ describe('executePipeline', () => {
       labels: [],
       comments: [],
     });
-    mockExecuteTask.mockResolvedValueOnce(true);
+    mockExecuteTask.mockResolvedValueOnce({ success: true });
 
     const exitCode = await executePipeline({
       issueNumber: 99,
@@ -427,7 +424,7 @@ describe('executePipeline', () => {
   });
 
   it('passes provider/model overrides to task execution', async () => {
-    mockExecuteTask.mockResolvedValueOnce(true);
+    mockExecuteTask.mockResolvedValueOnce({ success: true });
 
     const exitCode = await executePipeline({
       task: 'Fix the bug',
@@ -449,7 +446,7 @@ describe('executePipeline', () => {
   });
 
   it('should return exit code 5 when PR creation fails', async () => {
-    mockExecuteTask.mockResolvedValueOnce(true);
+    mockExecuteTask.mockResolvedValueOnce({ success: true });
     mockCreatePullRequest.mockReturnValueOnce({ success: false, error: 'PR failed' });
 
     const exitCode = await executePipeline({
@@ -463,7 +460,7 @@ describe('executePipeline', () => {
   });
 
   it('should return exit code 5 when createPullRequest throws', async () => {
-    mockExecuteTask.mockResolvedValueOnce(true);
+    mockExecuteTask.mockResolvedValueOnce({ success: true });
     mockCreatePullRequest.mockImplementationOnce(() => {
       throw new Error('--repo is not supported with GitLab provider. Use cwd context instead.');
     });
@@ -479,7 +476,7 @@ describe('executePipeline', () => {
   });
 
   it('should create PR with correct branch when --auto-pr', async () => {
-    mockExecuteTask.mockResolvedValueOnce(true);
+    mockExecuteTask.mockResolvedValueOnce({ success: true });
     mockCreatePullRequest.mockReturnValueOnce({ success: true, url: 'https://github.com/test/pr/1' });
 
     const exitCode = await executePipeline({
@@ -502,7 +499,7 @@ describe('executePipeline', () => {
   });
 
   it('should pass draft: true to createPullRequest when draftPr is true', async () => {
-    mockExecuteTask.mockResolvedValueOnce(true);
+    mockExecuteTask.mockResolvedValueOnce({ success: true });
     mockCreatePullRequest.mockReturnValueOnce({ success: true, url: 'https://github.com/test/pr/1' });
 
     const exitCode = await executePipeline({
@@ -522,7 +519,7 @@ describe('executePipeline', () => {
   });
 
   it('should pass draft: false to createPullRequest when draftPr is false', async () => {
-    mockExecuteTask.mockResolvedValueOnce(true);
+    mockExecuteTask.mockResolvedValueOnce({ success: true });
     mockCreatePullRequest.mockReturnValueOnce({ success: true, url: 'https://github.com/test/pr/1' });
 
     const exitCode = await executePipeline({
@@ -549,7 +546,7 @@ describe('executePipeline', () => {
       }
       return 'abc1234\n';
     });
-    mockExecuteTask.mockResolvedValueOnce(true);
+    mockExecuteTask.mockResolvedValueOnce({ success: true });
     mockCreatePullRequest.mockReturnValueOnce({ success: true, url: 'https://github.com/test/pr/1' });
 
     // When
@@ -571,7 +568,7 @@ describe('executePipeline', () => {
   });
 
   it('should use --task when both --task and positional task are provided', async () => {
-    mockExecuteTask.mockResolvedValueOnce(true);
+    mockExecuteTask.mockResolvedValueOnce({ success: true });
 
     const exitCode = await executePipeline({
       task: 'From --task flag',
@@ -605,7 +602,7 @@ describe('executePipeline', () => {
         labels: [],
         comments: [],
       });
-      mockExecuteTask.mockResolvedValueOnce(true);
+      mockExecuteTask.mockResolvedValueOnce({ success: true });
 
       await executePipeline({
         issueNumber: 42,
@@ -638,7 +635,7 @@ describe('executePipeline', () => {
         labels: [],
         comments: [],
       });
-      mockExecuteTask.mockResolvedValueOnce(true);
+      mockExecuteTask.mockResolvedValueOnce({ success: true });
 
       await executePipeline({
         issueNumber: 10,
@@ -670,7 +667,7 @@ describe('executePipeline', () => {
         labels: [],
         comments: [],
       });
-      mockExecuteTask.mockResolvedValueOnce(true);
+      mockExecuteTask.mockResolvedValueOnce({ success: true });
       mockCreatePullRequest.mockReturnValueOnce({ success: true, url: 'https://github.com/pr/1' });
 
       await executePipeline({
@@ -698,7 +695,7 @@ describe('executePipeline', () => {
           prBodyTemplate: '## Summary\n{report}\n\nIssue:{issue}\nDetails:{issue_body}',
         },
       });
-      mockExecuteTask.mockResolvedValueOnce(true);
+      mockExecuteTask.mockResolvedValueOnce({ success: true });
       mockCreatePullRequest.mockReturnValueOnce({ success: true, url: 'https://github.com/pr/2' });
 
       await executePipeline({
@@ -720,7 +717,7 @@ describe('executePipeline', () => {
     });
 
     it('should fall back to buildPrBody when no template is configured', async () => {
-      mockExecuteTask.mockResolvedValueOnce(true);
+      mockExecuteTask.mockResolvedValueOnce({ success: true });
       mockCreatePullRequest.mockReturnValueOnce({ success: true, url: 'https://github.com/pr/1' });
 
       await executePipeline({
@@ -746,7 +743,7 @@ describe('executePipeline', () => {
 
   describe('--skip-git', () => {
     it('should skip branch creation, commit, push when skipGit is true', async () => {
-      mockExecuteTask.mockResolvedValueOnce(true);
+      mockExecuteTask.mockResolvedValueOnce({ success: true });
       mockResolveConfigValue.mockImplementation((_projectDir: string, key: string) => (
         key === 'autoFetch' ? true : undefined
       ));
@@ -801,7 +798,7 @@ describe('executePipeline', () => {
     });
 
     it('should continue skipGit workflow in a non-git directory without git trace metadata', async () => {
-      mockExecuteTask.mockResolvedValueOnce(true);
+      mockExecuteTask.mockResolvedValueOnce({ success: true });
       mockGetCurrentBranch.mockImplementationOnce(() => {
         throw new Error('not a git repository');
       });
@@ -845,7 +842,7 @@ describe('executePipeline', () => {
         reviews: [{ author: 'reviewer1', body: 'Fix null check' }],
         files: ['src/auth.ts'],
       });
-      mockExecuteTask.mockResolvedValueOnce(true);
+      mockExecuteTask.mockResolvedValueOnce({ success: true });
 
       const exitCode = await executePipeline({
         prNumber: 456,
@@ -897,7 +894,7 @@ describe('executePipeline', () => {
         reviews: [{ author: 'reviewer1', body: 'Fix null check' }],
         files: ['src/auth.ts'],
       });
-      mockExecuteTask.mockResolvedValueOnce(true);
+      mockExecuteTask.mockResolvedValueOnce({ success: true });
 
       const exitCode = await executePipeline({
         prNumber: 456,
@@ -940,7 +937,7 @@ describe('executePipeline', () => {
     });
 
     it('should ignore --auto-pr when skipGit is true', async () => {
-      mockExecuteTask.mockResolvedValueOnce(true);
+      mockExecuteTask.mockResolvedValueOnce({ success: true });
 
       const exitCode = await executePipeline({
         task: 'Fix the bug',
@@ -955,7 +952,7 @@ describe('executePipeline', () => {
     });
 
     it('should still return workflow failure exit code when skipGit is true', async () => {
-      mockExecuteTask.mockResolvedValueOnce(false);
+      mockExecuteTask.mockResolvedValueOnce({ success: false });
 
       const exitCode = await executePipeline({
         task: 'Fix the bug',
@@ -978,7 +975,7 @@ describe('executePipeline', () => {
         baseBranch: 'main',
         taskSlug: 'fix-the-bug',
       });
-      mockExecuteTask.mockResolvedValueOnce(true);
+      mockExecuteTask.mockResolvedValueOnce({ success: true });
 
       const exitCode = await executePipeline({
         task: 'Fix the bug',
@@ -1016,7 +1013,7 @@ describe('executePipeline', () => {
     });
 
     it('should not create worktree when createWorktree is false', async () => {
-      mockExecuteTask.mockResolvedValueOnce(true);
+      mockExecuteTask.mockResolvedValueOnce({ success: true });
 
       const exitCode = await executePipeline({
         task: 'Fix the bug',
@@ -1038,7 +1035,7 @@ describe('executePipeline', () => {
     });
 
     it('should use original cwd when createWorktree is undefined', async () => {
-      mockExecuteTask.mockResolvedValueOnce(true);
+      mockExecuteTask.mockResolvedValueOnce({ success: true });
 
       const exitCode = await executePipeline({
         task: 'Fix the bug',
@@ -1066,7 +1063,7 @@ describe('executePipeline', () => {
         baseBranch: 'main',
         taskSlug: 'fix-the-bug',
       });
-      mockExecuteTask.mockResolvedValueOnce(true);
+      mockExecuteTask.mockResolvedValueOnce({ success: true });
 
       const exitCode = await executePipeline({
         task: 'Fix the bug',
@@ -1096,7 +1093,7 @@ describe('executePipeline', () => {
         baseBranch: 'main',
         taskSlug: 'fix-the-bug',
       });
-      mockExecuteTask.mockResolvedValueOnce(true);
+      mockExecuteTask.mockResolvedValueOnce({ success: true });
 
       const exitCode = await executePipeline({
         task: 'Fix the bug',
@@ -1161,7 +1158,7 @@ describe('executePipeline', () => {
         baseBranch: 'main',
         taskSlug: 'fix-the-bug',
       });
-      mockExecuteTask.mockResolvedValueOnce(true);
+      mockExecuteTask.mockResolvedValueOnce({ success: true });
 
       const exitCode = await executePipeline({
         task: 'Fix the bug',
@@ -1202,7 +1199,7 @@ describe('executePipeline', () => {
         baseBranch: 'main',
         taskSlug: 'fix-the-bug',
       });
-      mockExecuteTask.mockResolvedValueOnce(true);
+      mockExecuteTask.mockResolvedValueOnce({ success: true });
       mockCreatePullRequest.mockReturnValueOnce({ success: true, url: 'https://github.com/test/pr/1' });
 
       const exitCode = await executePipeline({
@@ -1231,7 +1228,7 @@ describe('executePipeline', () => {
         baseBranch: 'release/main',
         taskSlug: 'fix-the-bug',
       });
-      mockExecuteTask.mockResolvedValueOnce(true);
+      mockExecuteTask.mockResolvedValueOnce({ success: true });
       mockCreatePullRequest.mockReturnValueOnce({ success: true, url: 'https://github.com/test/pr/1' });
 
       const exitCode = await executePipeline({
@@ -1273,7 +1270,7 @@ describe('executePipeline', () => {
         pullRequestBaseRef: 'refs/takt/pr-base/release/main',
         pullRequestHeadRef: 'refs/heads/fix/auth-bug',
       });
-      mockExecuteTask.mockResolvedValueOnce(true);
+      mockExecuteTask.mockResolvedValueOnce({ success: true });
 
       const exitCode = await executePipeline({
         prNumber: 456,
@@ -1302,7 +1299,7 @@ describe('executePipeline', () => {
   });
 
   it('should return exit code 4 when git commit/push fails', async () => {
-    mockExecuteTask.mockResolvedValueOnce(true);
+    mockExecuteTask.mockResolvedValueOnce({ success: true });
     // stageAndCommit calls execFileSync('git', ['add', ...]) then ('git', ['commit', ...])
     // Make the commit call throw
     mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
@@ -1326,7 +1323,7 @@ describe('executePipeline', () => {
   describe('Slack notification', () => {
     it('should not send Slack notification when webhook is not configured', async () => {
       mockGetSlackWebhookUrl.mockReturnValue(undefined);
-      mockExecuteTask.mockResolvedValueOnce(true);
+      mockExecuteTask.mockResolvedValueOnce({ success: true });
 
       await executePipeline({
         task: 'Fix the bug',
@@ -1341,7 +1338,7 @@ describe('executePipeline', () => {
 
     it('should send success notification when webhook is configured', async () => {
       mockGetSlackWebhookUrl.mockReturnValue('https://hooks.slack.com/test');
-      mockExecuteTask.mockResolvedValueOnce(true);
+      mockExecuteTask.mockResolvedValueOnce({ success: true });
 
       await executePipeline({
         task: 'Fix the bug',
@@ -1373,7 +1370,7 @@ describe('executePipeline', () => {
 
     it('should send failure notification when workflow fails', async () => {
       mockGetSlackWebhookUrl.mockReturnValue('https://hooks.slack.com/test');
-      mockExecuteTask.mockResolvedValueOnce(false);
+      mockExecuteTask.mockResolvedValueOnce({ success: false });
 
       await executePipeline({
         task: 'Fix the bug',
@@ -1397,7 +1394,7 @@ describe('executePipeline', () => {
 
     it('should include PR URL in notification when auto-pr succeeds', async () => {
       mockGetSlackWebhookUrl.mockReturnValue('https://hooks.slack.com/test');
-      mockExecuteTask.mockResolvedValueOnce(true);
+      mockExecuteTask.mockResolvedValueOnce({ success: true });
       mockCreatePullRequest.mockReturnValueOnce({ success: true, url: 'https://github.com/test/pr/99' });
 
       await executePipeline({
@@ -1431,7 +1428,7 @@ describe('executePipeline', () => {
         reviews: [{ author: 'reviewer1', body: 'Fix null check' }],
         files: ['src/auth.ts'],
       });
-      mockExecuteTask.mockResolvedValueOnce(true);
+      mockExecuteTask.mockResolvedValueOnce({ success: true });
 
       const exitCode = await executePipeline({
         prNumber: 456,
@@ -1494,7 +1491,7 @@ describe('executePipeline', () => {
         reviews: [],
         files: ['src/auth.ts'],
       });
-      mockExecuteTask.mockResolvedValueOnce(true);
+      mockExecuteTask.mockResolvedValueOnce({ success: true });
 
       const exitCode = await executePipeline({
         prNumber: 456,
@@ -1533,7 +1530,7 @@ describe('executePipeline', () => {
         reviews: [],
         files: ['src/auth.ts'],
       });
-      mockExecuteTask.mockResolvedValueOnce(true);
+      mockExecuteTask.mockResolvedValueOnce({ success: true });
 
       const exitCode = await executePipeline({
         prNumber: 456,
@@ -1577,7 +1574,7 @@ describe('executePipeline', () => {
         reviews: [{ author: 'reviewer1', body: 'Fix null check' }],
         files: ['src/auth.ts'],
       });
-      mockExecuteTask.mockResolvedValueOnce(true);
+      mockExecuteTask.mockResolvedValueOnce({ success: true });
       mockCreatePullRequest.mockReturnValueOnce({ success: true, url: 'https://github.com/org/repo/pull/1' });
 
       // When
@@ -1619,7 +1616,7 @@ describe('executePipeline', () => {
         reviews: [{ author: 'reviewer1', body: 'Fix null check' }],
         files: ['src/auth.ts'],
       });
-      mockExecuteTask.mockResolvedValueOnce(true);
+      mockExecuteTask.mockResolvedValueOnce({ success: true });
       mockCreatePullRequest.mockReturnValueOnce({ success: true, url: 'https://github.com/org/repo/pull/1' });
 
       const exitCode = await executePipeline({

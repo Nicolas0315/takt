@@ -1,7 +1,7 @@
 ```markdown
 # Final Merge-Readiness Adjudication
 
-## Result: MERGEABLE / FIX REQUIRED / TASK REPLAN REQUIRED / BLOCKED BY ENVIRONMENT
+## Result: MERGEABLE / FIX REQUIRED / TASK REPLAN REQUIRED / BLOCKED BY ENVIRONMENT (DEFERRABLE) / BLOCKED BY ENVIRONMENT (NOT DEFERRABLE)
 
 ## Requirement and Evidence Summary
 | Subject | State | Evidence |

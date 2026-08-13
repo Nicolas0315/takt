@@ -8,6 +8,7 @@ vi.mock('../infra/config/index.js', () => ({
 
 import { ensureDir, writeFileAtomic } from '../infra/config/index.js';
 import { RunMetaManager } from '../features/tasks/execute/runMeta.js';
+import { parseRunMeta } from '../core/workflow/run/run-meta.js';
 
 function createRunPaths(): RunPaths {
   return buildRunPaths('/tmp/project', '20260409-force-fail-test');
@@ -330,5 +331,44 @@ describe('RunMetaManager', () => {
       });
       expect(meta).not.toHaveProperty('prContext');
     }
+  });
+});
+
+describe('parseRunMeta completion.report boundary', () => {
+  const baseMeta = {
+    task: 'Deferred task',
+    workflow: 'takt-experimental',
+    runSlug: '20260814-000000-deferred',
+    runRoot: '/repo/.takt/runs/20260814-000000-deferred',
+    reportDirectory: '/repo/.takt/runs/20260814-000000-deferred/reports',
+    contextDirectory: '/repo/.takt/runs/20260814-000000-deferred/context',
+    logsDirectory: '/repo/.takt/runs/20260814-000000-deferred/logs',
+    status: 'completed',
+    startTime: '2026-08-14T00:00:00.000Z',
+  };
+
+  it('should accept a project-relative deferred report path', () => {
+    const meta = parseRunMeta({
+      ...baseMeta,
+      completion: { kind: 'deferred', report: '.takt/runs/20260814-000000-deferred/reports/final-gate.md' },
+    });
+    expect(meta.completion).toEqual({
+      kind: 'deferred',
+      report: '.takt/runs/20260814-000000-deferred/reports/final-gate.md',
+    });
+  });
+
+  it('should reject an absolute deferred report path', () => {
+    expect(() => parseRunMeta({
+      ...baseMeta,
+      completion: { kind: 'deferred', report: '/etc/passwd' },
+    })).toThrow('completion.report must stay inside the project');
+  });
+
+  it('should reject a deferred report path that escapes the project', () => {
+    expect(() => parseRunMeta({
+      ...baseMeta,
+      completion: { kind: 'deferred', report: 'reports/../../outside/final-gate.md' },
+    })).toThrow('completion.report must stay inside the project');
   });
 });

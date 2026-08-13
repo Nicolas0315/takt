@@ -71,7 +71,7 @@ async function runPipeline(options: PipelineExecutionOptions): Promise<PipelineO
   }
 
   if (isDeferred && skipGit) {
-    info('Deferred workflow handoff requires Git commit, push, and pull request creation; --skip-git prevents handoff');
+    error('Deferred workflow handoff requires Git commit, push, and pull request creation; --skip-git prevents handoff');
     return {
       exitCode: EXIT_DEFERRED_HANDOFF_REQUIRED,
       result: buildResult({ branch: context.branch }),

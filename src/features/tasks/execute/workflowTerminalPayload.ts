@@ -1,4 +1,4 @@
-import { basename } from 'node:path';
+import { basename, isAbsolute, normalize } from 'node:path';
 import type { WorkflowTraceDiscovery } from '../../../core/workflow/observability/traceDiscovery.js';
 import type { RunFailure } from '../../../core/workflow/run/run-meta.js';
 import type { SessionState } from '../../../infra/config/index.js';
@@ -249,7 +249,11 @@ function assertWorkflowTerminalPublicationPayload(
     if (completion.kind !== 'deferred') {
       throw new TypeError('Workflow terminal payload completion kind is invalid');
     }
-    requireNonEmptyString(completion.report, '$.completion.report');
+    const report = completion.report;
+    requireNonEmptyString(report, '$.completion.report');
+    if (isAbsolute(report) || normalize(report).split(/[\\/]/, 1)[0] === '..') {
+      throw new TypeError('Workflow terminal payload completion report must stay inside the project');
+    }
   }
   requireIsoTimestamp(payload.endTime, '$.endTime');
   assertTerminalSessionLog(payload.sessionLog, payload);

@@ -372,7 +372,6 @@ describe('Pipeline Integration Tests', () => {
       { persona: 'reviewer', status: 'done', content: '[FINAL-GATE:1]\n\nExternal gate is unverified.\n\n## Unverified Gate Classification\n- PR CI: unverified' },
     ]);
     mockCheckGhCli.mockReturnValue({ available: true });
-    mockCreatePullRequest.mockImplementation(() => ({ success: true, url: 'https://example.test/pull/1' }));
 
     const events: string[] = [];
     mockExecFileSync.mockImplementation((_command, args) => {
@@ -392,12 +391,8 @@ describe('Pipeline Integration Tests', () => {
       }
       return '' as never;
     });
-    mockCreatePullRequest.mockImplementation((options) => {
+    mockCreatePullRequest.mockImplementation(() => {
       events.push('pr:create');
-      expect(options.body).toContain('TAKT Deferred Handoff');
-      expect(options.body).toContain('Merge readiness: unconfirmed');
-      expect(options.body).toContain('Unverified Gate Classification');
-      expect(options.body).toContain('review-resolution.md');
       return { success: true, url: 'https://example.test/pull/1' };
     });
 
@@ -412,6 +407,11 @@ describe('Pipeline Integration Tests', () => {
     });
 
     expect(exitCode).toBe(0);
+    const prBody = (mockCreatePullRequest.mock.calls[0]?.[0] as { body: string }).body;
+    expect(prBody).toContain('TAKT Deferred Handoff');
+    expect(prBody).toContain('Merge readiness: unconfirmed');
+    expect(prBody).toContain('Unverified Gate Classification');
+    expect(prBody).toContain('review-resolution.md');
     expect(events.findIndex((event) => event.includes('commit --no-verify'))).toBeGreaterThanOrEqual(0);
     expect(events.findIndex((event) => event === 'git push origin takt/deferred-test'))
       .toBeGreaterThan(events.findIndex((event) => event.includes('commit --no-verify')));

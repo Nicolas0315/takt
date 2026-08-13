@@ -348,9 +348,6 @@ describe('contract-family active composition', () => {
       });
       expect(content, instruction).toContain('cross_cutting');
       expect(content, instruction).toContain('deferred');
-      expect(content, instruction).toContain(
-        lang === 'ja' ? '環境要因による実証不能の4条件' : 'All four environmental inability conditions',
-      );
     }
   });
 

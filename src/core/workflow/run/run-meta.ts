@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { isAbsolute, normalize, resolve } from 'node:path';
 import { isPathInside, isValidReportDirName } from '../../../shared/utils/index.js';
 import { getErrorMessage } from '../../../shared/utils/error.js';
 import type { WorkflowResumePoint } from '../../models/types.js';
@@ -323,8 +323,18 @@ function parseRunCompletion(value: unknown): RunCompletion {
   }
   return {
     kind: 'deferred',
-    report: requiredString(completion.report, 'completion.report'),
+    report: requireProjectRelativeReportPath(
+      requiredString(completion.report, 'completion.report'),
+    ),
   };
+}
+
+function requireProjectRelativeReportPath(report: string): string {
+  const escapes = normalize(report).split(/[\\/]/, 1)[0] === '..';
+  if (isAbsolute(report) || escapes) {
+    throw new Error('Run metadata completion.report must stay inside the project');
+  }
+  return report;
 }
 
 function requiredAgentFailureCategory(value: unknown): AgentFailureCategory {

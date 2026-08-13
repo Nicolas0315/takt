@@ -184,5 +184,6 @@ describe('submitPullRequest', () => {
     expect(body).toContain('Follow-up gate: PR CI');
     expect(body).toContain(report);
     expect(body).not.toContain('completed successfully');
+    expect(mockReadFileSync).toHaveBeenCalledWith(`${projectCwd}/${report}`, 'utf-8');
   });
 });
