@@ -8,7 +8,7 @@
 import { describe, it, expect } from 'vitest';
 import chalk from 'chalk';
 import type { SelectOptionItem } from '../shared/prompt/select-menu.js';
-import { countItemLines } from '../shared/prompt/select-menu.js';
+import { countItemLines, countRenderedLines } from '../shared/prompt/select-menu.js';
 import {
   createViewportState,
   adjustScrollOffset,
@@ -16,6 +16,8 @@ import {
 } from '../shared/prompt/select-viewport.js';
 
 chalk.level = 0;
+
+type TreeOption = SelectOptionItem<string> & { leadingLines?: string[] };
 
 // ── Test fixtures ────────────────────────────────────────────────────
 
@@ -40,6 +42,14 @@ function withDescAndDetails(
   return { label, value, description, details };
 }
 
+function withLeadingLines(
+  label: string,
+  value: string,
+  leadingLines: string[],
+): TreeOption {
+  return { label, value, leadingLines };
+}
+
 // ── countItemLines ───────────────────────────────────────────────────
 
 describe('countItemLines', () => {
@@ -57,6 +67,21 @@ describe('countItemLines', () => {
 
   it('should count description + details', () => {
     expect(countItemLines(withDescAndDetails('A', 'a', 'desc', ['d1', 'd2', 'd3']))).toBe(5);
+  });
+
+  it('should count non-selectable leading tree headings', () => {
+    expect(countItemLines(withLeadingLines('review', 'review', ['development-core', 'peer-review']))).toBe(3);
+  });
+
+  it('should count shared headings according to the rendered suffixes', () => {
+    const options = [
+      withLeadingLines('plan', 'plan', ['root', 'child']),
+      withLeadingLines('review', 'review', ['root', 'child']),
+      withLeadingLines('fix', 'fix', ['root', 'child']),
+    ];
+
+    expect(countRenderedLines(options, false)).toBe(5);
+    expect(countItemLines(options[1]!, options[0]!.leadingLines)).toBe(1);
   });
 });
 
@@ -111,6 +136,42 @@ describe('createViewportState', () => {
 
     expect(state.active).toBe(true);
     expect(state.maxOptionLines).toBe(4);
+  });
+
+  it('should activate the viewport using tree heading lines', () => {
+    const options = [
+      withLeadingLines('plan', 'plan', ['development-core']),
+      withLeadingLines('review', 'review', ['development-core', 'peer-review']),
+      withLeadingLines('fix', 'fix', ['development-core', 'peer-review']),
+    ];
+    const state = createViewportState(8, options, false);
+
+    expect(state.active).toBe(true);
+    expect(state.maxOptionLines).toBe(4);
+  });
+
+  it('should align shared heading count, viewport state, and rendered lines', () => {
+    const options = [
+      withLeadingLines('plan', 'plan', ['root', 'child']),
+      withLeadingLines('review', 'review', ['root', 'child']),
+      withLeadingLines('fix', 'fix', ['root', 'child']),
+    ];
+    const state = createViewportState(8, options, false);
+    const lines = renderMenuWithViewport(
+      options,
+      1,
+      false,
+      1,
+      state.maxOptionLines,
+      'Cancel',
+    );
+
+    expect(countRenderedLines(options, false)).toBe(5);
+    expect(state.active).toBe(true);
+    expect(lines.filter((line) => line.includes('root'))).toHaveLength(1);
+    expect(lines.filter((line) => line.includes('child'))).toHaveLength(1);
+    expect(lines.find((line) => line.includes('❯'))).toContain('review');
+    expect(lines).toHaveLength(countItemLines(options[1]!) + 2);
   });
 });
 
@@ -174,6 +235,19 @@ describe('adjustScrollOffset', () => {
     // scrollOffset=0, selected=3 (below visible)
     const result = adjustScrollOffset(3, 0, multiLineOpts, false, 4);
     expect(result).toBeGreaterThan(0);
+  });
+
+  it('should scroll by selectable leaf index while accounting for heading lines', () => {
+    const options = [
+      withLeadingLines('plan', 'plan', ['development-core']),
+      withLeadingLines('review', 'review', ['development-core', 'peer-review']),
+      withLeadingLines('fix', 'fix', ['development-core', 'peer-review']),
+    ];
+
+    const result = adjustScrollOffset(2, 0, options, false, 4);
+
+    expect(result).toBeGreaterThan(0);
+    expect(adjustScrollOffset(2, result, options, false, 4)).toBe(result);
   });
 });
 
@@ -277,5 +351,36 @@ describe('renderMenuWithViewport', () => {
     expect(lines.join('\n')).toContain('A');
     expect(lines.join('\n')).toContain('desc a');
     expect(lines.join('\n')).toContain('↓ 2 more');
+  });
+
+  it('should render tree headings without cursors and keep the leaf cursor aligned', () => {
+    const options = [
+      withLeadingLines('plan', 'plan', ['development-core']),
+      withLeadingLines('review', 'review', ['development-core', 'peer-review']),
+    ];
+
+    const lines = renderMenuWithViewport(options, 1, false, 0, 5, 'Cancel');
+
+    expect(lines.join('\n')).toContain('development-core');
+    expect(lines.join('\n')).toContain('peer-review');
+    expect(lines.filter((line) => line.includes('❯'))).toHaveLength(1);
+    expect(lines.find((line) => line.includes('❯'))).toContain('review');
+  });
+
+  it('should repeat all headings for the first option in a scrolled viewport', () => {
+    const options = [
+      withLeadingLines('plan', 'plan', ['root', 'child']),
+      withLeadingLines('review', 'review', ['root', 'child']),
+      withLeadingLines('fix', 'fix', ['root', 'other']),
+    ];
+
+    const lines = renderMenuWithViewport(options, 1, false, 1, 5, 'Cancel');
+
+    expect(lines).toHaveLength(5);
+    expect(lines[0]).toContain('↑ 1 more');
+    expect(lines.filter((line) => line.includes('root'))).toHaveLength(1);
+    expect(lines.filter((line) => line.includes('child'))).toHaveLength(1);
+    expect(lines.find((line) => line.includes('❯'))).toContain('review');
+    expect(lines[lines.length - 1]).toContain('↓ 1 more');
   });
 });

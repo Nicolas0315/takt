@@ -6,7 +6,13 @@
 
 import chalk from 'chalk';
 import type { SelectOptionItem, ViewportState } from './select-menu.js';
-import { countItemLines, countRenderedLines, renderSingleOption, renderCancelOption } from './select-menu.js';
+import {
+  countItemLines,
+  countRenderedLines,
+  getLeadingLinesToRender,
+  renderSingleOption,
+  renderCancelOption,
+} from './select-menu.js';
 
 const HEADER_LINES = 4;
 
@@ -53,9 +59,12 @@ function calculateVisibleRange<T extends string>(
   const hasHiddenAbove = scrollOffset > 0;
   let usedLines = 0;
   let count = 0;
+  let previousLeadingLines: readonly string[] = [];
 
   for (let i = scrollOffset; i < totalItems; i++) {
-    const itemLines = i < options.length ? countItemLines(options[i]!) : 1;
+    const itemLines = i < options.length
+      ? countItemLines(options[i]!, previousLeadingLines)
+      : 1;
     const remainingItems = totalItems - (i + 1);
     const hasHiddenBelow = remainingItems > 0;
     const nextUsedLines = usedLines + itemLines;
@@ -67,6 +76,9 @@ function calculateVisibleRange<T extends string>(
 
     usedLines = nextUsedLines;
     count++;
+    if (i < options.length) {
+      previousLeadingLines = options[i]!.leadingLines ?? [];
+    }
   }
 
   if (count === 0 && scrollOffset < totalItems) {
@@ -150,11 +162,19 @@ export function renderMenuWithViewport<T extends string>(
     lines.push(chalk.gray(`  ↑ ${scrollOffset} more`));
   }
 
+  let previousLeadingLines: string[] = [];
   for (let i = scrollOffset; i < endIndex; i++) {
     if (i < options.length) {
       const opt = options[i]!;
       const isSelected = i === selectedIndex;
-      lines.push(...renderSingleOption(opt, isSelected, maxWidth));
+      const leadingLines = opt.leadingLines ?? [];
+      lines.push(...renderSingleOption(
+        opt,
+        isSelected,
+        maxWidth,
+        getLeadingLinesToRender(leadingLines, previousLeadingLines),
+      ));
+      previousLeadingLines = leadingLines;
     } else {
       const isCancelSelected = selectedIndex === options.length;
       lines.push(renderCancelOption(isCancelSelected, cancelLabel));

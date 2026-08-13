@@ -122,10 +122,11 @@ async function selectRetryStart(
   const result = await selectTaskRetryStart(
     workflowConfig,
     options,
-    (message, candidates, defaultValue) => selectOptionWithDefault(
+    (message, candidates, defaultValue, callbacks) => selectOptionWithDefault(
       message,
       candidates,
       defaultValue,
+      callbacks,
     ),
   );
   if (result === null) {

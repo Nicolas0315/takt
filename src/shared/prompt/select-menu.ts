@@ -14,6 +14,8 @@ export interface SelectOptionItem<T extends string> {
   value: T;
   description?: string;
   details?: string[];
+  leadingLines?: string[];
+  indent?: number;
 }
 
 export type KeyInputResult =
@@ -37,25 +39,62 @@ const LABEL_PREFIX = 4;
 const DESC_PREFIX = 5;
 const DETAIL_PREFIX = 9;
 
+function getIndentWithinWidth(indent: string, prefixWidth: number, maxWidth: number): string {
+  return indent.slice(0, Math.max(0, maxWidth - prefixWidth));
+}
+
+export function getLeadingLinesToRender(
+  leadingLines: readonly string[],
+  previousLeadingLines: readonly string[],
+): string[] {
+  let commonLength = 0;
+  while (
+    commonLength < leadingLines.length
+    && commonLength < previousLeadingLines.length
+    && leadingLines[commonLength] === previousLeadingLines[commonLength]
+  ) {
+    commonLength++;
+  }
+  return leadingLines.slice(commonLength);
+}
+
 export function renderSingleOption<T extends string>(
   opt: SelectOptionItem<T>,
   isSelected: boolean,
   maxWidth: number,
+  leadingLines = opt.leadingLines,
 ): string[] {
   const lines: string[] = [];
+  for (const leadingLine of leadingLines ?? []) {
+    lines.push(truncateText(`  ${leadingLine}`, maxWidth));
+  }
+
+  const indent = '  '.repeat(opt.indent ?? 0);
   const cursor = isSelected ? chalk.cyan('❯') : ' ';
-  const truncatedLabel = truncateText(opt.label, maxWidth - LABEL_PREFIX);
+  const labelIndent = getIndentWithinWidth(indent, LABEL_PREFIX, maxWidth);
+  const truncatedLabel = truncateText(
+    opt.label,
+    maxWidth - labelIndent.length - LABEL_PREFIX,
+  );
   const label = isSelected ? chalk.cyan.bold(truncatedLabel) : truncatedLabel;
-  lines.push(`  ${cursor} ${label}`);
+  lines.push(`${labelIndent}  ${cursor} ${label}`);
 
   if (opt.description) {
-    const truncatedDesc = truncateText(opt.description, maxWidth - DESC_PREFIX);
-    lines.push(chalk.gray(`     ${truncatedDesc}`));
+    const descriptionIndent = getIndentWithinWidth(indent, DESC_PREFIX, maxWidth);
+    const truncatedDesc = truncateText(
+      opt.description,
+      maxWidth - descriptionIndent.length - DESC_PREFIX,
+    );
+    lines.push(chalk.gray(`${descriptionIndent}     ${truncatedDesc}`));
   }
   if (opt.details && opt.details.length > 0) {
     for (const detail of opt.details) {
-      const truncatedDetail = truncateText(detail, maxWidth - DETAIL_PREFIX);
-      lines.push(chalk.dim(`       • ${truncatedDetail}`));
+      const detailIndent = getIndentWithinWidth(indent, DETAIL_PREFIX, maxWidth);
+      const truncatedDetail = truncateText(
+        detail,
+        maxWidth - detailIndent.length - DETAIL_PREFIX,
+      );
+      lines.push(chalk.dim(`${detailIndent}       • ${truncatedDetail}`));
     }
   }
 
@@ -70,8 +109,12 @@ export function renderCancelOption(isSelected: boolean, cancelLabel: string): st
 
 // ── Public pure functions ────────────────────────────────────────────
 
-export function countItemLines<T extends string>(opt: SelectOptionItem<T>): number {
-  let lines = 1;
+export function countItemLines<T extends string>(
+  opt: SelectOptionItem<T>,
+  previousLeadingLines: readonly string[] = [],
+): number {
+  const leadingLines = getLeadingLinesToRender(opt.leadingLines ?? [], previousLeadingLines);
+  let lines = leadingLines.length + 1;
   if (opt.description) lines++;
   if (opt.details) lines += opt.details.length;
   return lines;
@@ -85,12 +128,20 @@ export function renderMenu<T extends string>(
 ): string[] {
   const maxWidth = process.stdout.columns || 80;
   const lines: string[] = [];
+  let previousLeadingLines: string[] = [];
 
   for (let i = 0; i < options.length; i++) {
     const opt = options[i];
     if (!opt) continue;
     const isSelected = i === selectedIndex;
-    lines.push(...renderSingleOption(opt, isSelected, maxWidth));
+    const leadingLines = opt.leadingLines ?? [];
+    lines.push(...renderSingleOption(
+      opt,
+      isSelected,
+      maxWidth,
+      getLeadingLinesToRender(leadingLines, previousLeadingLines),
+    ));
+    previousLeadingLines = leadingLines;
   }
 
   if (hasCancelOption) {
@@ -106,8 +157,10 @@ export function countRenderedLines<T extends string>(
   hasCancelOption: boolean,
 ): number {
   let count = 0;
+  let previousLeadingLines: readonly string[] = [];
   for (const opt of options) {
-    count += countItemLines(opt);
+    count += countItemLines(opt, previousLeadingLines);
+    previousLeadingLines = opt.leadingLines ?? [];
   }
   if (hasCancelOption) count++;
   return count;

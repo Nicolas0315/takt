@@ -328,20 +328,54 @@ function buildNestedRestartPoint(projectDir: string): WorkflowRestartPoint {
 async function selectRestartPath(
   root: NonNullable<ReturnType<typeof loadWorkflowByIdentifier>>,
   projectDir: string,
-  labels: string[],
+  leaf: string,
+  occurrence = 0,
 ): Promise<WorkflowRestartPoint> {
-  let labelIndex = 0;
+  let branchLabel: string | undefined;
   const selected = await selectTaskRetryStart(root, {
     projectCwd: projectDir,
     lookupCwd: projectDir,
   }, async (_message, options) => {
-    const label = labels[labelIndex]!;
-    labelIndex += 1;
-    const option = options.find((candidate) => candidate.label === label);
-    if (option === undefined) {
-      throw new Error(`Expected retry option: ${label}`);
+    if (options.length === 0) {
+      throw new Error('Retry picker returned no options');
     }
-    return option.value;
+    const option = options.filter((candidate) => candidate.label.trim() === leaf)[occurrence];
+    if (option !== undefined) {
+      return option.value;
+    }
+
+    const navigationOptions = options.filter((candidate) => (
+      candidate.indent === (candidate.leadingLines?.length ?? 0) + 1
+    ));
+    if (branchLabel === undefined) {
+      const rootNavigation = navigationOptions.filter((candidate) => (
+        (candidate.leadingLines?.length ?? 0) === 1
+      ))[occurrence];
+      if (rootNavigation !== undefined) {
+        branchLabel = rootNavigation.label.trim();
+        return rootNavigation.value;
+      }
+    }
+    const branchNavigationOptions = branchLabel === undefined
+      ? navigationOptions
+      : navigationOptions.filter((candidate) => (
+        candidate.leadingLines?.some((line) => line.trim() === branchLabel) === true
+      ));
+    const deepestNavigationDepth = Math.max(
+      ...branchNavigationOptions.map((candidate) => candidate.leadingLines?.length ?? 0),
+      0,
+    );
+    const navigation = deepestNavigationDepth > 1
+      ? branchNavigationOptions.find((candidate) => (
+        (candidate.leadingLines?.length ?? 0) === deepestNavigationDepth
+      ))
+      : branchNavigationOptions.filter((candidate) => (
+        (candidate.leadingLines?.length ?? 0) === 1
+      ))[occurrence];
+    if (navigation === undefined) {
+      throw new Error(`Expected retry option: ${leaf} (#${occurrence})`);
+    }
+    return navigation.value;
   });
   if (selected?.selection.kind !== 'restart') {
     throw new Error('Expected restart selection');
@@ -926,7 +960,7 @@ describe('task restart persistence and execution resolution', () => {
     await expect(resolveTaskExecution(pending, projectDir)).rejects.toThrow(/restart.*publish/i);
   });
 
-  it('should fail queued revalidation when a selected terminal workflow_call target disappears', async () => {
+  it('should fail queued revalidation when the selected child workflow disappears', async () => {
     const projectDir = createProject();
     writeNestedWorkflows(projectDir, 'review');
     writeFailedTask(projectDir);
@@ -934,16 +968,14 @@ describe('task restart persistence and execution resolution', () => {
     if (root === null) {
       throw new Error('Expected default workflow');
     }
-    const restartPoint = await selectRestartPath(root, projectDir, [
-      'Restart from: "default" > "delegate"',
-    ]);
+    const restartPoint = await selectRestartPath(root, projectDir, 'review');
     const runner = new TaskRunner(projectDir);
     runner.requeueTask(
       'nested-retry',
       ['failed'],
       {
         startStep: undefined,
-        retryNote: 'restart terminal call',
+        retryNote: 'restart child review',
         resumePoint: undefined,
         workflow: undefined,
         taskDir: undefined,
@@ -958,7 +990,7 @@ describe('task restart persistence and execution resolution', () => {
     await expect(resolveTaskExecution(pending, projectDir)).rejects.toThrow(/unknown workflow.*coding/i);
   });
 
-  it('should fail queued revalidation when a selected terminal workflow_call target becomes non-callable', async () => {
+  it('should fail queued revalidation when the selected child workflow becomes non-callable', async () => {
     const projectDir = createProject();
     writeNestedWorkflows(projectDir, 'review');
     writeFailedTask(projectDir);
@@ -966,16 +998,14 @@ describe('task restart persistence and execution resolution', () => {
     if (root === null) {
       throw new Error('Expected default workflow');
     }
-    const restartPoint = await selectRestartPath(root, projectDir, [
-      'Restart from: "default" > "delegate"',
-    ]);
+    const restartPoint = await selectRestartPath(root, projectDir, 'review');
     const runner = new TaskRunner(projectDir);
     runner.requeueTask(
       'nested-retry',
       ['failed'],
       {
         startStep: undefined,
-        retryNote: 'restart terminal call',
+        retryNote: 'restart child review',
         resumePoint: undefined,
         workflow: undefined,
         taskDir: undefined,
@@ -1047,11 +1077,7 @@ describe('task restart persistence and execution resolution', () => {
 
     const restartPoints = [];
     for (const [rootStep, leaf] of [['left', 'leaf-a'], ['right', 'leaf-b']] as const) {
-      restartPoints.push(await selectRestartPath(root, projectDir, [
-        `Browse child workflow from: "args-root" > "${rootStep}"`,
-        `Browse child workflow from: "args-root" > "${rootStep}" > "router" > "route"`,
-        `Restart from: "args-root" > "${rootStep}" > "router" > "route" > "${leaf}" > "finish"`,
-      ]));
+      restartPoints.push(await selectRestartPath(root, projectDir, 'finish', rootStep === 'right' ? 1 : 0));
     }
     expect(restartPoints.map((point) => point.stack[2]?.workflow)).toEqual(['leaf-a', 'leaf-b']);
     for (const restartPoint of restartPoints) {
@@ -1093,14 +1119,8 @@ describe('task restart persistence and execution resolution', () => {
     if (root === null) {
       throw new Error('Expected identity-root workflow');
     }
-    const leftRestartPoint = await selectRestartPath(root, projectDir, [
-      'Browse child workflow from: "identity-root" > "left"',
-      'Restart from: "identity-root" > "left" > "shared" > "review"',
-    ]);
-    const rightRestartPoint = await selectRestartPath(root, projectDir, [
-      'Browse child workflow from: "identity-root" > "right"',
-      'Restart from: "identity-root" > "right" > "shared" > "review"',
-    ]);
+    const leftRestartPoint = await selectRestartPath(root, projectDir, 'review', 0);
+    const rightRestartPoint = await selectRestartPath(root, projectDir, 'review', 1);
     const runner = new TaskRunner(projectDir);
     runner.requeueTask(
       'nested-retry',

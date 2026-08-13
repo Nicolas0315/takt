@@ -173,6 +173,14 @@ function interactiveSelect<T extends string>(
 
     const terminalRows = process.stdout.rows ?? 24;
     let viewport = createViewportState(terminalRows, currentOptions, hasCancelOption);
+    if (viewport.active) {
+      viewport = {
+        ...viewport,
+        scrollOffset: adjustScrollOffset(
+          initialIndex, viewport.scrollOffset, currentOptions, hasCancelOption, viewport.maxOptionLines,
+        ),
+      };
+    }
     let totalLines = 0;
 
     const cleanup = (): unknown => {
@@ -394,26 +402,47 @@ export async function selectOption<T extends string>(
  */
 export async function selectOptionWithDefault<T extends string>(
   message: string,
-  options: { label: string; value: T }[],
+  options: SelectOptionItem<T>[],
   defaultValue: T,
+  callbacks?: InteractiveSelectCallbacks<T>,
 ): Promise<T | null> {
   if (options.length === 0) return defaultValue;
 
   const defaultIndex = options.findIndex((opt) => opt.value === defaultValue);
   const initialIndex = defaultIndex >= 0 ? defaultIndex : 0;
 
-  const decoratedOptions: SelectOptionItem<T>[] = options.map((opt) => ({
+  const decorateDefaultOptions = (items: SelectOptionItem<T>[]): SelectOptionItem<T>[] => items.map((opt) => ({
     ...opt,
     label: opt.value === defaultValue ? `${opt.label} ${chalk.green('(default)')}` : opt.label,
   }));
+  const decoratedOptions = decorateDefaultOptions(options);
+  const decoratedCallbacks: InteractiveSelectCallbacks<T> | undefined = callbacks === undefined
+    ? undefined
+    : {
+      ...callbacks,
+      ...(callbacks.onKeyPress === undefined
+        ? {}
+        : {
+          onKeyPress: (key: string, value: T, index: number): SelectOptionItem<T>[] | null => {
+            const updatedOptions = callbacks.onKeyPress!(key, value, index);
+            return updatedOptions === null ? null : decorateDefaultOptions(updatedOptions);
+          },
+        }),
+    };
 
-  const { selectedIndex } = await interactiveSelect(message, decoratedOptions, initialIndex, true);
+  const { selectedIndex, finalOptions } = await interactiveSelect(
+    message,
+    decoratedOptions,
+    initialIndex,
+    true,
+    decoratedCallbacks,
+  );
 
-  if (selectedIndex === options.length || selectedIndex === -1) {
+  if (selectedIndex === finalOptions.length || selectedIndex === -1) {
     return null;
   }
 
-  const selected = options[selectedIndex];
+  const selected = finalOptions[selectedIndex];
   if (selected) {
     console.log(chalk.green(`  ✓ ${selected.label}`));
     return selected.value;

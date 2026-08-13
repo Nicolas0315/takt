@@ -13,9 +13,13 @@ import {
   handleKeyInput,
   readMultilineFromStream,
 } from '../shared/prompt/index.js';
+import { renderSingleOption } from '../shared/prompt/select-menu.js';
+import { getDisplayWidth, stripAnsi } from '../shared/utils/text.js';
 
 // Disable chalk colors for predictable test output
 chalk.level = 0;
+
+type TreeOption = SelectOptionItem<string> & { leadingLines?: string[] };
 
 describe('prompt', () => {
   describe('renderMenu', () => {
@@ -118,6 +122,25 @@ describe('prompt', () => {
       expect(lines).toHaveLength(1);
       expect(lines[0]).toContain('Cancel');
     });
+
+    it('should render leading tree headings without adding selectable cursor positions', () => {
+      const options: TreeOption[] = [
+        { label: 'plan', value: 'plan', leadingLines: ['development-core'] },
+        { label: 'reviewers', value: 'reviewers', leadingLines: ['peer-review'] },
+      ];
+
+      const lines = renderMenu(options, 1, false);
+
+      expect(lines).toHaveLength(4);
+      expect(lines[0]).toContain('development-core');
+      expect(lines[0]).not.toContain('❯');
+      expect(lines[1]).toContain('plan');
+      expect(lines[1]).not.toContain('❯');
+      expect(lines[2]).toContain('peer-review');
+      expect(lines[2]).not.toContain('❯');
+      expect(lines[3]).toContain('❯');
+      expect(lines[3]).toContain('reviewers');
+    });
   });
 
   describe('countRenderedLines', () => {
@@ -185,6 +208,86 @@ describe('prompt', () => {
 
     it('should return 1 for empty options with cancel', () => {
       expect(countRenderedLines([], true)).toBe(1);
+    });
+
+    it('should count leading tree headings in the rendered line total', () => {
+      const options: TreeOption[] = [
+        { label: 'plan', value: 'plan', leadingLines: ['development-core'] },
+        { label: 'reviewers', value: 'reviewers', leadingLines: ['peer-review'] },
+      ];
+
+      expect(countRenderedLines(options, true)).toBe(5);
+    });
+
+    it('should count shared tree headings only once across consecutive leaves', () => {
+      const options: TreeOption[] = [
+        { label: 'plan', value: 'plan', leadingLines: ['root', 'child'] },
+        { label: 'review', value: 'review', leadingLines: ['root', 'child'] },
+        { label: 'fix', value: 'fix', leadingLines: ['root', 'child'] },
+      ];
+
+      expect(countRenderedLines(options, false)).toBe(5);
+    });
+  });
+
+  describe('renderSingleOption', () => {
+    it('should include indent in every truncation width budget', () => {
+      const maxWidth = 16;
+      const lines = renderSingleOption({
+        label: 'ABCDEFGHIJK',
+        value: 'item',
+        description: 'description',
+        details: ['detail'],
+        indent: 2,
+      }, false, maxWidth);
+
+      expect(lines).toHaveLength(3);
+      for (const line of lines) {
+        expect(getDisplayWidth(stripAnsi(line))).toBeLessThanOrEqual(maxWidth);
+      }
+    });
+
+    it('should keep a deeply indented narrow option within max width', () => {
+      const maxWidth = 10;
+      const lines = renderSingleOption({
+        label: '選択肢ABC',
+        value: 'item',
+        description: '説明文',
+        details: ['詳細情報'],
+        indent: 4,
+      }, false, maxWidth);
+
+      expect(lines).toHaveLength(3);
+      for (const line of lines) {
+        expect(getDisplayWidth(stripAnsi(line))).toBeLessThanOrEqual(maxWidth);
+      }
+    });
+
+    it('should keep leading heading lines within max width', () => {
+      const maxWidth = 20;
+      const lines = renderSingleOption({
+        label: 'review',
+        value: 'item',
+        leadingLines: [
+          `${'  '.repeat(3)}${'A'.repeat(100)}`,
+          '日本語'.repeat(20),
+        ],
+      }, false, maxWidth);
+
+      expect(lines).toHaveLength(3);
+      for (const line of lines) {
+        expect(getDisplayWidth(stripAnsi(line))).toBeLessThanOrEqual(maxWidth);
+      }
+    });
+
+    it('should truncate the heading prefix when max width is narrower than the prefix', () => {
+      const lines = renderSingleOption({
+        label: 'review',
+        value: 'item',
+        leadingLines: ['heading'],
+      }, false, 1);
+
+      expect(getDisplayWidth(stripAnsi(lines[0]!))).toBeLessThanOrEqual(1);
     });
   });
 
@@ -396,6 +499,55 @@ describe('prompt', () => {
 
       // defaultValue not found → falls back to index 0
       expect(result).toBe('plan');
+    });
+
+    it('should preserve leading tree headings while marking the selected default', async () => {
+      setupRawStdin(['\r']);
+
+      const { selectOptionWithDefault } = await import('../shared/prompt/index.js');
+      const options: TreeOption[] = [
+        { label: 'plan', value: 'plan', leadingLines: ['development-core'] },
+        { label: 'reviewers', value: 'reviewers', leadingLines: ['peer-review'] },
+      ];
+
+      const result = await selectOptionWithDefault('Start position:', options, 'reviewers');
+      const writes = (process.stdout.write as unknown as { mock: { calls: unknown[][] } }).mock.calls;
+      const output = writes.map((call) => String(call[0] ?? '')).join('');
+
+      expect(result).toBe('reviewers');
+      expect(output).toContain('peer-review');
+      expect(output).toMatch(/❯ reviewers \(default\)/);
+    });
+
+    it('should show a deep default leaf and its cursor in the initial viewport', async () => {
+      const rowsDescriptor = Object.getOwnPropertyDescriptor(process.stdout, 'rows');
+      Object.defineProperty(process.stdout, 'rows', { value: 10, configurable: true });
+
+      try {
+        setupRawStdin(['\r']);
+
+        const { selectOptionWithDefault } = await import('../shared/prompt/index.js');
+        const options: TreeOption[] = Array.from({ length: 60 }, (_, index) => ({
+          label: `leaf-${index}`,
+          value: `leaf-${index}`,
+          leadingLines: ['root', 'branch'],
+        }));
+
+        const result = await selectOptionWithDefault('Start position:', options, 'leaf-59');
+        const writes = (process.stdout.write as unknown as { mock: { calls: unknown[][] } }).mock.calls;
+        const output = writes.map((call) => String(call[0] ?? '')).join('');
+        const defaultLine = output.split('\n').find((line) => line.includes('leaf-59'));
+
+        expect(defaultLine).toContain('❯');
+        expect(defaultLine).toContain('(default)');
+        expect(result).toBe('leaf-59');
+      } finally {
+        if (rowsDescriptor) {
+          Object.defineProperty(process.stdout, 'rows', rowsDescriptor);
+        } else {
+          Reflect.deleteProperty(process.stdout, 'rows');
+        }
+      }
     });
   });
 
