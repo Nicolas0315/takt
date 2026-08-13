@@ -4,11 +4,13 @@
  * (promptfoo exits non-zero when a test fails, which would break `&&` chains).
  *
  * Usage: node eval/scripts/run-evals.mjs [suite...] [--promptfoo-flags...]
- * Suites: coding, arch, antipattern, frontend, cqrs, rescan, rescan-coding,
+ * Suites: coding, arch, arch-failure-aggregation, antipattern, frontend, cqrs,
+ *         rescan, rescan-coding,
  *         frontend-coder,
  *         cqrs-coder, fix-closure, fix-plan-fresh-findings,
  *         fix-plan-boundary-preflight, review-family-closure,
- *         initial-review-contract-discovery, follow-up-review-repair-regression,
+ *         initial-review-contract-discovery, testing-review-observable-evidence,
+ *         follow-up-review-repair-regression,
  *         follow-up-testing-review-repair-regression,
  *         initial-plan-contract-closure, replan-contract-closure,
  *         issue-plan-samples, plan-report-source-authority,
@@ -29,6 +31,7 @@ import { fileURLToPath } from 'node:url';
 const SUITES = {
   coding: 'promptfooconfig.coding.yaml',
   arch: 'promptfooconfig.arch.yaml',
+  'arch-failure-aggregation': 'promptfooconfig.arch-failure-aggregation.yaml',
   antipattern: 'promptfooconfig.antipattern.yaml',
   frontend: 'promptfooconfig.frontend.yaml',
   cqrs: 'promptfooconfig.cqrs.yaml',
@@ -38,15 +41,19 @@ const SUITES = {
   'cqrs-coder': 'promptfooconfig.cqrs-coder.yaml',
   'fix-closure': 'promptfooconfig.fix-closure.yaml',
   'fix-self-scan': 'promptfooconfig.fix-self-scan.yaml',
+  'fix-loop-convergence': 'promptfooconfig.fix-loop-convergence.yaml',
   'fix-plan-fresh-findings': 'promptfooconfig.fix-plan-fresh-findings.yaml',
   'fix-plan-boundary-preflight': 'promptfooconfig.fix-plan-boundary-preflight.yaml',
   'review-family-closure': 'promptfooconfig.review-family-closure.yaml',
   'initial-review-contract-discovery': 'promptfooconfig.initial-review-contract-discovery.yaml',
+  'testing-review-observable-evidence': 'promptfooconfig.testing-review-observable-evidence.yaml',
   'initial-plan-contract-closure': 'promptfooconfig.initial-plan-contract-closure.yaml',
   'replan-contract-closure': 'promptfooconfig.replan-contract-closure.yaml',
   'issue-plan-samples': 'promptfooconfig.issue-plan-samples.yaml',
   'plan-report-source-authority': 'promptfooconfig.plan-report-source-authority.yaml',
   'write-tests-contract-traceability': 'promptfooconfig.write-tests-contract-traceability.yaml',
+  'write-tests-default-priority': 'promptfooconfig.write-tests-default-priority.yaml',
+  'write-tests-default-priority-codex': 'promptfooconfig.write-tests-default-priority-codex.yaml',
   'scope-default-write-tests': 'promptfooconfig.scope-default-write-tests.yaml',
   'scope-maintenance-write-tests': 'promptfooconfig.scope-maintenance-write-tests.yaml',
   'scope-architecture-search': 'promptfooconfig.scope-architecture-search.yaml',
@@ -57,6 +64,10 @@ const SUITES = {
   'implementation-report-contract-traceability': 'promptfooconfig.implementation-report-contract-traceability.yaml',
   'follow-up-review-repair-regression': 'promptfooconfig.follow-up-review-repair-regression.yaml',
   'follow-up-testing-review-repair-regression': 'promptfooconfig.follow-up-testing-review-repair-regression.yaml',
+  'review-mode-authority': 'promptfooconfig.review-mode-authority.yaml',
+  'fix-verifier-family-boundary': 'promptfooconfig.fix-verifier-family-boundary.yaml',
+  'companion-early-scan': 'promptfooconfig.companion-early-scan.yaml',
+  'companion-evidence-boundary': 'promptfooconfig.companion-evidence-boundary.yaml',
   'review-adjudication': 'promptfooconfig.review-adjudication.yaml',
   'final-readiness-supervision': 'promptfooconfig.final-readiness-supervision.yaml',
   'final-readiness-preservation': 'promptfooconfig.final-readiness-preservation.yaml',
@@ -80,7 +91,16 @@ for (const name of names) {
 // 弱いモデルの行は常に部分失敗するため、デフォルトのゲート実行からは除外する。
 // fix-self-scan は claude ヘッドレス CLI（要 claude ログイン）で走るため、
 // codex 前提のデフォルト実行からは除外し、明示的に呼び出す。
-const DEFAULT_EXCLUDED = new Set(['rescan', 'rescan-coding', 'fix-self-scan']);
+// fix-loop-convergence も claude（opus）と codex（gpt-5.6-luna）の両ログインが
+// 必要な二重測定スイートのため、明示的に呼び出す。
+const DEFAULT_EXCLUDED = new Set([
+  'rescan',
+  'rescan-coding',
+  'fix-self-scan',
+  'fix-loop-convergence',
+  'write-tests-default-priority',
+  'write-tests-default-priority-codex',
+]);
 const selected = names.length > 0 ? names : Object.keys(SUITES).filter((s) => !DEFAULT_EXCLUDED.has(s));
 
 const summary = [];

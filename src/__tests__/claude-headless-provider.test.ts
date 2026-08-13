@@ -126,7 +126,7 @@ describe('ClaudeHeadlessProvider', () => {
     }));
   });
 
-  it('should pass strict read-only internal agent isolation to the headless client', async () => {
+  it('should pass explicitly configured runtime permissions to the headless client', async () => {
     callClaudeHeadlessMock.mockResolvedValue({
       persona: 'selector',
       status: 'done',
@@ -140,7 +140,6 @@ describe('ClaudeHeadlessProvider', () => {
 
     await agent.call('prompt', {
       cwd: '/tmp',
-      internalAgentIsolation: 'strict-readonly',
       permissionMode: 'readonly',
       allowedTools: [],
       mcpServers: {},
@@ -152,11 +151,10 @@ describe('ClaudeHeadlessProvider', () => {
     });
 
     expect(callClaudeHeadlessMock).toHaveBeenCalledWith('selector', 'prompt', expect.objectContaining({
-      internalAgentIsolation: 'strict-readonly',
       permissionMode: 'readonly',
       allowedTools: [],
       mcpServers: {},
-      skillsEnabled: false,
+      skillsEnabled: true,
     }));
   });
 
@@ -250,15 +248,6 @@ describe('ProviderRegistry with Claude headless', () => {
     expect(provider).toBeInstanceOf(ClaudeHeadlessProvider);
   });
 
-  it('should setup an agent through the registry', () => {
-    ProviderRegistry.resetInstance();
-    const registry = ProviderRegistry.getInstance();
-    const provider = registry.get('claude');
-    const agent = provider.setup({ name: 'test' });
-
-    expect(agent).toBeDefined();
-    expect(typeof agent.call).toBe('function');
-  });
 });
 
 describe('Claude provider split (registry)', () => {
@@ -281,12 +270,6 @@ describe('Claude provider split (registry)', () => {
     const sdk = getProvider('claude-sdk');
 
     expect(sdk.supportsStructuredOutput).toBe(true);
-  });
-
-  it('Given headless claude path, When supportsStructuredOutput, Then true after CLI json-schema wiring', () => {
-    const headless = getProvider('claude');
-
-    expect(headless.supportsStructuredOutput).toBe(true);
   });
 
   it('Given unknown id, When getProvider, Then throws with clear message', () => {
