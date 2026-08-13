@@ -569,7 +569,7 @@ version: 1
 
 provider:
   defaults:
-    pool: sol-pool
+    profile: sol-medium
 
   profiles:
     sol-high:
@@ -605,6 +605,8 @@ provider:
     steps:
       default/supervise:
         profile: sol-high
+      default/implement:
+        pool: sol-pool
     internal_agents:
       selector:
         profile: router
@@ -630,7 +632,9 @@ provider:
 
 TAKT が所有する structured agent は常に fresh session で起動します。native structured output 対応 provider には schema を直接渡し、非対応 provider には JSON schema instruction を渡して返却 object を parse・validate します。TAKT は internal agent 専用の permission、tool、network、sandbox、skill、MCP、bypass policy を追加しません。role を制限する場合は `capabilities` と `permission_mode` の一方または両方を明示した profile を割り当てます。両方を省略した場合は、通常の provider 設定をそのまま使用します。
 
-`provider.defaults` と各 `provider.targets` エントリは、固定の `profile` か auto routing を行う `pool` のいずれか一方だけを指定します。step は `<leaf-workflow-name>/<step-name>` 形式で指定し、agent を起動しない制御ノード（`workflow_call` など）は解決対象になりません。
+有効な provider section では `provider.defaults` の指定が必須で、固定の `profile` または順序付きの `ladder` のいずれか一方だけを指定します。`pool` は指定できません。`provider.targets.personas`、`provider.targets.tags`、`provider.targets.steps` のエントリは、固定の `profile`、順序付きの `ladder`、または auto routing 用の `pool` のいずれか一方を指定できます。`pool` はこれらの明示的な workflow target に限り指定できます。`internal_agents` のエントリは固定の `profile` または順序付きの `ladder` を指定できますが、`pool` は指定できません。`companions` のエントリは固定の `profile` のみ指定でき、`pool` と `ladder` は指定できません。step は `<leaf-workflow-name>/<step-name>` 形式で指定し、agent を起動しない制御ノード（`workflow_call` など）は解決対象になりません。
+
+`provider.auto_routing` が存在しても、`pool` を明示した target だけが自動ルーティング対象になります。pool を明示していない target、AI による task slug 生成などの非ワークフロー処理、その他の補助処理は `provider.defaults` を使用します。暗黙の既定 pool はなく、`fallback_profile` は明示的に選択された pool の中だけで使用されます。
 
 ### 解決の優先順位
 

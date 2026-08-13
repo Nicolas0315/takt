@@ -575,7 +575,7 @@ version: 1
 
 provider:
   defaults:
-    pool: sol-pool
+    profile: sol-medium
 
   profiles:
     sol-high:
@@ -611,6 +611,8 @@ provider:
     steps:
       default/supervise:
         profile: sol-high
+      default/implement:
+        pool: sol-pool
     internal_agents:
       selector:
         profile: router
@@ -636,7 +638,9 @@ provider:
 
 TAKT-owned structured agents always start a fresh session. Providers with native structured output receive the schema directly; other providers receive a JSON schema instruction, and TAKT parses and validates the returned object. TAKT does not add internal-agent-specific permission, tool, network, sandbox, skill, MCP, or bypass policy. Assign a profile with `capabilities`, `permission_mode`, or both when a role needs restrictions. If both are omitted, normal provider configuration is used unchanged.
 
-`provider.defaults` and every `provider.targets` entry choose exactly one of a fixed `profile` or an auto-routing `pool`. Steps are named `<leaf-workflow-name>/<step-name>`; control nodes that do not run an agent (such as `workflow_call`) are not resolution targets.
+`provider.defaults` is required in every active provider section and must choose exactly one of a fixed `profile` or an ordered `ladder`. It cannot specify `pool`. Entries under `provider.targets.personas`, `provider.targets.tags`, and `provider.targets.steps` choose exactly one of a fixed `profile`, an ordered `ladder`, or an auto-routing `pool`; `pool` is valid only on these explicit workflow targets. `internal_agents` entries may use a fixed `profile` or an ordered `ladder`, but cannot use `pool`. `companions` entries must use a fixed `profile` and cannot use `pool` or `ladder`. Steps are named `<leaf-workflow-name>/<step-name>`; control nodes that do not run an agent (such as `workflow_call`) are not resolution targets.
+
+When `provider.auto_routing` is present, only targets that explicitly name a `pool` are auto-routed. Targets without an explicit pool, non-workflow operations such as AI task-slug generation, and other auxiliary processing use `provider.defaults`; there is no implicit default pool. `fallback_profile` belongs to the explicitly selected pool and is not used as a non-workflow default.
 
 ### Resolution priority
 
