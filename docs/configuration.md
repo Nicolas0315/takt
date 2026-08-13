@@ -298,8 +298,7 @@ ignore_exceed: false          # Applies to takt run and takt watch like --ignore
 
 ```
 
-Pi SDK sessions are kept in memory for the current TAKT process. TAKT does not write Pi session JSONL files or persist `provider_options.pi.extensions` into Pi settings; explicitly requested packages use Pi's temporary resolution path.
-Implicit project-local Pi extensions are not trusted or loaded. Explicit Pi extensions execute inside the TAKT process, so only configure trusted local paths and package sources. Extension URLs containing embedded credentials or secret-bearing query parameters are rejected.
+Pi SDK sessions are kept in memory for the current TAKT process. TAKT does not write Pi session JSONL files. For `provider_options.pi` resource loading (`extensions`, `no_*`), temporary resolution, and trust boundaries, see [Pi resource loading](#pi-resource-loading).
 
 ### OpenCode execution guards
 
@@ -1018,6 +1017,36 @@ provider_options:
 ```
 
 File-edit permissions continue to be governed by `permission_mode`.
+
+<a id="pi-resource-loading"></a>
+
+#### Pi resource loading (`extensions`, `no_*`)
+
+Use `provider_options.pi` when a TAKT run should load Pi packages / extensions or restrict which Pi resource types are discovered:
+
+```yaml
+provider_options:
+  pi:
+    extensions:
+      - npm:pi-fff
+      # - git:https://github.com/example/pi-extension
+      # - /absolute/path/to/local-extension
+    no_extensions: true       # Disable discovery; still load the explicit extensions above
+    no_skills: true           # Disable Pi Skill discovery
+    no_prompt_templates: true # Disable Pi prompt-template discovery
+    no_themes: true           # Disable Pi theme discovery
+    no_context_files: true    # Disable Pi context-file discovery
+```
+
+- `extensions` accepts npm packages, Git sources, and local paths.
+- Explicit sources are resolved temporarily for the TAKT run and are not persisted into Pi settings.
+- `no_extensions` disables extension discovery but still loads the sources listed in `extensions`.
+- The other `no_*` options disable discovery of their respective resource types.
+- Implicit project-local Pi extensions are not trusted or loaded.
+- Explicit extensions execute inside the TAKT process, so configure only trusted local paths and package sources.
+- Extension URLs containing embedded credentials or secret-bearing query parameters are rejected.
+
+These settings follow normal provider-option leaf priority, including `TAKT_PROVIDER_OPTIONS_PI_*`.
 
 <a id="workflow-categories"></a>
 
