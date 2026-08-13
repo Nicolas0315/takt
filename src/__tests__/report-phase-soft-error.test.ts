@@ -132,6 +132,10 @@ function makeParallelRunner(): ParallelRunner {
       emitStepReports: vi.fn(),
       persistPreviousResponseSnapshot: vi.fn(),
       normalizeStructuredOutput: vi.fn((_step: WorkflowStep, response: AgentResponse) => response),
+      completeReviewerResponse: vi.fn(async ({ initialResponse }) => ({
+        response: initialResponse,
+        reviewerSessionId: initialResponse.sessionId,
+      })),
     } as unknown as ParallelRunnerDeps['stepExecutor'],
     engineOptions: {
       projectCwd: '/tmp/project',

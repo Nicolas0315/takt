@@ -10,6 +10,7 @@ import type {
 import { runWithPhaseSpan } from '../observability/workflowSpans.js';
 import { buildPhaseExecutionId } from '../../../shared/utils/phaseExecutionId.js';
 import { AGENT_FAILURE_CATEGORIES } from '../../../shared/types/agent-failure.js';
+import { getErrorMessage } from '../../../shared/utils/index.js';
 
 const MAX_PHASE1_EXECUTIONS = 3;
 
@@ -92,6 +93,9 @@ interface ObservedPhase1AttemptOptions {
     phaseExecutionId: string,
     iteration: number,
   ) => void) | undefined;
+  readonly onPhaseComplete?: CompleteObservedPhase1AttemptOptions['onPhaseComplete'];
+  readonly failurePersona?: string;
+  readonly recordFailure?: () => void;
 }
 
 interface CompleteObservedPhase1AttemptOptions {
@@ -133,30 +137,51 @@ export async function executeObservedPhase1Attempt(
       options.iteration,
     );
   };
-  const response = await runWithPhaseSpan({
-    enabled: options.enabled,
-    runId: options.runId,
-    workflowName: options.workflowName,
-    step: options.spanStep,
-    iteration: options.iteration,
-    phase: 1,
-    phaseName: 'execute',
-    instruction: options.attempt.instruction,
-    phaseExecutionId,
-    workflowStack: options.workflowStack,
-    sanitizeText: options.sanitizeText,
-    providerInfo: options.providerInfo,
-    getPromptParts: () => resolvedPromptParts,
-  }, () => options.execute(
-    options.attempt.instruction,
-    options.attempt.sessionId,
-    onPromptResolved,
-  ), (result) => ({
-    status: result.status,
-    content: result.content,
-    error: result.error,
-    providerUsage: result.providerUsage,
-  }));
+  let response: AgentResponse;
+  try {
+    response = await runWithPhaseSpan({
+      enabled: options.enabled,
+      runId: options.runId,
+      workflowName: options.workflowName,
+      step: options.spanStep,
+      iteration: options.iteration,
+      phase: 1,
+      phaseName: 'execute',
+      instruction: options.attempt.instruction,
+      phaseExecutionId,
+      workflowStack: options.workflowStack,
+      sanitizeText: options.sanitizeText,
+      providerInfo: options.providerInfo,
+      getPromptParts: () => resolvedPromptParts,
+    }, () => options.execute(
+      options.attempt.instruction,
+      options.attempt.sessionId,
+      onPromptResolved,
+    ), (result) => ({
+      status: result.status,
+      content: result.content,
+      error: result.error,
+      providerUsage: result.providerUsage,
+    }));
+  } catch (error) {
+    if (resolvedPromptParts !== undefined && options.onPhaseComplete !== undefined) {
+      completeObservedPhase1Attempt({
+        eventStep: options.eventStep,
+        iteration: options.iteration,
+        attempt: options.attempt,
+        response: {
+          persona: options.failurePersona ?? options.spanStep.name,
+          status: 'error',
+          content: '',
+          error: getErrorMessage(error),
+          timestamp: new Date(),
+        },
+        onPhaseComplete: options.onPhaseComplete,
+      });
+    }
+    options.recordFailure?.();
+    throw error;
+  }
   return {
     response,
     promptResolved: resolvedPromptParts !== undefined,

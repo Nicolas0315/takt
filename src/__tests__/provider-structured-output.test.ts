@@ -262,6 +262,7 @@ describe('ClaudeProvider — structured output', () => {
     const opts = mockCallClaudeCustom.mock.calls[0]?.[3];
     expect(opts).toHaveProperty('childProcessEnv', childProcessEnv);
   });
+
 });
 
 // ---------- Codex ----------

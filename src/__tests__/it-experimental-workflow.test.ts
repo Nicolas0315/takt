@@ -254,6 +254,33 @@ function expectResolvedReviewerInstructions(
   }
 }
 
+function expectResolvedReviewCompletionRetryInstruction(
+  language: 'en' | 'ja',
+  reviewerCall: WorkflowStep,
+  reviewerSteps: readonly ReviewerStepReference[],
+  projectDir: string,
+): string {
+  const instructionRef = reviewerCall.args?.review_completion_retry_instruction;
+  if (typeof instructionRef !== 'string') {
+    throw new Error(`Review completion instruction argument not found for "${reviewerCall.name}"`);
+  }
+  const resolvedInstruction = resolveRefToContent(
+    instructionRef,
+    undefined,
+    projectDir,
+    'instructions',
+    { projectDir, lang: language },
+  );
+  if (typeof resolvedInstruction !== 'string') {
+    throw new Error(`Review completion instruction "${instructionRef}" could not be resolved`);
+  }
+  expect(resolvedInstruction).not.toBe('');
+  for (const { step } of reviewerSteps) {
+    expect(step.reviewCompletion?.retryInstruction).toBe(resolvedInstruction);
+  }
+  return resolvedInstruction;
+}
+
 function collectReviewerSteps(
   language: 'en' | 'ja',
   workflow: WorkflowConfig,
@@ -378,7 +405,7 @@ function acceptedAndMergedCompanionFinding(): ScenarioEntry[] {
       },
     },
     {
-      persona: 'ai-antipattern-review-moderator',
+      persona: 'review-companion-moderator',
       status: 'done',
       content: 'moderate',
       structuredOutput: {
@@ -409,7 +436,7 @@ function acceptedAndMergedCompanionFinding(): ScenarioEntry[] {
       },
     },
     {
-      persona: 'ai-antipattern-review-moderator',
+      persona: 'review-companion-moderator',
       status: 'done',
       content: 'moderate',
       structuredOutput: {
@@ -554,15 +581,32 @@ describe('experimental builtin workflow', () => {
         ));
         expectResolvedReviewerInstructions(language, reviewerCalls[0]!, initialSuite!, projectDir);
         expectResolvedReviewerInstructions(language, reviewerCalls[1]!, followUpSuite!, projectDir);
-        const initialReviewers = new Map(collectReviewerSteps(language, initialSuite!, projectDir)
+        const initialReviewerSteps = collectReviewerSteps(language, initialSuite!, projectDir);
+        const followUpReviewerSteps = collectReviewerSteps(language, followUpSuite!, projectDir);
+        const initialReviewers = new Map(initialReviewerSteps
           .map(({ step }) => [step.name, step.instruction]));
-        const followUpReviewers = new Map(collectReviewerSteps(language, followUpSuite!, projectDir)
+        const followUpReviewers = new Map(followUpReviewerSteps
           .map(({ step }) => [step.name, step.instruction]));
         expect([...followUpReviewers.keys()].sort()).toEqual([...initialReviewers.keys()].sort());
         for (const [reviewer, initialInstruction] of initialReviewers) {
           expect(initialInstruction).not.toBe('');
           expect(followUpReviewers.get(reviewer)).not.toBe(initialInstruction);
         }
+        const initialRetryInstruction = expectResolvedReviewCompletionRetryInstruction(
+          language,
+          reviewerCalls[0]!,
+          initialReviewerSteps,
+          projectDir,
+        );
+        const followUpRetryInstruction = expectResolvedReviewCompletionRetryInstruction(
+          language,
+          reviewerCalls[1]!,
+          followUpReviewerSteps,
+          projectDir,
+        );
+        expect(reviewerCalls[0]!.args?.review_completion_retry_instruction)
+          .not.toBe(reviewerCalls[1]!.args?.review_completion_retry_instruction);
+        expect(initialRetryInstruction).not.toBe(followUpRetryInstruction);
 
         const reviewerSuite = initialSuite!;
         const securityReview = findWorkflowStep(reviewerSuite, 'security-review');
@@ -658,7 +702,7 @@ describe('experimental builtin workflow', () => {
         companionProviders: {
           'ai-antipattern-review-companion': { provider: 'mock' },
           'testing-review-companion': { provider: 'mock' },
-          'ai-antipattern-review-moderator': { provider: 'mock' },
+          'review-companion-moderator': { provider: 'mock' },
         },
         companionDiffReader: COMPANION_DIFF_READER_WITH_FINDING,
         structuredCaller: new ProviderNeutralStructuredCaller(),
@@ -764,7 +808,7 @@ describe('experimental builtin workflow', () => {
         selectorGitCommandRunner: SELECTOR_GIT_COMMAND_RUNNER,
         companionProviders: {
           'ai-antipattern-review-companion': { provider: 'mock' },
-          'ai-antipattern-review-moderator': { provider: 'mock' },
+          'review-companion-moderator': { provider: 'mock' },
         },
         companionDiffReader: COMPANION_DIFF_READER,
         structuredCaller: new ProviderNeutralStructuredCaller(),
@@ -884,7 +928,7 @@ describe('experimental builtin workflow', () => {
         companionProviders: {
           'ai-antipattern-review-companion': { provider: 'mock' },
           'testing-review-companion': { provider: 'mock' },
-          'ai-antipattern-review-moderator': { provider: 'mock' },
+          'review-companion-moderator': { provider: 'mock' },
         },
         companionDiffReader: COMPANION_DIFF_READER_WITH_FINDING,
         structuredCaller: new ProviderNeutralStructuredCaller(),

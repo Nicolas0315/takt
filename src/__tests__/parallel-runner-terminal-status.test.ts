@@ -137,6 +137,10 @@ function makeRunner(): { runner: ParallelRunner; deps: ParallelRunnerDeps } {
       buildInstruction: vi.fn((step: WorkflowStep) => `instruction:${step.name}`),
       emitStepReports: vi.fn(),
       persistPreviousResponseSnapshot: vi.fn(),
+      completeReviewerResponse: vi.fn(async ({ initialResponse }) => ({
+        response: initialResponse,
+        reviewerSessionId: initialResponse.sessionId,
+      })),
     } as unknown as ParallelRunnerDeps['stepExecutor'],
     engineOptions: {
       projectCwd: '/tmp/project',
@@ -301,6 +305,7 @@ describe('ParallelRunner terminal sub-step statuses', () => {
       childProcessEnv,
       step: expect.objectContaining({ name: 'security-review' }),
     }));
+    expect(deps.stepExecutor.completeReviewerResponse).not.toHaveBeenCalled();
   });
 
   it('returns parent error with rejected promise detail', async () => {

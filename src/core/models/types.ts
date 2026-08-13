@@ -107,6 +107,11 @@ export type {
   ResolvedFacetContent,
   DynamicFacetsConfig,
   DynamicFacetSelectionSnapshot,
+  ReviewCompletionConfig,
+} from './workflow-types.js';
+
+export {
+  MAX_REVIEW_COMPLETION_RETRY,
 } from './workflow-types.js';
 
 export type {
