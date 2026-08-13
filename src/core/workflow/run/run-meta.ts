@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { isAbsolute, normalize, resolve } from 'node:path';
-import { isPathInside, isValidReportDirName } from '../../../shared/utils/index.js';
+import { resolve } from 'node:path';
+import { isPathInside, isProjectRelativePath, isValidReportDirName } from '../../../shared/utils/index.js';
 import { getErrorMessage } from '../../../shared/utils/error.js';
 import type { WorkflowResumePoint } from '../../models/types.js';
 import { parseWorkflowResumePoint } from '../resume-point-codec.js';
@@ -330,8 +330,7 @@ function parseRunCompletion(value: unknown): RunCompletion {
 }
 
 function requireProjectRelativeReportPath(report: string): string {
-  const escapes = normalize(report).split(/[\\/]/, 1)[0] === '..';
-  if (isAbsolute(report) || escapes) {
+  if (!isProjectRelativePath(report)) {
     throw new Error('Run metadata completion.report must stay inside the project');
   }
   return report;

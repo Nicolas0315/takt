@@ -16,6 +16,13 @@ export function isPathInside(basePath: string, candidatePath: string): boolean {
   return isNormalizedPathInside(resolvedBase, resolvedCandidate);
 }
 
+// Lexical check only: the referenced file may not exist yet when the value is
+// validated, so symlinks are out of scope here (isRealPathInside covers reads).
+export function isProjectRelativePath(candidatePath: string): boolean {
+  return !path.isAbsolute(candidatePath)
+    && path.normalize(candidatePath).split(/[\\/]/, 1)[0] !== '..';
+}
+
 export function lstatIfExists(targetPath: string): Stats | null {
   try {
     return lstatSync(targetPath);

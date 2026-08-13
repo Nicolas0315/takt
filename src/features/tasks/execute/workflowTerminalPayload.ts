@@ -1,9 +1,10 @@
-import { basename, isAbsolute, normalize } from 'node:path';
+import { basename } from 'node:path';
 import type { WorkflowTraceDiscovery } from '../../../core/workflow/observability/traceDiscovery.js';
 import type { RunFailure } from '../../../core/workflow/run/run-meta.js';
 import type { SessionState } from '../../../infra/config/index.js';
 import type { SessionLog } from '../../../infra/fs/index.js';
 import type { NdjsonRecord } from '../../../shared/utils/types.js';
+import { isProjectRelativePath } from '../../../shared/utils/index.js';
 import {
   parseCanonicalWorkflowResumeFrame,
 } from '../../../shared/types/workflow-resume.js';
@@ -251,7 +252,7 @@ function assertWorkflowTerminalPublicationPayload(
     }
     const report = completion.report;
     requireNonEmptyString(report, '$.completion.report');
-    if (isAbsolute(report) || normalize(report).split(/[\\/]/, 1)[0] === '..') {
+    if (!isProjectRelativePath(report)) {
       throw new TypeError('Workflow terminal payload completion report must stay inside the project');
     }
   }
