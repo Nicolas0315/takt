@@ -1,11 +1,18 @@
 import type {
   AgentResponse,
   Language,
+  PermissionMode,
   PartDefinition,
 } from '../core/models/types.js';
 import type { ProviderUsageSnapshot } from '../core/models/response.js';
 import type { ProviderType } from '../core/workflow/types.js';
-import { runAgent, type RunAgentOptions, type StreamCallback } from './runner.js';
+import type { RunAgentOptions, StreamCallback } from './runner.js';
+import type { StepProviderOptions } from '../core/models/workflow-types.js';
+import {
+  executeStructuredAgent,
+  requireStructuredAgentProvider,
+  StructuredAgentResponseError,
+} from './structured-caller/transport.js';
 import { parseParts } from '../core/workflow/engine/task-decomposer.js';
 import { loadDecompositionSchema, loadMorePartsSchema } from '../infra/resources/schema-loader.js';
 import {
@@ -41,6 +48,9 @@ export interface DecomposeTaskOptions {
   provider?: ProviderType;
   resolvedModel?: string;
   resolvedProvider?: ProviderType;
+  resolvedProviderOptions?: StepProviderOptions;
+  permissionMode?: PermissionMode;
+  projectCwd?: string;
   onStream?: StreamCallback;
   workflowMeta?: RunAgentOptions['workflowMeta'];
   childProcessEnv?: RunAgentOptions['childProcessEnv'];
@@ -76,7 +86,7 @@ export interface DecomposeTaskResponse {
   providerUsage?: ProviderUsageSnapshot;
 }
 
-async function requestDecompositionResponse(
+export async function requestDecompositionRawResponse(
   instruction: string,
   maxInitialParts: number | undefined,
   options: DecomposeTaskOptions,
@@ -84,7 +94,7 @@ async function requestDecompositionResponse(
 ): Promise<AgentResponse> {
   let response: AgentResponse;
   try {
-    response = await runAgent(options.persona, buildDecomposePrompt(
+    response = await executeStructuredAgent<Record<string, unknown>>(buildDecomposePrompt(
       instruction,
       {
         maxInitialParts,
@@ -92,19 +102,22 @@ async function requestDecompositionResponse(
         inspectTools: options.inspectTools,
         rejectedDecomposition,
       },
-    ), {
+    ), loadDecompositionSchema(maxInitialParts), {
+      name: 'team-leader-decomposer',
+      persona: options.persona,
       cwd: options.cwd,
+      projectCwd: options.projectCwd,
       personaPath: options.personaPath,
       workflowBundleResourceRoot: options.workflowBundleResourceRoot,
       language: options.language,
-      model: options.model,
-      provider: options.provider,
-      resolvedModel: options.resolvedModel,
-      resolvedProvider: options.resolvedProvider,
-      allowedTools: options.inspectTools ?? [],
+      resolution: {
+        provider: requireStructuredAgentProvider(options.resolvedProvider ?? options.provider, 'task-decomposer'),
+        model: options.resolvedModel ?? options.model,
+        providerOptions: options.resolvedProviderOptions,
+        permissionMode: options.permissionMode,
+      },
+      ...(options.inspectTools === undefined ? {} : { allowedTools: options.inspectTools }),
       mcpServers: options.mcpServers,
-      permissionMode: 'readonly',
-      outputSchema: loadDecompositionSchema(maxInitialParts),
       onStream: createPublicationGuardedStreamCallback(options.onStream, options.abortSignal),
       workflowMeta: options.workflowMeta,
       childProcessEnv: options.childProcessEnv,
@@ -113,10 +126,14 @@ async function requestDecompositionResponse(
       onPromptResolved: options.onPromptResolved,
     });
   } catch (error) {
-    if (options.abortSignal?.aborted !== true) {
-      options.onAgentError?.(error);
+    if (error instanceof StructuredAgentResponseError) {
+      response = error.response;
+    } else {
+      if (options.abortSignal?.aborted !== true) {
+        options.onAgentError?.(error);
+      }
+      throw error;
     }
-    throw error;
   }
   if (options.abortSignal?.aborted !== true) {
     options.onAgentResponse?.(response);
@@ -132,7 +149,7 @@ export async function decomposeTask(
   return requestValidTeamLeaderDecomposition({
     abortSignal: options.abortSignal,
     request: async (rejectedDecomposition) => {
-      const response = await requestDecompositionResponse(
+      const response = await requestDecompositionRawResponse(
         instruction,
         maxInitialParts,
         options,
@@ -184,19 +201,21 @@ export async function requestMorePartsRawResponse(
 
   let response: AgentResponse;
   try {
-    response = await runAgent(options.persona, prompt, {
+    response = await executeStructuredAgent<Record<string, unknown>>(prompt, loadMorePartsSchema(), {
+      name: 'team-leader-more-parts',
+      persona: options.persona,
       cwd: options.cwd,
+      projectCwd: options.projectCwd,
       personaPath: options.personaPath,
       workflowBundleResourceRoot: options.workflowBundleResourceRoot,
       language: options.language,
-      model: options.model,
-      provider: options.provider,
-      resolvedModel: options.resolvedModel,
-      resolvedProvider: options.resolvedProvider,
-      allowedTools: [],
+      resolution: {
+        provider: requireStructuredAgentProvider(options.resolvedProvider ?? options.provider, 'task-more-parts'),
+        model: options.resolvedModel ?? options.model,
+        providerOptions: options.resolvedProviderOptions,
+        permissionMode: options.permissionMode,
+      },
       mcpServers: options.mcpServers,
-      permissionMode: 'readonly',
-      outputSchema: loadMorePartsSchema(),
       onStream: createPublicationGuardedStreamCallback(options.onStream, options.abortSignal),
       workflowMeta: options.workflowMeta,
       childProcessEnv: options.childProcessEnv,
@@ -204,10 +223,14 @@ export async function requestMorePartsRawResponse(
       failureDir: options.failureDir,
     });
   } catch (error) {
-    if (options.abortSignal?.aborted !== true) {
-      options.onAgentError?.(error);
+    if (error instanceof StructuredAgentResponseError) {
+      response = error.response;
+    } else {
+      if (options.abortSignal?.aborted !== true) {
+        options.onAgentError?.(error);
+      }
+      throw error;
     }
-    throw error;
   }
   if (options.abortSignal?.aborted !== true) {
     options.onAgentResponse?.(response);

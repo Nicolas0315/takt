@@ -451,13 +451,11 @@ describe('E2E: dynamic parallel selector (mock)', () => {
     expect(doctor.exitCode, `${doctor.stdout}\n${doctor.stderr}`).toBe(0);
     expect(runtime.exitCode, `${runtime.stdout}\n${runtime.stderr}`).toBe(0);
     const selectorStarts = readJsonl(mockCallLogPath)
-      .filter((record) => record.event === 'start' && record.personaName === 'takt-internal');
+      .filter((record) => record.event === 'start' && record.personaName === 'dynamic-parallel-selector');
     expect(selectorStarts).toEqual([
       expect.objectContaining({ provider: 'mock', model: 'cli-selector-model' }),
     ]);
-    expect(withoutOverride.exitCode).toBe(1);
-    expect(`${withoutOverride.stdout}\n${withoutOverride.stderr}`)
-      .toContain('does not support strict internal-agent isolation');
+    expect(withoutOverride.exitCode, `${withoutOverride.stdout}\n${withoutOverride.stderr}`).toBe(0);
   }, 420_000);
 
   it('should execute selected pool reviewers in YAML order when the selector returns them in reverse order', () => {
@@ -508,7 +506,7 @@ describe('E2E: dynamic parallel selector (mock)', () => {
     expect(personaStartCount('agents/frontend')).toBe(expected.frontend * 2);
     expect(personaStartCount('agents/backend')).toBe(expected.backend * 2);
     const selectorStarts = providerStarts
-      .filter((record) => record.personaName === 'takt-internal');
+      .filter((record) => record.personaName === 'dynamic-parallel-selector');
     expect(selectorStarts).toHaveLength(expected.selectors);
     if (mode === 'cumulative') {
       const meta = JSON.parse(
@@ -673,7 +671,7 @@ describe('E2E: dynamic parallel selector (mock)', () => {
     expect(personaNames.filter((name) => name === 'agents/architecture')).toHaveLength(1);
     expect(personaNames.filter((name) => name === 'agents/frontend')).toHaveLength(0);
     expect(personaNames.filter((name) => name === 'agents/backend')).toHaveLength(1);
-    expect(personaNames.filter((name) => name === 'takt-internal')).toHaveLength(1);
+    expect(personaNames.filter((name) => name === 'dynamic-parallel-selector')).toHaveLength(1);
     expect(resumedStarts.every((record) => record.model === 'cli-resume-model')).toBe(true);
   }, 480_000);
 });

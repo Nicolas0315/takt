@@ -99,14 +99,12 @@ const selectorGitCommandRunner = new GitSelectorCommandRunner();
 const MOCK_SELECTOR_PROVIDER = {
   provider: 'mock' as const,
   providerOptions: {},
-  nativeTools: [],
 };
 
 const CODEX_SELECTOR_PROVIDER = {
   provider: 'codex' as const,
   model: 'gpt-5',
   providerOptions: {},
-  nativeTools: ['request_user_input', 'update_plan', 'view_image', 'web_search'],
 };
 
 class WorkflowEngine extends BaseWorkflowEngine {
@@ -580,7 +578,6 @@ describe('WorkflowEngine Integration: Parallel Step Aggregation', () => {
       resolvedExecution: unknown;
       outputSchema: Record<string, unknown> | undefined;
       internalSystemPrompt: string | undefined;
-      internalAgentIsolation: string | undefined;
       instruction: string;
     }> = [];
     vi.mocked(runAgent).mockImplementation(async (persona, instruction, options) => {
@@ -593,7 +590,6 @@ describe('WorkflowEngine Integration: Parallel Step Aggregation', () => {
         resolvedExecution: options?.resolvedExecution,
         outputSchema: options?.outputSchema,
         internalSystemPrompt: options?.internalSystemPrompt,
-        internalAgentIsolation: options?.internalAgentIsolation,
         instruction,
       });
       if (options?.outputSchema) {
@@ -656,17 +652,16 @@ describe('WorkflowEngine Integration: Parallel Step Aggregation', () => {
     expect(selectorOutputSchema).not.toHaveProperty('properties.selected_ids.uniqueItems');
     expect(selectorCall).toMatchObject({
       persona: undefined,
-      allowedTools: [],
-      mcpServers: {},
+      allowedTools: undefined,
+      mcpServers: undefined,
       resolvedExecution: {
         provider: 'mock',
         model: undefined,
         providerOptions: {},
-        permissionMode: 'readonly',
+        permissionMode: undefined,
       },
-      bypassPermissions: false,
+      bypassPermissions: undefined,
       internalSystemPrompt: expect.stringContaining('internal dynamic parallel selector'),
-      internalAgentIsolation: 'strict-readonly',
       outputSchema: expect.objectContaining({
         additionalProperties: false,
         required: ['selected_ids', 'rationale'],
@@ -1624,7 +1619,7 @@ describe('WorkflowEngine Integration: Parallel Step Aggregation', () => {
     expect(abortReason).toContain('[REDACTED]');
   });
 
-  it('should execute a Codex selector with the read-only structured agent contract', async () => {
+  it('should execute a Codex selector without implicit capability or permission constraints', async () => {
     const config = normalizeWorkflowConfig(dynamicParallelWorkflowRaw(), tmpDir);
     vi.mocked(runAgent).mockImplementation(async (persona, _instruction, options) => {
       if (options?.outputSchema !== undefined) {
@@ -1653,22 +1648,22 @@ describe('WorkflowEngine Integration: Parallel Step Aggregation', () => {
     }).run();
 
     expect(state.status, state.lastOutput?.content).toBe('completed');
-    expect(runAgent).toHaveBeenCalledWith(
-      undefined,
-      expect.any(String),
+    const selectorCall = vi.mocked(runAgent).mock.calls.find(([, , options]) => options?.outputSchema !== undefined);
+    expect(selectorCall?.[0]).toBeUndefined();
+    expect(selectorCall?.[2]).toEqual(
       expect.objectContaining({
         resolvedExecution: {
           provider: 'codex',
           model: 'gpt-5',
           providerOptions: {},
-          permissionMode: 'readonly',
+          permissionMode: undefined,
         },
-        bypassPermissions: false,
-        allowedTools: [],
-        mcpServers: {},
         outputSchema: expect.any(Object),
       }),
     );
+    expect(selectorCall?.[2].bypassPermissions).toBeUndefined();
+    expect(selectorCall?.[2].allowedTools).toBeUndefined();
+    expect(selectorCall?.[2].mcpServers).toBeUndefined();
   });
 
   it('should apply dynamic effective selection to the shared concurrency semaphore', async () => {

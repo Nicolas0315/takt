@@ -178,7 +178,7 @@ steps:
 
 `persona_name` は表示名専用です。config の `provider_routing.personas` は raw `persona` キーに一致し、`provider_routing.tags` は step の任意の `tags` 配列に書かれた順で一致します。同じ provider / model / provider_options leaf では後ろの tag が前の tag を上書きします。
 
-`session_key` は通常の agent step、parallel sub-step、`loop_monitors.judge` で指定できます。system step、workflow-call step、parallel parent step では agent session を所有しないため指定できません。同じ persona を使う複数の agent step のセッションを分離したい場合、または別の agent step で意図的に同じセッションを共有したい場合に使います。実行時の有効キーは `session_key` に解決済み provider を付けた形になり、例: `shared-coder:claude` です。`session_key` を省略した場合は persona キー、persona が無い場合は step 名が使われます。空文字列と空白のみの値は workflow 検証で拒否されます。
+`session_key` は通常の agent step と parallel sub-step で指定できます。system step、workflow-call step、loop-monitor judge、parallel parent step では再開可能な agent session を所有しないため指定できません。同じ persona を使う複数の agent step のセッションを分離したい場合、または別の agent step で意図的に同じセッションを共有したい場合に使います。実行時の有効キーは `session_key` に解決済み provider を付けた形になり、例: `shared-coder:claude` です。`session_key` を省略した場合は persona キー、persona が無い場合は step 名が使われます。空文字列と空白のみの値は workflow 検証で拒否されます。
 
 `quality_gates` の文字列は従来どおり agent step の AI への完了条件としてプロンプトに含まれます。`type: command` の gate は agent step 完了後に worktree 内で実行され、終了コード `0` の場合のみ成功します。workflow YAML の command gate を使うには config 側で `workflow_command_gates.custom_scripts: true` を有効にする必要があります。失敗時は command のメタデータ、cwd、終了コードまたは timeout / output limit 情報、非公開 output log path が同じ agent step の差し戻し入力に含まれます。サニタイズ済み stdout / stderr はローカルの非公開ログだけに保存され、agent feedback には挿入されません。`system` と `workflow_call` step では `quality_gates` を指定できません。
 
@@ -295,7 +295,7 @@ TAKT は Normal / Parallel / Dynamic Parallel / Arpeggio / Team Leader / Workflo
 
 ### Dynamic Parallel Step
 
-`parallel` には、常時実行する `fixed` と selector が選ぶ `pool` を指定するオブジェクト形式も使えます。TAKT は step へ進入した時点で read-only の内部 selector を実行します。selector は workflow step ではなく、agent や workflow 定義を生成・変更できません。selector は read-only 権限、permission bypass 無効、MCP server 非継承、TAKT が所有する structured output contract で実行されます。
+`parallel` には、常時実行する `fixed` と selector が選ぶ `pool` を指定するオブジェクト形式も使えます。TAKT は step へ進入した時点で内部 selector を実行します。selector は workflow step ではなく、agent や workflow 定義を生成・変更できません。解決済み runtime profile を fresh session で使い、TAKT が所有する structured output contract を返します。明示的な制限が必要なら profile に `capabilities` と `permission_mode` を設定します。省略した項目について selector 専用の制限は追加されません。
 
 ```yaml
   - name: reviewers
@@ -515,7 +515,7 @@ pool 内の全候補は同じ形を持ちます。
 
 #### selector 契約
 
-`dynamic_facets` を持つ step へ進入したとき、TAKT は main agent 起動前に内部の read-only selector を実行します。selector は workflow step ではなく、agent や workflow 定義を生成・変更できず、read-only 権限、permission bypass 無効、MCP server 非継承、TAKT が所有する structured output contract で fresh session で実行します。
+`dynamic_facets` を持つ step へ進入したとき、TAKT は main agent 起動前に内部 selector を実行します。selector は workflow step ではなく、agent や workflow 定義を生成・変更できず、解決済み runtime profile と TAKT が所有する structured output contract を fresh session で使います。明示的な制限が必要なら profile に `capabilities` と `permission_mode` を設定します。省略した項目について selector 専用の制限は追加されません。
 
 selector には少なくとも次を渡します。
 
@@ -830,7 +830,7 @@ promotion は並列サブ step ではサポートされません。
 | `knowledge` | - | knowledge キーまたはキー配列（section map、または bare 名で project → user → builtin の順に解決） |
 | `instruction` | - | instruction キー（section map、または bare 名で project → user → builtin の順に解決） |
 | `edit` | - | step がプロジェクトファイルを編集できるか (`true` / `false`) |
-| `companion` | - | 通常の agent step と並行して隔離された read-only reviewer を実行（[Companion レビュアー](#companion-レビュアー)参照） |
+| `companion` | - | 解決済み runtime profile を使う Companion reviewer を通常 agent step と並行実行（[Companion レビュアー](#companion-レビュアー)参照） |
 | `pass_previous_response` | `true` | 前の step の出力を `{previous_response}` に渡す |
 | `provider_options.claude.allowed_tools` | - | step または workflow に対する Claude ツール許可リスト |
 | `provider_options.claude.base_url` | - | `claude` / `claude-sdk` 用の Anthropic 互換 base URL（[configuration ガイド](./configuration.ja.md#provider-base-url-base_url) 参照） |
@@ -995,7 +995,6 @@ loop_monitors:
     ignore_steps: [verify]
     threshold: 3
     judge:
-      session_key: loop-supervisor
       persona: supervisor
       instruction: "fix ループに進捗があるかを評価してください..."
       rules:
@@ -1009,7 +1008,7 @@ loop_monitors:
 
 `loop_monitors.judge` は agent step と同じ provider/model 検証で `provider`、`model`、`provider_options` を指定できます。`provider` を省略した場合、judge はトリガー元 step の provider と model を継承します。`provider` を指定して `model` を省略した場合、継承 model はクリアされます。トリガー元 step に解決済み model があっても provider または CLI のデフォルトを使わせたい場合は、`model: null` を指定してください。
 
-`loop_monitors.judge.session_key` も step の `session_key` と同じく、実行時は provider suffix 付きのキーになります。同じ persona を使う複数の監視 judge が同じセッションを resume してはいけない場合に指定してください。
+loop-monitor judge は常に新しい provider session で実行されます。そのため `loop_monitors.judge` では `session_key` を指定できません。
 
 ### `rate_limit_fallback`
 

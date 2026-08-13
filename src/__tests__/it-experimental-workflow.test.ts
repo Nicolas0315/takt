@@ -12,7 +12,7 @@ import { WorkflowEngine } from '../core/workflow/index.js';
 import type { CompanionDiffReader } from '../core/workflow/companion/diff-reader.js';
 import { RuleDetectionExhaustedError } from '../core/workflow/evaluation/RuleDetectionExhaustedError.js';
 import type { SelectorGitCommandRunner } from '../core/workflow/dynamic-parallel/selector-git-command-runner.js';
-import { DefaultStructuredCaller } from '../agents/structured-caller.js';
+import { ProviderNeutralStructuredCaller } from '../agents/structured-caller.js';
 import { loadWorkflowFromFile } from '../infra/config/loaders/workflowFileLoader.js';
 import { resolveRefToContent } from '../infra/config/loaders/resource-resolver.js';
 import {
@@ -68,7 +68,6 @@ vi.mock('../shared/utils/index.js', async (importOriginal) => ({
 const SELECTOR_PROVIDER = {
   provider: 'mock' as const,
   providerOptions: {},
-  nativeTools: [],
 };
 const SELECTOR_GIT_COMMAND_RUNNER: SelectorGitCommandRunner = {
   run: async () => ({ output: Buffer.alloc(0), bytes: 0 }),
@@ -344,13 +343,20 @@ function responseForReturn(
 
 function selection(selectedIds: string[], rationale: string): ScenarioEntry {
   return {
-    persona: 'takt-internal',
+    persona: 'dynamic-facet-selector',
     status: 'done',
     content: rationale,
     structuredOutput: {
       selected_ids: selectedIds,
       rationale,
     },
+  };
+}
+
+function parallelSelection(selectedIds: string[], rationale: string): ScenarioEntry {
+  return {
+    ...selection(selectedIds, rationale),
+    persona: 'dynamic-parallel-selector',
   };
 }
 
@@ -612,7 +618,7 @@ describe('experimental builtin workflow', () => {
         selection(['testing'], 'Testing implementation facets are required.'),
         responseForNext(implementation, 'implement', 'COMPLETE'),
         ...acceptedAndMergedCompanionFinding(),
-        selection(['architecture-review'], 'The first review round covers architecture changes.'),
+        parallelSelection(['architecture-review'], 'The first review round covers architecture changes.'),
         response(reviewerSuite, 'coding-review', 'coding-reviewer', 'needs_fix'),
         response(reviewerSuite, 'ai-antipattern-review', 'ai-antipattern-reviewer', 'needs_fix'),
         response(reviewerSuite, 'architecture-review', 'architecture-reviewer', 'needs_fix'),
@@ -626,7 +632,7 @@ describe('experimental builtin workflow', () => {
         responseForNext(remediation, 'fix-retry', 'fix-verifier'),
         ...acceptedAndMergedCompanionFinding(),
         responseForNext(remediation, 'fix-verifier', 'COMPLETE'),
-        selection(['security-review'], 'The second review round covers security changes.'),
+        parallelSelection(['security-review'], 'The second review round covers security changes.'),
         selection(['cli'], 'The TAKT local execution security knowledge matches the changed surface.'),
         response(reviewerSuite, 'coding-review', 'coding-reviewer', 'approved'),
         response(reviewerSuite, 'ai-antipattern-review', 'ai-antipattern-reviewer', 'approved'),
@@ -638,7 +644,7 @@ describe('experimental builtin workflow', () => {
         responseForNext(remediation, 'fix', 'fix-verifier'),
         ...acceptedAndMergedCompanionFinding(),
         responseForNext(remediation, 'fix-verifier', 'COMPLETE'),
-        selection([], 'The fixed reviewers cover the final-gate remediation.'),
+        parallelSelection([], 'The fixed reviewers cover the final-gate remediation.'),
         response(reviewerSuite, 'coding-review', 'coding-reviewer', 'approved'),
         response(reviewerSuite, 'ai-antipattern-review', 'ai-antipattern-reviewer', 'approved'),
         responseForNext(peerReview, 'review-adjudication', 'final-gate'),
@@ -655,7 +661,7 @@ describe('experimental builtin workflow', () => {
           'ai-antipattern-review-moderator': { provider: 'mock' },
         },
         companionDiffReader: COMPANION_DIFF_READER_WITH_FINDING,
-        structuredCaller: new DefaultStructuredCaller(),
+        structuredCaller: new ProviderNeutralStructuredCaller(),
         workflowCallResolver: ({ parentWorkflow, step, projectCwd, lookupCwd }) =>
           resolveWorkflowCallTarget(parentWorkflow, step, projectCwd, lookupCwd),
       });
@@ -727,7 +733,7 @@ describe('experimental builtin workflow', () => {
         responseForNext(core, 'replan', 'implement'),
         selection(['testing'], 'The replanned implementation still changes test boundaries.'),
         responseForNext(implementation, 'implement', 'COMPLETE'),
-        selection([], 'The fixed TAKT reviewers cover the changed path.'),
+        parallelSelection([], 'The fixed TAKT reviewers cover the changed path.'),
         response(reviewerSuite, 'coding-review', 'coding-reviewer', 'needs_fix'),
         response(reviewerSuite, 'ai-antipattern-review', 'ai-antipattern-reviewer', 'needs_fix'),
         responseForNext(peerReview, 'review-adjudication', 'remediation'),
@@ -737,7 +743,7 @@ describe('experimental builtin workflow', () => {
         responseForNext(core, 'replan', 'implement'),
         selection(['testing'], 'The second replanned implementation changes test boundaries.'),
         responseForNext(implementation, 'implement', 'COMPLETE'),
-        selection([], 'The fixed TAKT reviewers cover the replanned path.'),
+        parallelSelection([], 'The fixed TAKT reviewers cover the replanned path.'),
         response(reviewerSuite, 'coding-review', 'coding-reviewer', 'approved'),
         response(reviewerSuite, 'ai-antipattern-review', 'ai-antipattern-reviewer', 'approved'),
         responseForNext(peerReview, 'review-adjudication', 'final-gate'),
@@ -745,7 +751,7 @@ describe('experimental builtin workflow', () => {
         responseForNext(core, 'replan', 'implement'),
         selection(['testing'], 'The final-gate replan still changes test boundaries.'),
         responseForNext(implementation, 'implement', 'COMPLETE'),
-        selection([], 'The fixed reviewers cover the final-gate replan.'),
+        parallelSelection([], 'The fixed reviewers cover the final-gate replan.'),
         response(reviewerSuite, 'coding-review', 'coding-reviewer', 'approved'),
         response(reviewerSuite, 'ai-antipattern-review', 'ai-antipattern-reviewer', 'approved'),
         responseForNext(peerReview, 'review-adjudication', 'final-gate'),
@@ -761,7 +767,7 @@ describe('experimental builtin workflow', () => {
           'ai-antipattern-review-moderator': { provider: 'mock' },
         },
         companionDiffReader: COMPANION_DIFF_READER,
-        structuredCaller: new DefaultStructuredCaller(),
+        structuredCaller: new ProviderNeutralStructuredCaller(),
         workflowCallResolver: ({ parentWorkflow, step, projectCwd, lookupCwd }) =>
           resolveWorkflowCallTarget(parentWorkflow, step, projectCwd, lookupCwd),
       });
@@ -822,7 +828,7 @@ describe('experimental builtin workflow', () => {
         selectorProvider: SELECTOR_PROVIDER,
         selectorGitCommandRunner: SELECTOR_GIT_COMMAND_RUNNER,
         companionDiffReader: COMPANION_DIFF_READER,
-        structuredCaller: new DefaultStructuredCaller(),
+        structuredCaller: new ProviderNeutralStructuredCaller(),
         workflowCallResolver: ({ parentWorkflow, step, projectCwd, lookupCwd }) =>
           resolveWorkflowCallTarget(parentWorkflow, step, projectCwd, lookupCwd),
       });
@@ -863,7 +869,7 @@ describe('experimental builtin workflow', () => {
         selection(['testing'], 'Testing implementation facets are required.'),
         responseForNext(implementation, 'implement', 'COMPLETE'),
         ...acceptedAndMergedCompanionFinding(),
-        selection(['testing-review'], 'Testing review is required.'),
+        parallelSelection(['testing-review'], 'Testing review is required.'),
         response(reviewerSuite, 'coding-review', 'coding-reviewer', 'approved'),
         response(reviewerSuite, 'ai-antipattern-review', 'ai-antipattern-reviewer', 'approved'),
         response(reviewerSuite, 'testing-review', 'testing-reviewer', 'approved'),
@@ -881,7 +887,7 @@ describe('experimental builtin workflow', () => {
           'ai-antipattern-review-moderator': { provider: 'mock' },
         },
         companionDiffReader: COMPANION_DIFF_READER_WITH_FINDING,
-        structuredCaller: new DefaultStructuredCaller(),
+        structuredCaller: new ProviderNeutralStructuredCaller(),
         workflowCallResolver: ({ parentWorkflow, step, projectCwd, lookupCwd }) =>
           resolveWorkflowCallTarget(parentWorkflow, step, projectCwd, lookupCwd),
       });

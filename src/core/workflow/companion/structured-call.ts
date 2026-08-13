@@ -1,4 +1,4 @@
-import { executeIsolatedStructuredInternalAgent } from '../../../agents/agent-usecases.js';
+import { executeStructuredAgent } from '../../../agents/structured-caller/transport.js';
 import type { AgentResponse } from '../../models/types.js';
 import type { ProviderRoutingEntry } from '../../models/config-types.js';
 import {
@@ -57,26 +57,28 @@ export class CompanionStructuredCaller {
       resolution: {
         provider: request.provider.provider,
         model: request.provider.model,
-        providerOptions: request.provider.providerOptions ?? {},
+        providerOptions: request.provider.providerOptions,
+        permissionMode: request.provider.permissionMode,
       },
       abortSignal: signal,
       validateResponse: request.validateResponse,
-      call: (systemPrompt, prompt, schema, options) => executeIsolatedStructuredInternalAgent(
-        systemPrompt,
+      call: (systemPrompt, prompt, schema, options) => executeStructuredAgent(
         prompt,
         schema,
         {
+          name: request.agentName,
           cwd: options.cwd,
           projectCwd: options.projectCwd,
           failureDir: options.failureDir,
-          agentName: request.agentName,
+          systemPrompt,
           language: this.input.language,
           abortSignal: options.abortSignal,
           onPromptResolved: options.onPromptResolved,
           resolution: {
             provider: options.resolution.provider,
             model: options.resolution.model,
-            providerOptions: options.resolution.providerOptions ?? {},
+            providerOptions: options.resolution.providerOptions,
+            permissionMode: options.resolution.permissionMode,
           },
         },
       ),
