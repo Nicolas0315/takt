@@ -50,6 +50,7 @@ vi.mock('../shared/utils/index.js', async (importOriginal) => {
 
 import { QueryExecutor } from '../infra/claude/executor.js';
 import { buildSdkOptions } from '../infra/claude/options-builder.js';
+import { getActiveQueryCount } from '../infra/claude/query-manager.js';
 import { sdkMessageToStreamEvent } from '../infra/claude/stream-converter.js';
 
 const RATE_LIMIT_MESSAGE = 'Rate limit exceeded. Please try again later.';
@@ -441,6 +442,99 @@ describe('QueryExecutor abortSignal wiring', () => {
 
     expect(interruptMock).toHaveBeenCalledTimes(1);
     expect(result.interrupted).toBe(true);
+  });
+
+  it('abort後はinterruptとiteratorの終了完了までquery registryから外さない', async () => {
+    const controller = new AbortController();
+    let resolveInterrupt!: () => void;
+    let resolveReturn!: () => void;
+    const interruptGate = new Promise<void>((resolve) => {
+      resolveInterrupt = resolve;
+    });
+    const returnGate = new Promise<void>((resolve) => {
+      resolveReturn = resolve;
+    });
+    let iteratorReturnStarted = false;
+    const iterator: AsyncIterator<Record<string, unknown>> = {
+      next: vi.fn(() => new Promise<IteratorResult<Record<string, unknown>>>(() => {})),
+      return: vi.fn(async () => {
+        iteratorReturnStarted = true;
+        await returnGate;
+        return { done: true, value: undefined };
+      }),
+    };
+    const query = {
+      interrupt: vi.fn(async () => {
+        await interruptGate;
+      }),
+      [Symbol.asyncIterator]: () => iterator,
+    };
+    queryMock.mockReturnValue(query);
+    const activeBefore = getActiveQueryCount();
+    const executor = new QueryExecutor();
+    const execution = executor.execute('test', {
+      cwd: '/tmp/project',
+      abortSignal: controller.signal,
+    });
+
+    await vi.waitFor(() => expect(getActiveQueryCount()).toBe(activeBefore + 1));
+    controller.abort();
+    await vi.waitFor(() => {
+      expect(query.interrupt).toHaveBeenCalledTimes(1);
+      expect(iteratorReturnStarted).toBe(true);
+    });
+    expect(getActiveQueryCount()).toBe(activeBefore + 1);
+
+    let settled = false;
+    void execution.finally(() => {
+      settled = true;
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(settled).toBe(false);
+
+    resolveInterrupt();
+    resolveReturn();
+    const result = await execution;
+
+    expect(result.interrupted).toBe(true);
+    expect(getActiveQueryCount()).toBe(activeBefore);
+  });
+
+  it('abort後のSDK cleanupがハングしても有限時間でqueryを解放する', async () => {
+    vi.useFakeTimers();
+    try {
+      const controller = new AbortController();
+      const iterator: AsyncIterator<Record<string, unknown>> = {
+        next: vi.fn(() => new Promise<IteratorResult<Record<string, unknown>>>(() => {})),
+        return: vi.fn(() => new Promise<IteratorResult<Record<string, unknown>>>(() => {})),
+      };
+      const query = {
+        interrupt: vi.fn(() => new Promise<void>(() => {})),
+        [Symbol.asyncIterator]: () => iterator,
+      };
+      queryMock.mockReturnValue(query);
+      const activeBefore = getActiveQueryCount();
+      const execution = new QueryExecutor().execute('test', {
+        cwd: '/tmp/project',
+        abortSignal: controller.signal,
+      });
+
+      expect(getActiveQueryCount()).toBe(activeBefore + 1);
+      controller.abort();
+      for (let attempt = 0; attempt < 10 && vi.getTimerCount() === 0; attempt += 1) {
+        await Promise.resolve();
+      }
+      expect(query.interrupt).toHaveBeenCalledTimes(1);
+      expect(vi.getTimerCount()).toBe(1);
+
+      await vi.advanceTimersByTimeAsync(30_000);
+      const result = await execution;
+
+      expect(result.interrupted).toBe(true);
+      expect(getActiveQueryCount()).toBe(activeBefore);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

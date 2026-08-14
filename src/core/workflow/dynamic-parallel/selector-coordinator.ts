@@ -27,6 +27,7 @@ const SELECTOR_RATIONALE_LOG_MAX_BYTES = 1024;
 
 export interface DynamicParallelSelectorCoordinatorDeps {
   readonly engineOptions: WorkflowEngineOptions;
+  readonly getAbortSignal?: () => AbortSignal | undefined;
   readonly failureDir: string;
   readonly selectionStore: DynamicParallelSelectionStore;
   readonly getCwd: () => string;
@@ -48,8 +49,12 @@ export class DynamicParallelSelectorCoordinator {
     this.inputReader = deps.inputReader;
   }
 
+  private resolveAbortSignal(): AbortSignal | undefined {
+    return this.deps.getAbortSignal?.() ?? this.deps.engineOptions.abortSignal;
+  }
+
   async selectParticipants(step: WorkflowStep, state: WorkflowState, task: string): Promise<WorkflowStep[]> {
-    const signal = this.deps.engineOptions.abortSignal;
+    const signal = this.resolveAbortSignal();
     signal?.throwIfAborted();
     if (!step.parallel || !isDynamicParallelSubSteps(step.parallel)) {
       throw new Error(`Step "${step.name}" is not a dynamic parallel step`);
@@ -108,7 +113,7 @@ export class DynamicParallelSelectorCoordinator {
           projectCwd: this.deps.engineOptions.projectCwd,
           persona: step.parallel.selection.selector?.persona,
           workflowBundleResourceRoot: this.deps.engineOptions.workflowBundleResourceRoot,
-          abortSignal: this.deps.engineOptions.abortSignal,
+          abortSignal: signal,
           language: this.deps.engineOptions.language,
           failureDir: this.deps.failureDir,
           personaPath: step.parallel.selection.selector?.personaPath,
