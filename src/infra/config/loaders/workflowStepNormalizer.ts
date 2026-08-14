@@ -11,13 +11,14 @@ import type {
 } from '../../../core/models/index.js';
 import { getWorkflowStepKind } from '../../../core/models/workflow-step-kind.js';
 import type { WorkflowArpeggioConfig, WorkflowMcpServersConfig, WorkflowOverrides } from '../../../core/models/config-types.js';
-import type {
-  StepProviderOptions,
-  WorkflowCallArgValue,
-  WorkflowStepKind,
-  DynamicFacetsConfig,
-  SelectorGuidance,
-  ReviewCompletionConfig,
+import {
+  MAX_REVIEW_COMPLETION_RETRY,
+  type DynamicFacetsConfig,
+  type ReviewCompletionConfig,
+  type SelectorGuidance,
+  type StepProviderOptions,
+  type WorkflowCallArgValue,
+  type WorkflowStepKind,
 } from '../../../core/models/workflow-types.js';
 import type { CompanionSelection } from '../../../core/models/companion-types.js';
 import { applyQualityGateOverrides } from './qualityGateOverrides.js';
@@ -86,7 +87,7 @@ function normalizeReviewCompletion(
   }
   return {
     minRetry: raw.min_retry ?? 0,
-    maxRetry: raw.max_retry ?? 1,
+    maxRetry: raw.max_retry ?? MAX_REVIEW_COMPLETION_RETRY,
     retryInstruction,
   };
 }
