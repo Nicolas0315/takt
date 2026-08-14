@@ -30,6 +30,17 @@ const ROLES = {
     '--- INSTRUCTION ここまで ---',
     DRY_RUN_NOTE,
   ].join('\n\n'),
+  'fix-plan': () => [
+    'あなたは TAKT ワークフローの fix-plan ステップを実行する planner エージェントである。次の instruction 全文に従うこと。',
+    '--- INSTRUCTION（全文） ---',
+    expandFacet('instructions/fix-plan-from-review-resolution.md'),
+    '--- INSTRUCTION ここまで ---',
+    '出力は次の output contract に従うこと。',
+    '--- OUTPUT CONTRACT（全文） ---',
+    expandFacet('output-contracts/fix-plan.md'),
+    '--- OUTPUT CONTRACT ここまで ---',
+    DRY_RUN_NOTE,
+  ].join('\n\n'),
   fix: () => [
     'あなたは TAKT ワークフローの fix ステップを実行する coder エージェントである。次の instruction 全文に従うこと。',
     '--- INSTRUCTION（全文） ---',

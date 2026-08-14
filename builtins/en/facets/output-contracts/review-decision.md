@@ -6,6 +6,18 @@
 ## Decision Summary
 {Source reports, actionable family count, non-actionable count, and evidence summary}
 
+## Invariant Register Carry-forward
+Carry-forward source: {Relative path of the selected fix-verification / No prior remediation / Carry-forward source missing: reason}
+
+| Fix Unit | Family ID | Invariant Name | Responsible Source | Current Verification Number | Previous Verification Number | Previous Path | Current Path | Same-Invariant / Recurrence Judgment | Cumulative `incomplete` Count | Recurrence on a Different Path Confirmed? | Enforcement-Point Candidate | Record Integrity |
+|----------|-----------|---------------------|---------------------|-----------------------------|--------------------------------|---------------|--------------|--------------------------------------|-------------------------------|---------|-----------------------------|------------------|
+| {Copy one invariant row from the selected single source unchanged} | {Unchanged} | {Unchanged} | {Unchanged} | {Unchanged} | {Unchanged} | {Unchanged} | {Unchanged} | {Unchanged} | {Unchanged} | {Unchanged} | {Unchanged} | {Unchanged} |
+
+When the source statement is No prior remediation or Carry-forward source missing, keep it and its reason on the `Carry-forward source` line and do not create an invariant row for it.
+
+### Mapping When a Name or Responsible Source Changed
+- {None, or old family ID, invariant name, and responsible source (the single responsibility and source that defines the invariant and guarantees it holds) -> the three new values, with the reason; do not treat only moving or splitting files as a change}
+
 ## Actionable Families
 | family | Finding ID / source | Authorization basis | Evidence | Problem -> root cause | Affected contract paths | Acceptance criteria | Remediation boundary |
 |--------|---------------------|---------------------|----------|-----------------------|-------------------------|---------------------|----------------------|
@@ -23,6 +35,6 @@
 **Cognitive-load rules:**
 - Record every submitted finding ID exactly once in Finding Dispositions
 - Record an authorization basis for every actionable family, and also record why a new follow-up finding was absent from the initial round
-- No actionable findings -> include only the summary, finding dispositions, and unresolved premises
+- No actionable findings -> include only the summary, invariant-register carry-forward, finding dispositions, and unresolved premises
 - Actionable findings -> consolidate findings with the same cause into one family and include every `actionable` and `duplicate` finding ID in its target family
 - Findings with any other disposition are excluded from remediation and must not appear in an actionable family
