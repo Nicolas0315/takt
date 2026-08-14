@@ -579,6 +579,7 @@ describe('WorkflowEngine Integration: Parallel Step Aggregation', () => {
       resolvedExecution: unknown;
       outputSchema: Record<string, unknown> | undefined;
       internalSystemPrompt: string | undefined;
+      onActivity: unknown;
       instruction: string;
     }> = [];
     vi.mocked(runAgent).mockImplementation(async (persona, instruction, options) => {
@@ -591,6 +592,7 @@ describe('WorkflowEngine Integration: Parallel Step Aggregation', () => {
         resolvedExecution: options?.resolvedExecution,
         outputSchema: options?.outputSchema,
         internalSystemPrompt: options?.internalSystemPrompt,
+        onActivity: options?.onActivity,
         instruction,
       });
       if (options?.outputSchema) {
@@ -663,6 +665,7 @@ describe('WorkflowEngine Integration: Parallel Step Aggregation', () => {
       },
       bypassPermissions: false,
       internalSystemPrompt: expect.stringContaining('internal dynamic parallel selector'),
+      onActivity: expect.any(Function),
       outputSchema: expect.objectContaining({
         additionalProperties: false,
         required: ['selected_ids', 'rationale'],

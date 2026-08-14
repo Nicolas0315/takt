@@ -27,7 +27,7 @@ import type { StepExecutor } from './StepExecutor.js';
 import type { WorkflowEngineOptions, PhaseName, PhasePromptParts, JudgeStageEntry, StepRunResult } from '../types.js';
 import type { RuntimeStepResolution } from '../types.js';
 import type {
-  WorkflowStepDeadline,
+  WorkflowStepInactivityDeadline,
   WorkflowStepExecutionDeadlineContext,
 } from './step-deadline.js';
 import type { ParallelLoggerOptions } from './parallel-logger.js';
@@ -102,7 +102,7 @@ function isAgentParallelSubStep(step: WorkflowStep): step is AgentWorkflowStep {
 
 async function runWithExecutionDeadline<T>(
   context: WorkflowStepExecutionDeadlineContext | undefined,
-  deadline: WorkflowStepDeadline | undefined,
+  deadline: WorkflowStepInactivityDeadline | undefined,
   operation: () => Promise<T>,
 ): Promise<T> {
   if (context === undefined || deadline === undefined) {
@@ -279,9 +279,16 @@ export class ParallelRunner {
       });
       return [subStep.name, providerInfo];
     }));
-    const routedProviderInfoByStep = this.deps.engineOptions.autoRouting
-      ? await resolveAutoRoutingBatch({
-          autoRouting: this.deps.engineOptions.autoRouting,
+    const autoRouting = this.deps.engineOptions.autoRouting;
+    const routingDeadline = autoRouting === undefined
+      ? undefined
+      : executionDeadlineContext?.begin(`parallel:auto-routing:${step.name}`, {
+          provider: autoRouting.router.provider,
+          providerOptions: autoRouting.router.providerOptions,
+        });
+    const routedProviderInfoByStep = autoRouting
+      ? await runWithExecutionDeadline(executionDeadlineContext, routingDeadline, () => resolveAutoRoutingBatch({
+          autoRouting,
           concurrency: step.concurrency,
           items: agentSubSteps.map((subStep) => ({
             id: subStep.name,
@@ -318,7 +325,11 @@ export class ParallelRunner {
           runtime: this.deps.engineOptions.routingRuntime,
           logger: log,
           abortSignal: this.resolveAbortSignal(),
-        })
+          ...this.deps.optionsBuilder.buildDeadlineActivityCallbacks(
+            `parallel:auto-routing:${step.name}`,
+            routingDeadline?.recordActivity,
+          ),
+        }))
       : new Map();
     const workflowCallResumeStack = subSteps.some(isWorkflowCallStep)
       ? this.requireWorkflowCallResumeStack(step, stepIteration)
@@ -339,8 +350,8 @@ export class ParallelRunner {
       return [subStep.name, providerInfo];
     }));
 
-    const subStepDeadlineByName = new Map<string, WorkflowStepDeadline>();
-    const getSubStepDeadline = (subStep: WorkflowStep): WorkflowStepDeadline | undefined => {
+    const subStepDeadlineByName = new Map<string, WorkflowStepInactivityDeadline>();
+    const getSubStepDeadline = (subStep: WorkflowStep): WorkflowStepInactivityDeadline | undefined => {
       if (executionDeadlineContext === undefined) {
         return undefined;
       }
@@ -497,12 +508,17 @@ export class ParallelRunner {
             updatePersonaSession,
           );
         }
-        // Override onStream with parallel logger's prefixed handler (immutable)
+        // Preserve provider activity/logging while replacing only the display callback.
         const agentOptions: RunAgentOptions = parallelLogger
           ? {
               ...baseOptions,
               ...(compactionOutcome === 'fresh' ? { sessionId: undefined } : {}),
-              onStream: parallelLogger.createStreamHandler(subStep.name, index),
+              onStream: this.deps.optionsBuilder.buildProviderStream(
+                executableSubStep,
+                subPm.provider,
+                subPm.model,
+                parallelLogger.createStreamHandler(subStep.name, index),
+              ),
             }
           : {
               ...baseOptions,
