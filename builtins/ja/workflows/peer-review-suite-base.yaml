@@ -63,6 +63,8 @@ steps:
         $param: ai_antipattern_review_instruction
     rules:
       self:
+        - condition: any("error")
+          next: reviewers
         - condition: all("approved")
           next: COMPLETE
         - condition: any("needs_fix")

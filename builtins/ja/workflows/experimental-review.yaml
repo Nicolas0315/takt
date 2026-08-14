@@ -44,6 +44,8 @@ steps:
       frontend_review_instruction: { $param: frontend_review_instruction }
     rules:
       self:
+        - condition: any("error")
+          next: review
         - condition: all("approved")
           next: COMPLETE
         - condition: any("needs_fix")
