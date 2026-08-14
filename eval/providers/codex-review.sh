@@ -1,28 +1,28 @@
 #!/usr/bin/env bash
-# promptfoo exec プロバイダ: codex CLI での判定専用実行（read-only）。
-# 使い方: exec: bash providers/codex-judge.sh <model> [reasoning-effort]
-# fix-loop-convergence スイートで使用。モデルを明示指定するため
-# openai:codex-sdk ではなく CLI を直接使う。
+# promptfoo exec provider: run a read-only Codex review in a fixture.
+# Usage: codex-review.sh <model> [reasoning-effort] <work-dir>
 set -euo pipefail
+
 model="$1"
-if [ "$#" -ge 3 ]; then
+if [ "$#" -ge 4 ]; then
   reasoning_effort="$2"
-  prompt="$3"
+  work_dir="$3"
+  prompt="$4"
 else
   reasoning_effort="max"
-  prompt="$2"
+  work_dir="$2"
+  prompt="$3"
 fi
-raw_timeout_seconds="${CODEX_JUDGE_TIMEOUT_SECONDS:-600}"
+raw_timeout_seconds="${CODEX_REVIEW_TIMEOUT_SECONDS:-900}"
 if [[ ! "$raw_timeout_seconds" =~ ^0*([1-9][0-9]{0,6})$ ]]; then
-  echo "CODEX_JUDGE_TIMEOUT_SECONDS must be an integer from 1 through 2147483" >&2
+  echo "CODEX_REVIEW_TIMEOUT_SECONDS must be an integer from 1 through 2147483" >&2
   exit 2
 fi
 timeout_seconds="${BASH_REMATCH[1]}"
 if [ "$timeout_seconds" -gt 2147483 ]; then
-  echo "CODEX_JUDGE_TIMEOUT_SECONDS must be an integer from 1 through 2147483" >&2
+  echo "CODEX_REVIEW_TIMEOUT_SECONDS must be an integer from 1 through 2147483" >&2
   exit 2
 fi
-cd "$(dirname "$0")/.."
 codex_pid=''
 watchdog_pid=''
 tmp_dir=$(mktemp -d)
@@ -49,6 +49,8 @@ cleanup() {
 trap cleanup EXIT
 trap 'cleanup; exit 130' INT
 trap 'cleanup; exit 143' TERM
+
+cd "$(dirname "$0")/../${work_dir}"
 printf '%s' "$prompt" > "$prompt_file"
 
 set -m
@@ -104,15 +106,15 @@ watchdog_status=0
 wait "$watchdog_pid" 2>/dev/null || watchdog_status=$?
 watchdog_pid=''
 if [ "$watchdog_status" -ne 0 ] && { [ -f "$timeout_marker" ] || [ "$watchdog_status" -ne 143 ]; }; then
-  echo "codex judge watchdog failed (exit ${watchdog_status})" >&2
+  echo "codex review watchdog failed (exit ${watchdog_status})" >&2
   exit 125
 fi
 if [ -f "$timeout_marker" ]; then
-  echo "codex judge timed out after ${timeout_seconds}s" >&2
+  echo "codex review timed out after ${timeout_seconds}s" >&2
   exit 124
 fi
 if [ "$status" -ne 0 ]; then
-  echo "codex judge run failed (exit ${status})" >&2
+  echo "codex review failed (exit ${status})" >&2
   exit "$status"
 fi
 codex_pid=''

@@ -10,7 +10,9 @@
  *         cqrs-coder, fix-closure, fix-plan-fresh-findings,
  *         fix-plan-boundary-preflight, fix-plan-cause-check,
  *         review-family-closure,
- *         initial-review-contract-discovery, testing-review-observable-evidence,
+ *         initial-review-contract-discovery,
+ *         initial-review-external-identity-wiring,
+ *         testing-review-observable-evidence,
  *         follow-up-review-repair-regression,
  *         follow-up-testing-review-repair-regression,
  *         initial-plan-contract-closure, replan-contract-closure,
@@ -20,6 +22,7 @@
  *         implementation-report-contract-traceability,
  *         review-adjudication, final-readiness-supervision,
  *         final-readiness-preservation,
+ *         final-readiness-precision,
  *         task-instruction-gherkin
  *         (default: all except suites that require optional CLI authentication)
  * Example: npm run eval:prompts -- arch --repeat 3
@@ -47,6 +50,7 @@ const SUITES = {
   'fix-plan-cause-check': 'promptfooconfig.fix-plan-cause-check.yaml',
   'review-family-closure': 'promptfooconfig.review-family-closure.yaml',
   'initial-review-contract-discovery': 'promptfooconfig.initial-review-contract-discovery.yaml',
+  'initial-review-external-identity-wiring': 'promptfooconfig.initial-review-external-identity-wiring.yaml',
   'testing-review-observable-evidence': 'promptfooconfig.testing-review-observable-evidence.yaml',
   'initial-plan-contract-closure': 'promptfooconfig.initial-plan-contract-closure.yaml',
   'replan-contract-closure': 'promptfooconfig.replan-contract-closure.yaml',
@@ -72,6 +76,7 @@ const SUITES = {
   'review-adjudication': 'promptfooconfig.review-adjudication.yaml',
   'final-readiness-supervision': 'promptfooconfig.final-readiness-supervision.yaml',
   'final-readiness-preservation': 'promptfooconfig.final-readiness-preservation.yaml',
+  'final-readiness-precision': 'promptfooconfig.final-readiness-precision.yaml',
   'task-instruction-gherkin': 'promptfooconfig.task-instruction-gherkin.yaml',
 };
 
@@ -92,14 +97,19 @@ for (const name of names) {
 // 弱いモデルの行は常に部分失敗するため、デフォルトのゲート実行からは除外する。
 // fix-self-scan は claude ヘッドレス CLI（要 claude ログイン）で走るため、
 // codex 前提のデフォルト実行からは除外し、明示的に呼び出す。
-// fix-loop-convergence と fix-plan-cause-check も claude（opus）と
-// codex（gpt-5.6-luna）の両ログインが必要な二重測定スイートのため、明示的に呼び出す。
+// fix-loop-convergence も claude（opus）と codex（Luna Max / Sol High）の
+// 両ログインが必要な3モデル測定スイートのため、明示的に呼び出す。
+// initial-review-external-identity-wiring も同じ2つの外部 CLI で3モデルを使うため、
+// デフォルト実行から除外して明示的に呼び出す。
+// fix-plan-cause-check も claude（opus）と codex（gpt-5.6-luna）の
+// 両ログインが必要な二重測定スイートのため、明示的に呼び出す。
 const DEFAULT_EXCLUDED = new Set([
   'rescan',
   'rescan-coding',
   'fix-self-scan',
   'fix-loop-convergence',
   'fix-plan-cause-check',
+  'initial-review-external-identity-wiring',
   'write-tests-default-priority',
   'write-tests-default-priority-codex',
 ]);
