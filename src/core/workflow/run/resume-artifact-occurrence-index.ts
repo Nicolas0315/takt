@@ -48,10 +48,11 @@ function legacyNamespaceSignature(stepName: string, workflowName: string): strin
 
 export class ResumeArtifactOccurrenceIndex {
   readonly #maxByCallSite = new Map<string, number>();
+  readonly #artifactNamespacePaths = new Set<string>();
 
   constructor(
     manifest: ResumeReportSnapshotManifest | undefined,
-    sourceResumePoint?: WorkflowResumePoint,
+    sourceResumePoint: WorkflowResumePoint | undefined,
   ) {
     const callSitesByNamespace = new Map<string, string>();
     const callSitesBySignature = new Map<string, Set<string>>();
@@ -87,6 +88,7 @@ export class ResumeArtifactOccurrenceIndex {
         const namespaceSegment = segments[index + 1]!;
         const parsed = parseWorkflowCallNamespaceSegment(namespaceSegment);
         if (parsed === undefined || parsed.iteration === '*') continue;
+        this.#artifactNamespacePaths.add(JSON.stringify(segments.slice(0, index + 2)));
         const signature = namespaceSignature(
           parsed.stepName,
           parsed.workflowName,
@@ -101,10 +103,6 @@ export class ResumeArtifactOccurrenceIndex {
           );
           if (legacyCandidates?.size === 1) {
             callSite = [...legacyCandidates][0];
-          } else if (legacyCandidates !== undefined && legacyCandidates.size > 1) {
-            throw new Error(
-              `Cannot migrate legacy workflow-call artifact namespace "${namespaceSegment}": logical call-site is ambiguous`,
-            );
           }
         }
         if (callSite === undefined) continue;
@@ -126,5 +124,9 @@ export class ResumeArtifactOccurrenceIndex {
       stepName,
       workflowCallPath,
     ));
+  }
+
+  hasArtifactNamespacePath(namespacePath: readonly string[]): boolean {
+    return this.#artifactNamespacePaths.has(JSON.stringify(namespacePath));
   }
 }
