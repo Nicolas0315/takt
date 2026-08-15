@@ -1,7 +1,7 @@
 ```markdown
 # Coding Review
 
-## Result: APPROVE / REJECT
+{{include:output-contracts/base-review-result}}
 
 ## Summary
 {Summarize the review result in 1-2 sentences}
@@ -13,15 +13,9 @@ Fill this when the diff adds or changes IDs, names, metadata, config, environmen
 |--------------|----------------------|--------------------------|---------------|----------|---------------------------------|
 | {normal entry / derived condition / validation / evaluation / output / re-injection, etc.} | {Requirement} | `src/file.ts:42` | `src/file.test.ts:10` | ✅/❌/⚠️ | {none / evidence} |
 
-## Non-Finding Concerns
-| Item | Location | Classification | Evidence for Not Making a Finding |
-|------|----------|----------------|-----------------------------------|
-| {Concern, or "none"} | `src/file.ts:42` | false_positive / overreach / outside_contract_jurisdiction / no_issue_after_verification | {Evidence} |
+{{include:output-contracts/base-review-non-finding-concerns}}
 
-## Problem-Family Completion Sweep
-| family_tag / changed contract | Responsible source | Observable invariant | Reason to change from the same cause | Added path | Definition, production, validation | Consumption, persistence, reinjection | Failure, interruption, retry, resume, parallel, auxiliary entries | Mocks, fixtures, test doubles | Unchecked paths | Result |
-|-------------------------------|--------------------|----------------------|--------------------------------------|------------|------------------------------------|---------------------------------------|--------------------------------------------------------------------------|------------------------------|-----------------|--------|
-| {problem family or contract reviewed} | {single responsibility and source that defines the invariant and guarantees it holds} | {condition to preserve} | {why the paths need to change for the same cause} | {new path checked in this review, or none} | {locations checked} | {locations checked} | {paths checked} | {test assets checked} | {none or reason unchecked} | {no issue / finding number} |
+{{include:output-contracts/base-review-problem-family-completion-sweep}}
 
 ## Current Iteration Findings (new)
 | # | finding_id | family_tag | Severity | Location | Issue | Impact | Authorization Basis | Reason Absent from Initial Round | Fix Suggestion |
@@ -30,9 +24,8 @@ Fill this when the diff adds or changes IDs, names, metadata, config, environmen
 
 For a follow-up finding, `Authorization Basis` must be exactly one of the four listed values; reject every other value. `Reason Absent from Initial Round` is an independent factual explanation, never another authorization value.
 
-## Carry-over Findings (persists)
-| # | finding_id | family_tag | Previous Evidence | Current Evidence | Issue | Fix Suggestion |
-|---|------------|------------|-------------------|------------------|-------|----------------|
+{{include:output-contracts/base-review-persists}}
+{{include:output-contracts/base-review-carry-over-findings}}
 | 1 | CODE-PERSIST-src-file-L77 | regression | `src/file.ts:77` | `src/file.ts:77` | {Unresolved issue} | {Fix suggestion} |
 
 ## Resolved Findings (resolved)
@@ -40,26 +33,24 @@ For a follow-up finding, `Authorization Basis` must be exactly one of the four l
 |------------|--------------------------|---------------------|
 | CODE-RESOLVED-src-file-L10 | {Original finding acceptance criteria} | Resolved at `src/file.ts:10` |
 
-## Reopened Findings (reopened)
-| # | finding_id | family_tag | Prior Resolution Evidence | Recurrence Evidence | Issue | Fix Suggestion |
-|---|------------|------------|--------------------------|---------------------|-------|----------------|
-| 1 | CODE-REOPENED-src-file-L55 | bug | `Previously: src/file.ts:10` | `src/file.ts:55` | {Reopened issue} | {Fix suggestion} |
+{{include:output-contracts/base-review-adjudicated-out-of-scope}}
+{{include:output-contracts/base-review-reopened-findings}}
+| 1 | CODE-REOPENED-src-file-L55 | bug | `review-resolution.md`: previously resolved | d | `src/file.ts:55` | {Reopened issue} | {Fix suggestion} |
 
+{{include:output-contracts/base-review-reopened}}
 ## Verification Evidence
 - Diff review: {What was checked}
 - Build: {Result, or state unverified}
 - Tests: {Result, or state unverified}
 
-## Re-scan Evidence (required from the second review onward)
-| Policy/Knowledge section checked | Evidence in the diff (`file:line` or "none") |
-|----------------------------------|----------------------------------------------|
-| {section name} | {evidence} |
+{{include:output-contracts/base-review-rescan-evidence}}
 
 ## Rejection Gate
-- REJECT only when at least one finding exists in `new`, `persists`, or `reopened`
+{{include:output-contracts/base-review-rejection-gate-only-when}}
 - Findings without `finding_id` are invalid
 ```
 
 **Cognitive load reduction rules:**
 - APPROVE: Summary plus Verification Evidence, Contract Entry Check, Re-scan Evidence (from the second iteration onward), and Non-Finding Concerns when needed
 - REJECT: Include every verified finding row and aggregate locations with the same cause
+{{include:output-contracts/base-review-adjudicated-out-of-scope-reporting}}
