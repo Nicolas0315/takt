@@ -362,7 +362,7 @@ function parallelSelection(selectedIds: string[], rationale: string): ScenarioEn
   };
 }
 
-function acceptedAndMergedCompanionFinding(): ScenarioEntry[] {
+function acceptedCompanionFinding(followUpResponse: ScenarioEntry): ScenarioEntry[] {
   return [
     {
       persona: 'ai-antipattern-review-companion',
@@ -375,7 +375,6 @@ function acceptedAndMergedCompanionFinding(): ScenarioEntry[] {
           line: 1,
           finding: 'The changed observable contract lacks regression coverage.',
         }],
-        updates: [],
         notes: null,
       },
     },
@@ -387,11 +386,7 @@ function acceptedAndMergedCompanionFinding(): ScenarioEntry[] {
         findings: [{
           action: 'accept',
           sourceIndex: 0,
-          severity: null,
-          finding: null,
-          targetId: null,
         }],
-        updates: [],
       },
     },
     {
@@ -406,7 +401,6 @@ function acceptedAndMergedCompanionFinding(): ScenarioEntry[] {
           line: 1,
           finding: 'The changed observable contract lacks regression coverage.',
         }],
-        updates: [],
         notes: null,
       },
     },
@@ -416,15 +410,12 @@ function acceptedAndMergedCompanionFinding(): ScenarioEntry[] {
       content: 'moderate',
       structuredOutput: {
         findings: [{
-          action: 'merge',
+          action: 'reject',
           sourceIndex: 0,
-          severity: null,
-          finding: null,
-          targetId: 'ai-antipattern-review-companion-1',
         }],
-        updates: [],
       },
     },
+    followUpResponse,
   ];
 }
 
@@ -620,7 +611,7 @@ describe('experimental builtin workflow', () => {
         responseForNext(core, 'write_tests', 'implement'),
         selection(['testing'], 'Testing implementation facets are required.'),
         responseForNext(implementation, 'implement', 'COMPLETE'),
-        ...acceptedAndMergedCompanionFinding(),
+        ...acceptedCompanionFinding(responseForNext(implementation, 'implement', 'COMPLETE')),
         parallelSelection(['architecture-review'], 'The first review round covers architecture changes.'),
         response(reviewerSuite, 'coding-review', 'coding-reviewer', 'needs_fix'),
         response(reviewerSuite, 'ai-antipattern-review', 'ai-antipattern-reviewer', 'needs_fix'),
@@ -629,11 +620,11 @@ describe('experimental builtin workflow', () => {
         responseForNext(remediation, 'fix-plan', 'fix'),
         selection(['testing'], 'Testing remediation facets are required.'),
         responseForNext(remediation, 'fix', 'fix-verifier'),
-        ...acceptedAndMergedCompanionFinding(),
+        ...acceptedCompanionFinding(responseForNext(remediation, 'fix', 'fix-verifier')),
         responseForNext(remediation, 'fix-verifier', 'fix-retry'),
         selection(['testing'], 'Testing remediation facets are required for the retry.'),
         responseForNext(remediation, 'fix-retry', 'fix-verifier'),
-        ...acceptedAndMergedCompanionFinding(),
+        ...acceptedCompanionFinding(responseForNext(remediation, 'fix-retry', 'fix-verifier')),
         responseForNext(remediation, 'fix-verifier', 'COMPLETE'),
         parallelSelection(['security-review'], 'The second review round covers security changes.'),
         selection(['cli'], 'The TAKT local execution security knowledge matches the changed surface.'),
@@ -645,7 +636,7 @@ describe('experimental builtin workflow', () => {
         responseForNext(remediation, 'fix-plan', 'fix'),
         selection(['security'], 'The final-gate remediation requires security facets.'),
         responseForNext(remediation, 'fix', 'fix-verifier'),
-        ...acceptedAndMergedCompanionFinding(),
+        ...acceptedCompanionFinding(responseForNext(remediation, 'fix', 'fix-verifier')),
         responseForNext(remediation, 'fix-verifier', 'COMPLETE'),
         parallelSelection([], 'The fixed reviewers cover the final-gate remediation.'),
         response(reviewerSuite, 'coding-review', 'coding-reviewer', 'approved'),
@@ -675,7 +666,7 @@ describe('experimental builtin workflow', () => {
       const companionFindingEvents: Array<{
         step: string;
         companion: string;
-        findingId: string;
+        severity: 'must_fix' | 'should_fix' | 'nit';
       }> = [];
       engine.on('workflow:abort', (_state, reason) => abortReasons.push(reason));
       engine.on('companion:start', ({ step, companion }) => {
@@ -684,8 +675,8 @@ describe('experimental builtin workflow', () => {
       engine.on('companion:review_round', ({ step, companion }) => {
         companionReviewRounds.push({ step, companion });
       });
-      engine.on('companion:finding', ({ step, companion, findingId }) => {
-        companionFindingEvents.push({ step, companion, findingId });
+      engine.on('companion:finding', ({ step, companion, severity }) => {
+        companionFindingEvents.push({ step, companion, severity });
       });
 
       const state = await engine.run();
@@ -707,7 +698,7 @@ describe('experimental builtin workflow', () => {
       expect(companionFindingEvents).toEqual(companionSteps.map((step) => ({
         step,
         companion: 'ai-antipattern-review-companion',
-        findingId: 'ai-antipattern-review-companion-1',
+        severity: 'should_fix',
       })));
     },
     60_000,
@@ -871,7 +862,7 @@ describe('experimental builtin workflow', () => {
         responseForNext(core, 'write_tests', 'implement'),
         selection(['testing'], 'Testing implementation facets are required.'),
         responseForNext(implementation, 'implement', 'COMPLETE'),
-        ...acceptedAndMergedCompanionFinding(),
+        ...acceptedCompanionFinding(responseForNext(implementation, 'implement', 'COMPLETE')),
         parallelSelection(['testing-review'], 'Testing review is required.'),
         response(reviewerSuite, 'coding-review', 'coding-reviewer', 'approved'),
         response(reviewerSuite, 'ai-antipattern-review', 'ai-antipattern-reviewer', 'approved'),
@@ -901,7 +892,7 @@ describe('experimental builtin workflow', () => {
       const companionFindingEvents: Array<{
         step: string;
         companion: string;
-        findingId: string;
+        severity: 'must_fix' | 'should_fix' | 'nit';
       }> = [];
       engine.on('workflow:abort', (_state, reason) => abortReasons.push(reason));
       engine.on('companion:start', ({ step, companion }) => {
@@ -910,8 +901,8 @@ describe('experimental builtin workflow', () => {
       engine.on('companion:review_round', ({ step, companion }) => {
         companionReviewRounds.push({ step, companion });
       });
-      engine.on('companion:finding', ({ step, companion, findingId }) => {
-        companionFindingEvents.push({ step, companion, findingId });
+      engine.on('companion:finding', ({ step, companion, severity }) => {
+        companionFindingEvents.push({ step, companion, severity });
       });
 
       const state = await engine.run();
@@ -927,7 +918,7 @@ describe('experimental builtin workflow', () => {
       expect(companionFindingEvents).toEqual([{
         step: 'implement',
         companion: 'ai-antipattern-review-companion',
-        findingId: 'ai-antipattern-review-companion-1',
+        severity: 'should_fix',
       }]);
     },
     60_000,
