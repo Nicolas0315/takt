@@ -183,7 +183,7 @@ describe('Workflow Loader IT: builtin workflow loading', () => {
         'scenario-based-test-report',
         'scenario-based-fix-plan-from-review-resolution',
         'scenario-based-fix-plan',
-        'scenario-based-supervise-merge-readiness',
+        'scenario-based-supervise-review-resolution',
       ].sort();
       expect(scenarioRefsByFile).toEqual([
         { file: 'workflows/experimental.yaml', refs: scenarioSelection },
@@ -199,7 +199,7 @@ describe('Workflow Loader IT: builtin workflow loading', () => {
         testing_report_format: { default: 'test-report' },
         fix_plan_instruction: { default: 'fix-plan-from-review-resolution' },
         fix_plan_report_format: { default: 'fix-plan' },
-        final_gate_instruction: { default: 'supervise-merge-readiness' },
+        final_gate_instruction: { default: 'supervise-review-resolution' },
       });
       expect(findRawStep(core, 'plan')).toMatchObject({
         with: {
@@ -223,13 +223,18 @@ describe('Workflow Loader IT: builtin workflow loading', () => {
           fix_plan_report_format: { $param: 'fix_plan_report_format' },
           final_gate_instruction: { $param: 'final_gate_instruction' },
         },
+        rules: [
+          { condition: 'COMPLETE', next: 'COMPLETE' },
+          { condition: 'need_replan', next: 'replan' },
+          { condition: 'ABORT', next: 'ABORT' },
+        ],
       });
 
       const peerReview = readRaw('workflows', 'peer-review');
       expect(peerReview.subworkflow?.params).toMatchObject({
         fix_plan_instruction: { default: 'fix-plan-from-review-resolution' },
         fix_plan_report_format: { default: 'fix-plan' },
-        final_gate_instruction: { default: 'supervise-merge-readiness' },
+        final_gate_instruction: { default: 'supervise-review-resolution' },
       });
       expect(findRawStep(peerReview, 'final-gate')).toMatchObject({
         with: { final_gate_instruction: { $param: 'final_gate_instruction' } },

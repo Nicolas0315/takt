@@ -115,13 +115,12 @@ function assertExistingFamilyRecordingContracts(
   const writableContracts = (step.outputContracts ?? [])
     .filter(({ useJudge }) => useJudge !== false);
   for (const { format, formatRef } of writableContracts) {
-    if (formatRef !== 'merge-readiness-supervision') continue;
-    const heading = lang === 'ja' ? '## 前段 finding の扱い' : '## Prior Finding Dispositions';
+    const heading = lang === 'ja' ? '## 指摘ごとの裁定' : '## Finding Dispositions';
+    const section = markdownSection(format, heading);
+    if (section === undefined) continue;
     const markers = lang === 'ja'
       ? ['対象 family', '同じ原因で変更される理由', '合流根拠']
       : ['Target family', 'Reason to change from the same cause', 'Rationale'];
-    const section = markdownSection(format, heading);
-    expect(section, `${path}:${formatRef}`).toBeDefined();
     for (const value of markers) expect(section, `${path}:${formatRef}:${value}`).toContain(value);
   }
   const matchingContracts = writableContracts
@@ -414,25 +413,37 @@ describe('contract-family active composition', () => {
     const resolvedFormats = new Set(lookupEntries.flatMap(({ familyRecordingContracts }) => (
       familyRecordingContracts?.map(({ formatRef }) => formatRef) ?? []
     )));
-    expect(resolvedFormats).toContain('merge-readiness-review');
     expect(resolvedFormats).toContain('supervisor-validation');
-    expect(resolvedFormats).toContain('merge-readiness-supervision');
   });
 
-  it.each(LANGUAGES)('persists every family identity field in adjudication output for %s', (lang) => {
-    const content = readFileSync(join(
-      getLanguageResourcesDir(lang),
-      'facets',
-      'output-contracts',
-      'review-decision.md',
-    ), 'utf8');
-    const heading = lang === 'ja' ? '## 修正対象 family' : '## Actionable Families';
-    const markers = lang === 'ja'
-      ? ['担当箇所', '観測可能な不変条件', '同じ原因で変更される理由']
-      : ['Responsible source', 'Observable invariant', 'Reason to change from the same cause'];
-    const section = markdownSection(content, heading);
-    expect(section, heading).toBeDefined();
-    for (const value of markers) expect(section, `${heading}:${value}`).toContain(value);
+  it.each(LANGUAGES)('persists family identity and merge grounds in integrated outputs for %s', (lang) => {
+    for (const contract of ['review-decision', 'supervisor-validation']) {
+      const content = readFileSync(join(
+        getLanguageResourcesDir(lang),
+        'facets',
+        'output-contracts',
+        `${contract}.md`,
+      ), 'utf8');
+      const familyHeading = lang === 'ja' ? '## 修正対象 family' : '## Actionable Families';
+      const familyMarkers = lang === 'ja'
+        ? ['担当箇所', '観測可能な不変条件', '同じ原因で変更される理由', '追加した経路']
+        : ['Responsible source', 'Observable invariant', 'Reason to change from the same cause', 'Added path'];
+      const familySection = markdownSection(content, familyHeading);
+      expect(familySection, `${contract}:${familyHeading}`).toBeDefined();
+      for (const value of familyMarkers) {
+        expect(familySection, `${contract}:${familyHeading}:${value}`).toContain(value);
+      }
+
+      const dispositionHeading = lang === 'ja' ? '## 指摘ごとの裁定' : '## Finding Dispositions';
+      const dispositionMarkers = lang === 'ja'
+        ? ['対象 family', '同じ原因で変更される理由', '合流根拠']
+        : ['Target family', 'Reason to change from the same cause', 'Rationale'];
+      const dispositionSection = markdownSection(content, dispositionHeading);
+      expect(dispositionSection, `${contract}:${dispositionHeading}`).toBeDefined();
+      for (const value of dispositionMarkers) {
+        expect(dispositionSection, `${contract}:${dispositionHeading}:${value}`).toContain(value);
+      }
+    }
   });
 
   it('classifies every real-loader companion without hard-coded role projection', () => {
@@ -477,8 +488,8 @@ describe('contract-family active composition', () => {
       ['fix', 'apply-fix-verification'],
       ['apply-fix-verification', 'verify-fix'],
       ['verify-fix', 'fix'],
-      ['plan', 'review-merge-readiness'],
-      ['review-merge-readiness', 'plan'],
+      ['plan', 'supervise-review-resolution'],
+      ['supervise-review-resolution', 'plan'],
     ] as const;
     for (const [declaredInstruction, swappedInstruction] of swaps) {
       const swappedContent = resolveRefToContent(
@@ -502,7 +513,7 @@ describe('contract-family active composition', () => {
       ['fixture/steps[0]:fix', 'apply-fix-verification'],
       ['fixture/steps[0]:fix-retry', 'verify-fix'],
       ['fixture/steps[0]:fix-verifier', 'fix'],
-      ['fixture/steps[0]:plan', 'review-merge-readiness'],
+      ['fixture/steps[0]:plan', 'supervise-review-resolution'],
       ['fixture/steps[0]:final-gate', 'plan'],
     ] as const;
     for (const [path, swappedInstruction] of swaps) {

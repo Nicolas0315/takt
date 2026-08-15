@@ -454,7 +454,7 @@ describe('experimental builtin workflow', () => {
         testing_report_format: 'scenario-based-test-report',
         fix_plan_instruction: 'scenario-based-fix-plan-from-review-resolution',
         fix_plan_report_format: 'scenario-based-fix-plan',
-        final_gate_instruction: 'scenario-based-supervise-merge-readiness',
+        final_gate_instruction: 'scenario-based-supervise-review-resolution',
       };
       const reportFormatRef = (workflow: WorkflowConfig, stepName: string): string | undefined => {
         const reports = findWorkflowStep(workflow, stepName).outputContracts;
@@ -507,7 +507,7 @@ describe('experimental builtin workflow', () => {
           args: {
             fix_plan_instruction: 'fix-plan-from-review-resolution',
             fix_plan_report_format: 'fix-plan',
-            final_gate_instruction: 'supervise-merge-readiness',
+            final_gate_instruction: 'supervise-review-resolution',
           },
         });
         expect(findWorkflowStep(peerReview, 'remediation')).toMatchObject({
@@ -952,7 +952,7 @@ describe('experimental builtin workflow', () => {
   );
 
   it(
-    'should abort the Japanese experimental wrapper when the final gate is blocked by the environment',
+    'should replan a blocked final decision before aborting when project changes cannot resolve it',
     async () => {
       const language = 'ja';
       writeFileSync(join(projectDir, '.takt', 'config.yaml'), `language: ${language}\n`);
@@ -976,7 +976,8 @@ describe('experimental builtin workflow', () => {
         response(reviewerSuite, 'ai-antipattern-review', 'ai-antipattern-reviewer', 'approved'),
         response(reviewerSuite, 'testing-review', 'testing-reviewer', 'approved'),
         responseForNext(peerReview, 'review-adjudication', 'final-gate'),
-        responseForNext(peerReview, 'final-gate', 'ABORT'),
+        responseForReturn(peerReview, 'final-gate', 'need_replan'),
+        responseForNext(core, 'replan', 'ABORT'),
       ]);
       const engine = new WorkflowEngine(wrapper, projectDir, 'Implement a change that cannot be remediated', {
         projectCwd: projectDir,
