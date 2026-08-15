@@ -1,14 +1,13 @@
 # yaml-language-server: $schema=https://promptfoo.dev/config-schema.json
 #
-# Prompt quality eval for TAKT facets (trial: codex provider only).
+# Prompt quality eval for TAKT facets across the standard review model matrix.
 #
 # Evaluates the REAL assembled Phase 1 prompt of the coding-review substep
 # (peer-review subworkflow, the takt-default lineage), rendered via
 # eval/scripts/prepare.mjs. arch-review lives in promptfooconfig.arch.yaml.
 #
 # Run from the repo root:
-#   npm run eval:prompts   # prepare (latest facets -> prompts + snapshots
-#                          # + seeded reports) then eval via local codex login
+#   npm run eval:prompts:coding   # requires Claude and Codex CLI logins
 
 description: 'TAKT facet eval: peer-review / coding-review'
 
@@ -16,19 +15,15 @@ prompts:
   - file://prompts/coding-review.phase1.md
 
 providers:
-  - id: openai:codex-sdk
-    label: codex
-    config:
-      working_dir: fixtures/sample-project
-      sandbox_mode: read-only
-      approval_policy: never
-      skip_git_repo_check: true
-      # Token saver (user decision): trades some fidelity vs production
-      # runs. Compare scores only against runs with the same effort.
-      model_reasoning_effort: low
+  - id: 'exec: bash providers/claude-review.sh claude-opus-5 fixtures/sample-project'
+    label: claude-opus-5
+  - id: 'exec: bash providers/codex-review.sh gpt-5.6-luna max fixtures/sample-project'
+    label: codex-luna-max
+  - id: 'exec: bash providers/codex-review.sh gpt-5.6-sol high fixtures/sample-project'
+    label: codex-sol-high
 
-# Grader for model-graded assertions (llm-rubric) also runs on codex,
-# so the whole eval stays on the ChatGPT-login auth path (no API billing).
+# The Claude provider uses Claude CLI login. Codex providers and the grader use
+# Codex CLI login; no API billing is used.
 defaultTest:
   options:
     provider:
@@ -38,6 +33,9 @@ defaultTest:
         approval_policy: never
         skip_git_repo_check: true
         model_reasoning_effort: low
+
+evaluateOptions:
+  maxConcurrency: 3
 
 tests:
   - description: 'recall: planted coding-policy violations must be flagged'
@@ -53,23 +51,32 @@ tests:
       - type: javascript
         metric: recall/swallowed-error
         value: |
-          return /(loadFromJson|catch)/i.test(output) &&
-            /(swallow|silent|suppress|ignor|握りつぶ|黙殺|隠蔽|無視|空配列|empty array)/i.test(output);
+          return /(loadFromJson|catch|例外|exception)/i.test(output) &&
+            /(swallow|silent|suppress|ignor|握りつぶ|黙殺|隠蔽|無視|空配列|empty array|伝播(?:されない|されず|されません|していない|しない|せず|しません|させていない|させない|させず)|再(?:throw|スロー|送出)(?:されない|されず|しない|せず)|飲み込)/i.test(output);
       - type: javascript
         metric: recall/any-type
         value: |
-          return /(updateProfile|patch|:\s*any\b|`any`|any\s*型|any\s+type)/i.test(output) &&
-            /(問題|指摘|禁止|避け|型安全|unsafe|no-explicit-any|type-?safe)/i.test(output);
+          return /(:\s*any\b|`any`|\bany\b\s*型|\bany\b\s+type|の\s*\bany\b|\bany\b\s*と)/i.test(output) &&
+            /(問題|指摘|禁止|避け|型安全|unsafe|no-explicit-any|type-?safe|破壊|上書き|任意|無制限|検証|拒否|限定)/i.test(output);
       - type: javascript
         metric: recall/in-place-mutation
         value: |
-          return /(sortByName|\.sort\()/i.test(output) &&
-            /(直接|破壊|変更|mutat|in-?place|元の|入力|引数|caller)/i.test(output);
+          const target = '(?:sortByName|\\.sort\\b|ソート|並べ替え|並び替え)';
+          const mutation = '(?:破壊|変更|書き換え|mutat|in[ -]?place|元の(?:配列|入力|値|参照)(?:を|が|の)?(?:破壊|変更|書き換え|ソート))';
+          return new RegExp(
+            `${target}[^\\n。.!?]{0,160}${mutation}|${mutation}[^\\n。.!?]{0,160}${target}`,
+            'i',
+          ).test(output);
       - type: javascript
         metric: recall/todo-without-issue
         value: |
           return /TODO/i.test(output) &&
-            /(issue|ticket|チケット|課題|根拠|番号|未追跡|管理されていない)/i.test(output);
+            /(issue|ticket|チケット|課題|根拠|番号|未追跡|管理されていない|未実装|無実装|未完了|未解決|先送り|未完成|放置|解消|除去|削除)/i.test(output);
+      - type: javascript
+        metric: recall/blocking-verdict
+        value: |
+          return /(?:^|\n)(?:#{1,6}\s*)?(?:(?:レビュー)?結果|判定|Result|Verdict)\s*[:：]\s*(?:\*\*)?(?:REJECT|REQUEST\s+CHANGES)\b/im.test(output) ||
+            /(?:^|\n)#{1,6}\s*(?:\*\*)?(?:REJECT|REQUEST\s+CHANGES)\b/im.test(output);
 
   - description: 'precision: clean diff must not produce fabricated findings'
     vars:
@@ -80,8 +87,25 @@ tests:
         metric: precision/no-false-positive
         value: |
           The output is a code review of a small, correct Logger class.
-          Pass if the review does NOT assert a substantive defect (bug,
-          policy violation, security risk) in the logger change. Minor or
-          optional improvement suggestions are acceptable. Fail if the
-          review claims the change contains a fallback for required data,
-          a swallowed error, or any other concrete defect requiring a fix.
+          Pass only if the verdict is APPROVE and the review does NOT assert
+          a substantive defect (bug, policy violation, security risk) in the
+          logger change. Minor or optional improvement suggestions are
+          acceptable only when they remain non-blocking and are not reported
+          as findings. Fail if the verdict is REJECT / REQUEST CHANGES or the
+          review claims any concrete defect requiring a fix.
+
+  - description: 'recall: explicitly required completeness must remain blocking'
+    vars:
+      task: file://cases/required-logger-shorthands.md
+      previous_response: file://cases/prev-gather-required-logger-shorthands.md
+    assert:
+      - type: llm-rubric
+        metric: recall/required-completeness
+        value: |
+          The task explicitly requires Logger convenience methods for all four
+          levels: debug(), info(), warn(), and error(). The implementation has
+          only debug() and error(). Pass only if the review returns REJECT or
+          REQUEST CHANGES and identifies both missing required methods, info()
+          and warn(), as a requirement violation. Fail if it approves, treats
+          the methods as optional, or suppresses the issue as an improvement
+          suggestion, warning, symmetry concern, or overreach.
