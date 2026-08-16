@@ -6,6 +6,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.59.1] - 2026-08-16
+
+### Fixed
+
+- The builtin review-fix loop no longer re-adjudicates stale findings from `review-resolution.md` (#1393). A `review-resolution.md` that exists when adjudication starts is treated as adjudication history and the step's output destination, never as a finding submission source: only findings submitted by the reviewer reports of the immediately preceding completed review round can enter the actionable set. The selector continues a reviewer only from the current `Actionable Families` section — history, dispositions, and carry-forward rows cannot keep a reviewer selected — and when the latest round approves with no findings while a verified fix merely repeats in the resolution file, the loop monitor chooses its declared non-retry outcome instead of rerunning reviewers or the same fix.
+
 ## [0.59.0] - 2026-08-16
 
 ### Added
