@@ -7,7 +7,7 @@ import { validateWorkflowConfig } from '../core/workflow/engine/WorkflowValidato
 import type { PartDefinition, WorkflowStep } from '../core/models/types.js';
 import type { WorkflowEngineOptions } from '../core/workflow/types.js';
 import { resolveStepProviderModel } from '../core/workflow/provider-resolution.js';
-import { createPartStep } from '../core/workflow/engine/team-leader-common.js';
+import { createPartStep, createTeamLeaderPlanningStep } from '../core/workflow/engine/team-leader-common.js';
 import {
   denormalizeProviderRouting,
   normalizeProviderRouting,
@@ -757,6 +757,62 @@ describe('provider_routing provider_options resolution', () => {
     });
     expect(resolveStepProviderModel({
       step: parentStep,
+      provider: 'mock',
+      model: 'project-model',
+      providerRouting,
+    } as Parameters<typeof resolveStepProviderModel>[0])).toMatchObject({
+      provider: 'codex',
+      model: 'gpt-5.5',
+      providerSource: 'provider_routing.tags',
+      modelSource: 'provider_routing.tags',
+    });
+    expect(resolveStepProviderModel({
+      step: partStep,
+      provider: 'mock',
+      model: 'project-model',
+      providerRouting,
+    } as Parameters<typeof resolveStepProviderModel>[0])).toMatchObject({
+      provider: 'opencode',
+      model: 'ollama-cloud/qwen3-coder-next',
+      providerSource: 'provider_routing.tags',
+      modelSource: 'provider_routing.tags',
+    });
+  });
+
+  it('Given team_leader leader_tags and part_tags, When resolving provider/model, Then leader and part route separately', () => {
+    const parentStep = createStep({
+      name: 'implement',
+      persona: 'leader',
+      providerRoutingPersonaKey: 'leader',
+      tags: ['step'],
+      teamLeader: {
+        persona: 'planner',
+        maxConcurrency: 3,
+        timeoutMs: 900000,
+        leaderTags: ['leader'],
+        partTags: ['coding'],
+      },
+    });
+    const part: PartDefinition = {
+      id: 'api',
+      title: 'API',
+      instruction: 'implement api',
+    };
+    const providerRouting = {
+      tags: {
+        leader: { provider: 'codex' as const, model: 'gpt-5.5' },
+        coding: { provider: 'opencode' as const, model: 'ollama-cloud/qwen3-coder-next' },
+      },
+    };
+
+    const planningStep = createTeamLeaderPlanningStep(parentStep);
+    const partStep = createPartStep(parentStep, part);
+
+    expect(parentStep.tags).toEqual(['step']);
+    expect(planningStep.tags).toEqual(['leader']);
+    expect(partStep.tags).toEqual(['coding']);
+    expect(resolveStepProviderModel({
+      step: planningStep,
       provider: 'mock',
       model: 'project-model',
       providerRouting,

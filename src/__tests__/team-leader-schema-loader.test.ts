@@ -185,11 +185,12 @@ describe('team_leader schema', () => {
     expect(result.success).toBe(true);
   });
 
-  it('Given team_leader.part_tags, When parsing a step, Then part_tags are preserved', () => {
+  it('Given team_leader.leader_tags and part_tags, When parsing a step, Then both tag sets are preserved', () => {
     const raw = {
       name: 'implement',
       tags: ['leader'],
       team_leader: {
+        leader_tags: ['strong-model'],
         part_tags: ['coding'],
       },
       instruction: 'decompose',
@@ -201,6 +202,7 @@ describe('team_leader schema', () => {
     if (!result.success) {
       return;
     }
+    expect(result.data.team_leader?.leader_tags).toEqual(['strong-model']);
     expect(result.data.team_leader?.part_tags).toEqual(['coding']);
   });
 
@@ -267,6 +269,7 @@ describe('normalizeWorkflowConfig team_leader', () => {
             fail_on_part_error: true,
             timeout_ms: 90000,
             inspect_tools: [' Read ', 'Glob', 'grep'],
+            leader_tags: [' lead '],
             part_tags: [' coding ', 'review'],
             part_persona: 'coder',
             part_allowed_tools: ['Read', 'Edit'],
@@ -292,6 +295,7 @@ describe('normalizeWorkflowConfig team_leader', () => {
       failOnPartError: true,
       timeoutMs: 90000,
       inspectTools: ['read', 'glob', 'grep'],
+      leaderTags: ['lead'],
       partTags: ['coding', 'review'],
       partPersona: 'coder',
       partPersonaPath: undefined,
@@ -423,6 +427,24 @@ describe('normalizeWorkflowConfig team_leader', () => {
     };
 
     expect(() => normalizeWorkflowConfig(raw, workflowDir)).toThrow(/team_leader\.part_tags/);
+  });
+
+  it('Given a blank team_leader.leader_tags entry, When normalizing workflow config, Then it fails fast', () => {
+    const workflowDir = join(process.cwd(), 'src', '__tests__');
+    const raw = {
+      name: 'workflow',
+      steps: [
+        {
+          name: 'implement',
+          team_leader: {
+            leader_tags: ['  '],
+          },
+          instruction: 'decompose',
+        },
+      ],
+    };
+
+    expect(() => normalizeWorkflowConfig(raw, workflowDir)).toThrow(/team_leader\.leader_tags/);
   });
 
   it('Given non-read-only team_leader.inspect_tools, When normalizing workflow config, Then it fails fast', () => {

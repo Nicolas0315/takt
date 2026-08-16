@@ -877,7 +877,7 @@ describe('TeamLeaderRunner with structuredCaller', () => {
     expect(phaseErrorOutcome).toEqual({ status: 'cancelled' });
   });
 
-  it('Given teamLeader.partTags, When running multiple decomposed parts, Then each part step gets part tags without changing aggregated output', async () => {
+  it('Given teamLeader.leaderTags and partTags, When running multiple decomposed parts, Then leader and parts get separate tags', async () => {
     mockExecuteAgent.mockImplementation(async (_persona, instruction: string) => {
       if (instruction.includes('Implement API')) {
         return {
@@ -952,13 +952,14 @@ describe('TeamLeaderRunner with structuredCaller', () => {
       name: 'implement',
       persona: 'coder',
       personaDisplayName: 'coder',
-      tags: ['leader'],
+      tags: ['step'],
       instruction: 'Task: {task}',
       passPreviousResponse: true,
       teamLeader: {
         persona: 'team-leader',
         maxConcurrency: 2,
         timeoutMs: 1000,
+        leaderTags: ['leader'],
         partPersona: 'coder',
         partTags: ['coding', 'edit'],
       },

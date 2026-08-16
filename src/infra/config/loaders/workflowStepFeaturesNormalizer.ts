@@ -116,16 +116,8 @@ export function normalizeTeamLeader(
   const rawPersona = raw.persona?.trim();
   const personaDisplayName = personaSpec ? extractPersonaDisplayName(personaSpec) : undefined;
   const providerRoutingPersonaKey = rawPersona && rawPersona.length > 0 ? rawPersona : undefined;
-  const partTags = raw.part_tags?.map((tag, index) => {
-    const normalizedTag = tag.trim();
-    if (normalizedTag.length === 0) {
-      throw withWorkflowStepErrorPath(
-        new Error('team_leader.part_tags contains an empty entry'),
-        [...stepPath, 'team_leader', 'part_tags', index],
-      );
-    }
-    return normalizedTag;
-  });
+  const leaderTags = normalizeTeamLeaderTags(raw.leader_tags, 'leader_tags', stepPath);
+  const partTags = normalizeTeamLeaderTags(raw.part_tags, 'part_tags', stepPath);
 
   return {
     persona: personaSpec,
@@ -137,6 +129,7 @@ export function normalizeTeamLeader(
     ...(raw.fail_on_part_error !== undefined ? { failOnPartError: raw.fail_on_part_error } : {}),
     timeoutMs: raw.timeout_ms ?? 900000,
     inspectTools: normalizeTeamLeaderInspectTools(raw.inspect_tools, stepPath),
+    leaderTags,
     partPersona,
     partPersonaPath,
     partTags,
@@ -144,6 +137,23 @@ export function normalizeTeamLeader(
     partEdit: raw.part_edit,
     partPermissionMode: raw.part_permission_mode,
   };
+}
+
+function normalizeTeamLeaderTags(
+  tags: string[] | undefined,
+  fieldName: 'leader_tags' | 'part_tags',
+  stepPath: readonly PropertyKey[],
+): string[] | undefined {
+  return tags?.map((tag, index) => {
+    const normalizedTag = tag.trim();
+    if (normalizedTag.length === 0) {
+      throw withWorkflowStepErrorPath(
+        new Error(`team_leader.${fieldName} contains an empty entry`),
+        [...stepPath, 'team_leader', fieldName, index],
+      );
+    }
+    return normalizedTag;
+  });
 }
 
 function normalizeTeamLeaderField<T>(

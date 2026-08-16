@@ -43,6 +43,8 @@ export interface TeamLeaderConfig {
   timeoutMs: number;
   /** Read-only inspection tools for the parent decomposition call */
   inspectTools?: string[];
+  /** Provider routing tags for the team leader agent */
+  leaderTags?: string[];
   /** Persona reference for part agents */
   partPersona?: string;
   /** Resolved absolute path for part persona */
