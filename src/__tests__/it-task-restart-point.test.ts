@@ -150,6 +150,63 @@ function writeRootRestartLifecycleWorkflows(projectDir: string): void {
   ].join('\n'));
 }
 
+function writeStaticParallelRestartWorkflows(projectDir: string): void {
+  const personaDir = path.join(projectDir, '.takt', 'facets', 'personas');
+  fs.mkdirSync(personaDir, { recursive: true });
+  for (const persona of [
+    'parallel-parent-persona',
+    'parallel-worker-persona',
+    'child-initial-persona',
+    'child-review-persona',
+  ]) {
+    fs.writeFileSync(path.join(personaDir, `${persona}.md`), `You are ${persona}.\n`, 'utf-8');
+  }
+  writeWorkflow(projectDir, 'default.yaml', [
+    'name: default',
+    'initial_step: reviewers',
+    'max_steps: 10',
+    'steps:',
+    '  - name: reviewers',
+    '    persona: parallel-parent-persona',
+    '    instruction: Run reviewers',
+    '    parallel:',
+    '      - name: delegate',
+    '        kind: workflow_call',
+    '        call: child',
+    '        rules:',
+    '          - condition: COMPLETE',
+    '            next: COMPLETE',
+    '      - name: worker',
+    '        persona: parallel-worker-persona',
+    '        instruction: Run worker',
+    '        rules:',
+    '          - condition: when(true)',
+    '            next: COMPLETE',
+    '    rules:',
+    '      - condition: when(true)',
+    '        next: COMPLETE',
+  ].join('\n'));
+  writeWorkflow(projectDir, 'child.yaml', [
+    'name: child',
+    'subworkflow:',
+    '  callable: true',
+    'initial_step: prepare',
+    'steps:',
+    '  - name: prepare',
+    '    persona: child-initial-persona',
+    '    instruction: Prepare child',
+    '    rules:',
+    '      - condition: when(true)',
+    '        next: review',
+    '  - name: review',
+    '    persona: child-review-persona',
+    '    instruction: Review child',
+    '    rules:',
+    '      - condition: when(true)',
+    '        next: COMPLETE',
+  ].join('\n'));
+}
+
 function writeRestartExecutionWorkflows(projectDir: string): void {
   const personaDir = path.join(projectDir, '.takt', 'facets', 'personas');
   fs.mkdirSync(personaDir, { recursive: true });
@@ -1278,6 +1335,76 @@ describe('task restart persistence and execution resolution', () => {
 
     expect(success).toBe(true);
     expect(readStartedMockPersonas(mockCallLog)).toEqual(['child-first-persona']);
+    expect(getScenarioQueue()?.remaining).toBe(0);
+  });
+
+  it('should execute a persisted static parallel child leaf restart through ParallelRunner', async () => {
+    const projectDir = createProject();
+    writeStaticParallelRestartWorkflows(projectDir);
+    writeFailedTask(projectDir);
+    invalidateAllResolvedConfigCache();
+    const root = loadWorkflowByIdentifier('default', projectDir);
+    const child = loadWorkflowByIdentifier('child', projectDir);
+    if (root === null || child === null) {
+      throw new Error('Expected static parallel restart workflows');
+    }
+    const restartPoint: WorkflowRestartPoint = {
+      stack: [
+        buildWorkflowRestartPointEntry(root, 'reviewers', 'agent'),
+        buildWorkflowRestartPointEntry(root, 'delegate', 'workflow_call', 1),
+        buildWorkflowRestartPointEntry(child, 'review', 'agent'),
+      ],
+    };
+    const runner = new TaskRunner(projectDir);
+    runner.requeueTask(
+      'nested-retry',
+      ['failed'],
+      {
+        startStep: undefined,
+        retryNote: 'restart static parallel child leaf',
+        resumePoint: undefined,
+        workflow: undefined,
+        taskDir: undefined,
+        sourceRunSlug: undefined,
+        restartPoint,
+      },
+    );
+    const pending = runner.listPendingTaskItems()[0];
+    if (pending === undefined) {
+      throw new Error('Expected static parallel restart task');
+    }
+    const resolved = await resolveTaskExecution(pending, projectDir);
+
+    expect(pending.data?.restart_point).toEqual(restartPoint);
+    expect(resolved.restartPoint).toEqual(restartPoint);
+    expect(resolved.startStep).toBe('reviewers');
+
+    const mockCallLog = path.join(projectDir, 'static-parallel-mock-calls.ndjson');
+    process.env.TAKT_MOCK_CALL_LOG = mockCallLog;
+    setMockScenario([
+      { persona: 'child-review-persona', status: 'done', content: 'child review complete' },
+      { persona: 'parallel-worker-persona', status: 'done', content: 'worker complete' },
+    ]);
+    const running = runner.claimNextTasks(1)[0];
+    if (running === undefined) {
+      throw new Error('Expected static parallel restart task to be claimed');
+    }
+
+    const success = await executeAndCompleteTask(
+      running,
+      runner,
+      projectDir,
+      { provider: 'mock' },
+      { outputMode: 'silent' },
+    );
+
+    expect(success).toBe(true);
+    const startedPersonas = readStartedMockPersonas(mockCallLog);
+    expect([...startedPersonas].sort()).toEqual([
+      'child-review-persona',
+      'parallel-worker-persona',
+    ].sort());
+    expect(startedPersonas).not.toContain('child-initial-persona');
     expect(getScenarioQueue()?.remaining).toBe(0);
   });
 

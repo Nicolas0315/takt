@@ -10,7 +10,10 @@ import { MAX_WORKFLOW_CALL_DEPTH } from '../core/workflow/workflow-call-depth.js
 import {
   selectTaskRetryStart,
 } from '../features/tasks/list/taskRetryStartSelection.js';
-import { validateTaskRetryRestartPoint } from '../features/tasks/taskRetryStartPath.js';
+import {
+  TaskRetryRestartTree,
+  validateTaskRetryRestartPoint,
+} from '../features/tasks/taskRetryStartPath.js';
 import type { SelectOptionItem } from '../shared/prompt/index.js';
 import { attachWorkflowOpaqueRef } from '../infra/config/loaders/workflowSourceMetadata.js';
 
@@ -290,7 +293,10 @@ describe('task retry start tree selection', () => {
         return findLeaf(options, 'delegate').value;
       }
 
+      expect(options.length).toBeLessThanOrEqual(50);
       expect(options.some((option) => option.value === 'resume-checkpoint')).toBe(true);
+      expect(options.some((option) => option.label.trim() === 'delegate')).toBe(true);
+      expect(options.some((option) => option.label.trim() === 'review')).toBe(true);
       expect(defaultValue).toBe('resume-checkpoint');
       return 'resume-checkpoint';
     });
@@ -495,7 +501,131 @@ describe('task retry start tree selection', () => {
     expect(result?.selection.kind).toBe('restart');
   });
 
-  it('should keep static parallel child leaves out of authored restart selections', async () => {
+  it('should retain an expanded static parallel child beside an earlier default leaf', () => {
+    const child = makeWorkflow({
+      name: 'child',
+      ref: 'project:child',
+      callable: true,
+      steps: [agentStep('review')],
+    });
+    const root = makeWorkflow({
+      name: 'default',
+      ref: 'project:root',
+      initialStep: 'target',
+      steps: [
+        agentStep('target'),
+        ...Array.from({ length: 48 }, (_, index) => agentStep(`step-${index}`)),
+        parallelStep('reviewers', [callStep('delegate', 'child')]),
+        agentStep('after'),
+      ],
+    });
+    mockResolveWorkflowCallTarget.mockReturnValue(child);
+    const tree = new TaskRetryRestartTree(root, pathContext, undefined, {});
+
+    const initialNodes = tree.getVisibleNodes();
+    const parallelParent = initialNodes.find((node) => (
+      node.kind === 'leaf' && node.step.name === 'reviewers'
+    ));
+    expect(initialNodes).toHaveLength(50);
+    expect(parallelParent).toBeDefined();
+
+    expect(tree.handleKeyPress(parallelParent!.value, '\x1B[B')).toBe(true);
+    const expandedParallelNodes = tree.getVisibleNodes();
+    const delegate = expandedParallelNodes.find((node) => (
+      node.kind === 'navigation' && node.step.name === 'delegate'
+    ));
+    expect(delegate).toBeDefined();
+    if (delegate?.kind !== 'navigation') {
+      throw new Error('Expected the static parallel workflow call to be navigable');
+    }
+
+    tree.toggleNavigation(delegate);
+    const expandedCallNodes = tree.getVisibleNodes();
+    const target = expandedCallNodes.find((node) => (
+      node.kind === 'leaf' && node.step.name === 'target'
+    ));
+
+    expect(expandedCallNodes.length).toBeLessThanOrEqual(50);
+    expect(target).toBeDefined();
+    expect(expandedCallNodes.some((node) => node.step.name === 'reviewers')).toBe(true);
+    expect(expandedCallNodes.some((node) => node.step.name === 'delegate')).toBe(true);
+    expect(expandedCallNodes.some((node) => node.step.name === 'review')).toBe(true);
+    expect(tree.getDefaultValue()).toBe(target!.value);
+  });
+
+  it('should retain the target when the public picker expands a static parallel child', async () => {
+    const child = makeWorkflow({
+      name: 'child',
+      ref: 'project:child',
+      callable: true,
+      steps: [agentStep('review')],
+    });
+    const root = makeWorkflow({
+      name: 'default',
+      ref: 'project:root',
+      initialStep: 'target',
+      steps: [
+        agentStep('target'),
+        ...Array.from({ length: 48 }, (_, index) => agentStep(`step-${index}`)),
+        parallelStep('reviewers', [callStep('delegate', 'child')]),
+        agentStep('after'),
+      ],
+    });
+    mockResolveWorkflowCallTarget.mockReturnValue(child);
+    let promptCount = 0;
+
+    const result = await selectTaskRetryStart(root, pathContext, async (
+      _message,
+      options,
+      defaultValue,
+      callbacks,
+    ) => {
+      promptCount += 1;
+      if (promptCount === 1) {
+        const parallelParent = findLeaf(options, 'reviewers');
+        const onKeyPress = callbacks?.onKeyPress;
+        if (onKeyPress === undefined) {
+          throw new Error('Expected the selector key callback');
+        }
+        const expandedOptions = onKeyPress(
+          '\x1B[B',
+          parallelParent.value,
+          options.indexOf(parallelParent),
+        );
+        if (expandedOptions === null) {
+          throw new Error('Expected static parallel expansion to update options');
+        }
+        const delegate = expandedOptions.find((option) => option.label.trim() === 'delegate');
+        if (delegate === undefined) {
+          throw new Error('Expected the expanded workflow call navigation');
+        }
+        return delegate.value;
+      }
+
+      expect(options.length).toBeLessThanOrEqual(50);
+      expect(options.some((option) => option.label.trim() === 'target')).toBe(true);
+      expect(options.some((option) => option.label.trim() === 'reviewers')).toBe(true);
+      expect(options.some((option) => option.label.trim() === 'delegate')).toBe(true);
+      const target = findLeaf(options, 'target');
+      expect(defaultValue).toBe(target.value);
+      return target.value;
+    });
+
+    expect(promptCount).toBe(2);
+    expect(result?.selection.kind).toBe('restart');
+    if (result?.selection.kind !== 'restart') {
+      throw new Error('Expected an authored restart selection');
+    }
+    expect(result.selection.restartPoint.stack).toHaveLength(1);
+    expect(result.selection.restartPoint.stack.at(-1)).toMatchObject({
+      workflow: 'default',
+      workflow_ref: 'project:root',
+      step: 'target',
+      kind: 'agent',
+    });
+  });
+
+  it('should select and validate a static parallel child leaf as an authored restart', async () => {
     const child = makeWorkflow({
       name: 'child',
       ref: 'project:child',
@@ -530,8 +660,8 @@ describe('task retry start tree selection', () => {
         return updatedOptions!.find((option) => option.label.trim() === 'delegate')!.value;
       }
 
-      expect(observedOptions.some((option) => option.label.trim() === 'review')).toBe(false);
-      return findLeaf(options, 'reviewers').value;
+      expect(observedOptions.some((option) => option.label.trim() === 'review')).toBe(true);
+      return findLeaf(options, 'review').value;
     });
 
     expect(promptCount).toBe(2);
@@ -539,12 +669,278 @@ describe('task retry start tree selection', () => {
     if (result?.selection.kind !== 'restart') {
       throw new Error('Expected an authored restart selection');
     }
-    expect(result.selection.restartPoint.stack).toHaveLength(1);
+    expect(result.selection.restartPoint.stack).toHaveLength(3);
+    expect(result.selection.restartPoint.stack.map((entry) => entry.step)).toEqual([
+      'reviewers',
+      'delegate',
+      'review',
+    ]);
     expect(() => validateTaskRetryRestartPoint(
       root,
       result.selection.restartPoint,
       pathContext,
     )).not.toThrow();
+  });
+
+  it('TRSPB-DIRECT-PARTIAL-DOWN should move from a partial child window to its next leaf', async () => {
+    const child = makeWorkflow({
+      name: 'child',
+      ref: 'project:child',
+      callable: true,
+      steps: [agentStep('child-0'), agentStep('child-1')],
+    });
+    const root = makeWorkflow({
+      name: 'default',
+      ref: 'project:root',
+      steps: [
+        ...Array.from({ length: 49 }, (_, index) => agentStep(`root-${index}`)),
+        callStep('delegate', 'child'),
+      ],
+    });
+    mockResolveWorkflowCallTarget.mockReturnValue(child);
+    let promptCount = 0;
+
+    const result = await selectTaskRetryStart(root, pathContext, async (
+      _message,
+      options,
+      _defaultValue,
+      callbacks,
+    ) => {
+      promptCount += 1;
+      expect(options.length).toBeLessThanOrEqual(50);
+
+      if (promptCount === 1) {
+        expect(options).toHaveLength(50);
+        expect(options.some((option) => option.label.trim() === 'child-0')).toBe(false);
+        return findLeaf(options, 'delegate').value;
+      }
+
+      const firstChildLeaf = findLeaf(options, 'child-0');
+      expect(options.at(-1)?.label.trim()).toBe('child-0');
+      const updatedOptions = callbacks?.onKeyPress?.(
+        '\x1B[B',
+        firstChildLeaf.value,
+        options.indexOf(firstChildLeaf),
+      );
+      expect(updatedOptions).not.toBeNull();
+      expect(updatedOptions!.length).toBeLessThanOrEqual(50);
+      expect(updatedOptions!.some((option) => option.label.trim() === 'child-0')).toBe(false);
+      expect(updatedOptions!.at(-1)?.label.trim()).toBe('child-1');
+      return findLeaf(updatedOptions!, 'child-1').value;
+    });
+
+    expect(promptCount).toBe(2);
+    expect(result?.selection.kind).toBe('restart');
+    if (result?.selection.kind !== 'restart') {
+      throw new Error('Expected an authored restart selection');
+    }
+    expect(result.selection.restartPoint.stack.at(-1)).toMatchObject({
+      workflow: 'child',
+      workflow_ref: 'project:child',
+      step: 'child-1',
+      kind: 'agent',
+    });
+    expect(() => validateTaskRetryRestartPoint(
+      root,
+      result.selection.restartPoint,
+      pathContext,
+    )).not.toThrow();
+  });
+
+  it('TRSPB-STATIC-PARTIAL-DOWN should move from a static parallel child window to its next leaf', async () => {
+    const child = makeWorkflow({
+      name: 'child',
+      ref: 'project:child',
+      callable: true,
+      steps: [agentStep('child-0'), agentStep('child-1')],
+    });
+    const root = makeWorkflow({
+      name: 'default',
+      ref: 'project:root',
+      steps: [
+        ...Array.from({ length: 48 }, (_, index) => agentStep(`root-${index}`)),
+        parallelStep('reviewers', [callStep('delegate', 'child')]),
+      ],
+    });
+    mockResolveWorkflowCallTarget.mockReturnValue(child);
+    let promptCount = 0;
+
+    const result = await selectTaskRetryStart(root, pathContext, async (
+      _message,
+      options,
+      _defaultValue,
+      callbacks,
+    ) => {
+      promptCount += 1;
+      expect(options.length).toBeLessThanOrEqual(50);
+
+      if (promptCount === 1) {
+        const parallelParent = findLeaf(options, 'reviewers');
+        const expandedOptions = callbacks?.onKeyPress?.(
+          '\x1B[B',
+          parallelParent.value,
+          options.indexOf(parallelParent),
+        );
+        expect(expandedOptions).not.toBeNull();
+        expect(expandedOptions!.some((option) => option.label.trim() === 'delegate')).toBe(true);
+        return findLeaf(expandedOptions!, 'delegate').value;
+      }
+
+      const firstChildLeaf = findLeaf(options, 'child-0');
+      expect(options.at(-1)?.label.trim()).toBe('child-0');
+      const updatedOptions = callbacks?.onKeyPress?.(
+        '\x1B[B',
+        firstChildLeaf.value,
+        options.indexOf(firstChildLeaf),
+      );
+      expect(updatedOptions).not.toBeNull();
+      expect(updatedOptions!.length).toBeLessThanOrEqual(50);
+      expect(updatedOptions!.some((option) => option.label.trim() === 'child-0')).toBe(false);
+      expect(updatedOptions!.at(-1)?.label.trim()).toBe('child-1');
+      return findLeaf(updatedOptions!, 'child-1').value;
+    });
+
+    expect(promptCount).toBe(2);
+    expect(result?.selection.kind).toBe('restart');
+    if (result?.selection.kind !== 'restart') {
+      throw new Error('Expected an authored restart selection');
+    }
+    expect(result.selection.restartPoint.stack.map((entry) => entry.step)).toEqual([
+      'reviewers',
+      'delegate',
+      'child-1',
+    ]);
+    expect(result.selection.restartPoint.stack.at(-1)?.kind).toBe('agent');
+    expect(() => validateTaskRetryRestartPoint(
+      root,
+      result.selection.restartPoint,
+      pathContext,
+    )).not.toThrow();
+  });
+
+  it('should move across sparse static parallel calls using visible offsets', async () => {
+    const child = makeWorkflow({
+      name: 'child',
+      ref: 'project:child',
+      callable: true,
+      steps: [agentStep('review')],
+    });
+    const sparseSubSteps = [
+      callStep('call-0', 'child'),
+      ...Array.from({ length: 99 }, (_, index) => agentStep(`worker-${index + 1}`)),
+      callStep('call-100', 'child'),
+      ...Array.from({ length: 49 }, (_, index) => callStep(`call-${index + 101}`, 'child')),
+    ];
+    const root = makeWorkflow({
+      name: 'default',
+      ref: 'project:root',
+      steps: [parallelStep('reviewers', sparseSubSteps)],
+    });
+    mockResolveWorkflowCallTarget.mockReturnValue(child);
+    let promptCount = 0;
+
+    const result = await selectTaskRetryStart(root, pathContext, async (
+      _message,
+      options,
+      _defaultValue,
+      callbacks,
+    ) => {
+      promptCount += 1;
+      expect(options.length).toBeLessThanOrEqual(50);
+      expect(new Set(options.map((option) => option.value)).size).toBe(options.length);
+      expect(options.some((option) => option.label.trim().startsWith('worker-'))).toBe(false);
+
+      if (promptCount === 1) {
+        const parent = findLeaf(options, 'reviewers');
+        const expanded = callbacks?.onKeyPress?.(
+          '\x1B[B',
+          parent.value,
+          options.indexOf(parent),
+        );
+        expect(expanded).not.toBeNull();
+        expect(expanded?.some((option) => option.label.trim() === 'call-0')).toBe(true);
+        expect(expanded?.some((option) => option.label.trim() === 'call-100')).toBe(true);
+        return findLeaf(expanded!, 'call-0').value;
+      }
+
+      if (promptCount === 2) {
+        const childLeaf = findLeaf(options, 'review');
+        const shifted = callbacks?.onKeyPress?.(
+          '\x1B[B',
+          childLeaf.value,
+          options.indexOf(childLeaf),
+        );
+        expect(shifted).not.toBeNull();
+        expect(new Set(shifted!.map((option) => option.value)).size).toBe(shifted!.length);
+        expect(shifted?.some((option) => option.label.trim() === 'call-0')).toBe(false);
+        expect(shifted?.some((option) => option.label.trim() === 'call-100')).toBe(true);
+        return findLeaf(shifted!, 'call-100').value;
+      }
+
+      if (promptCount === 3) {
+        const childLeaf = findLeaf(options, 'review');
+        const shiftedBack = callbacks?.onKeyPress?.(
+          '\x1B[A',
+          childLeaf.value,
+          options.indexOf(childLeaf),
+        );
+        expect(shiftedBack).not.toBeNull();
+        expect(new Set(shiftedBack!.map((option) => option.value)).size).toBe(shiftedBack!.length);
+        expect(shiftedBack?.some((option) => option.label.trim() === 'call-0')).toBe(true);
+        return findLeaf(shiftedBack!, 'reviewers').value;
+      }
+
+      throw new Error(`Unexpected picker prompt ${promptCount}`);
+    });
+
+    expect(promptCount).toBe(3);
+    expect(result?.selection.kind).toBe('restart');
+  });
+
+  it('should expose only workflow_call candidates in a sparse static parallel window', async () => {
+    const child = makeWorkflow({
+      name: 'child',
+      ref: 'project:child',
+      callable: true,
+      steps: [agentStep('review')],
+    });
+    const root = makeWorkflow({
+      name: 'default',
+      ref: 'project:root',
+      steps: [parallelStep('reviewers', [
+        callStep('call-0', 'child'),
+        ...Array.from({ length: 99 }, (_, index) => agentStep(`worker-${index + 1}`)),
+        callStep('call-100', 'child'),
+      ])],
+    });
+    mockResolveWorkflowCallTarget.mockReturnValue(child);
+
+    let promptCount = 0;
+    await selectTaskRetryStart(root, pathContext, async (
+      _message,
+      options,
+      _defaultValue,
+      callbacks,
+    ) => {
+      promptCount += 1;
+      expect(options.length).toBeLessThanOrEqual(50);
+      expect(options.some((option) => option.label.trim() === 'worker-50')).toBe(false);
+      if (promptCount === 1) {
+        const parent = findLeaf(options, 'reviewers');
+        const expanded = callbacks?.onKeyPress?.(
+          '\x1B[B',
+          parent.value,
+          options.indexOf(parent),
+        );
+        expect(expanded).not.toBeNull();
+        expect(expanded?.some((option) => option.label.trim() === 'call-0')).toBe(true);
+        expect(expanded?.some((option) => option.label.trim() === 'call-100')).toBe(true);
+        return parent.value;
+      }
+      return findLeaf(options, 'reviewers').value;
+    });
+
+    expect(promptCount).toBe(1);
   });
 
   it('should keep a late static parallel Resume leaf in the initial window', async () => {
@@ -1138,7 +1534,33 @@ describe('task retry start tree selection', () => {
     ]);
     expect(result).toEqual({
       label: childInitial.label,
-      selection: { kind: 'resume', resumePoint },
+      selection: {
+        kind: 'restart',
+        restartPoint: {
+          stack: [
+            {
+              workflow: 'default',
+              workflow_ref: 'project:root',
+              step: 'delegate',
+              kind: 'workflow_call',
+              call_instance: 1,
+            },
+            {
+              workflow: 'child',
+              workflow_ref: 'project:child',
+              step: 'delegate',
+              kind: 'workflow_call',
+              call_instance: 1,
+            },
+            {
+              workflow: 'grandchild',
+              workflow_ref: 'project:grandchild',
+              step: 'review',
+              kind: 'agent',
+            },
+          ],
+        },
+      },
     });
   });
 
@@ -1180,7 +1602,77 @@ describe('task retry start tree selection', () => {
     const childInitial = findLeaf(observedOptions, 'review');
     expect(observedDefault).toBe(childInitial.value);
     expect(observedDefault).not.toBe(firstLeaf.value);
-    expect(result?.selection.kind).toBe('resume');
+    expect(result).toEqual({
+      label: childInitial.label,
+      selection: {
+        kind: 'restart',
+        restartPoint: {
+          stack: [
+            {
+              workflow: 'default',
+              workflow_ref: 'project:root',
+              step: 'delegate',
+              kind: 'workflow_call',
+              call_instance: 1,
+            },
+            {
+              workflow: 'child',
+              workflow_ref: 'project:child',
+              step: 'review',
+              kind: 'agent',
+            },
+          ],
+        },
+      },
+    });
+  });
+
+  it.each([
+    {
+      description: 'effect-backed system',
+      initialStep: 'publish',
+      step: systemStep('publish', [{ type: 'merge_pr', pr: 42 }]),
+    },
+    {
+      description: 'synthesized agent',
+      initialStep: 'engine-step',
+      step: synthesizedAgentStep('engine-step'),
+    },
+  ])('should reject a terminal workflow call whose child initial is an unrestartable $description', async ({
+    initialStep,
+    step,
+  }) => {
+    const child = makeWorkflow({
+      name: 'child',
+      ref: 'project:child',
+      callable: true,
+      initialStep,
+      steps: [step, agentStep('finish')],
+    });
+    const root = makeWorkflow({
+      name: 'default',
+      ref: 'project:root',
+      steps: [agentStep('plan'), callStep('delegate', 'child')],
+    });
+    const resumePoint = resumePointWithStack([{
+      workflow: 'default',
+      workflow_ref: 'project:root',
+      step: 'delegate',
+      kind: 'workflow_call',
+      occurrence: 1,
+      call_instance: 1,
+    }]);
+    mockResolveWorkflowCallTarget.mockReturnValue(child);
+    let selectorCalled = false;
+
+    await expect(selectTaskRetryStart(root, {
+      ...pathContext,
+      resumePoint,
+    }, async () => {
+      selectorCalled = true;
+      return null;
+    })).rejects.toThrow('Task retry resume path cannot be resolved');
+    expect(selectorCalled).toBe(false);
   });
 
   it('should replace bounded windows while reaching a deep leaf without page actions', async () => {
@@ -1608,6 +2100,62 @@ describe('task retry start tree selection', () => {
     await expect(selectTaskRetryStart(root, pathContext, async () => null)).rejects.toThrow();
   });
 
+  it('should continue after collapsing and reopening a workflow-call navigation', async () => {
+    const child = makeWorkflow({
+      name: 'child',
+      ref: 'project:child',
+      callable: true,
+      steps: [agentStep('review')],
+    });
+    const root = makeWorkflow({
+      name: 'default',
+      ref: 'project:root',
+      steps: [callStep('delegate', 'child')],
+    });
+    mockResolveWorkflowCallTarget.mockReturnValue(child);
+    let promptCount = 0;
+    let navigationValue: string | undefined;
+
+    const result = await selectTaskRetryStart(root, pathContext, async (
+      _message,
+      options,
+      defaultValue,
+    ) => {
+      promptCount += 1;
+      const navigation = findLeaf(options, 'delegate');
+
+      if (promptCount === 1) {
+        expect(options.some((option) => option.label.trim() === 'review')).toBe(true);
+        navigationValue = navigation.value;
+        return navigation.value;
+      }
+
+      if (promptCount === 2) {
+        expect(options).toHaveLength(1);
+        expect(navigation.value).toBe(navigationValue);
+        expect(defaultValue).toBe(navigationValue);
+        return navigation.value;
+      }
+
+      expect(options.some((option) => option.label.trim() === 'review')).toBe(true);
+      const review = findLeaf(options, 'review');
+      expect(defaultValue).toBe(review.value);
+      return review.value;
+    });
+
+    expect(promptCount).toBe(3);
+    expect(result?.selection.kind).toBe('restart');
+    if (result?.selection.kind !== 'restart') {
+      throw new Error('Expected an authored restart selection');
+    }
+    expect(result.selection.restartPoint.stack.at(-1)).toMatchObject({
+      workflow: 'child',
+      workflow_ref: 'project:child',
+      step: 'review',
+      kind: 'agent',
+    });
+  });
+
   it('should fail once when an expanded child has no selectable leaf', async () => {
     const child = makeWorkflow({
       name: 'child',
@@ -1830,6 +2378,52 @@ describe('persisted task retry restart validation', () => {
 
     expect(() => validateTaskRetryRestartPoint(root, restartPoint, pathContext))
       .toThrow('Restart path cannot continue after non-call step "plan"');
+  });
+
+  it('should reject dynamic and non-call static parallel continuations', () => {
+    const child = makeWorkflow({
+      name: 'child',
+      ref: 'project:child',
+      callable: true,
+      steps: [agentStep('finish')],
+    });
+    const dynamicRoot = makeWorkflow({
+      name: 'default',
+      ref: 'project:root',
+      steps: [{
+        ...agentStep('reviewers'),
+        parallel: {
+          kind: 'dynamic',
+          fixed: [agentStep('fixed')],
+          pool: [{ ...agentStep('delegate'), description: 'delegate' }],
+          selection: { mode: 'replace' },
+        },
+      } as WorkflowStep],
+    });
+    const staticRoot = makeWorkflow({
+      name: 'default',
+      ref: 'project:root',
+      steps: [parallelStep('reviewers', [agentStep('worker')])],
+    });
+    const dynamicPath: WorkflowRestartPoint = {
+      stack: [
+        rootRestartPoint('reviewers').stack[0]!,
+        { workflow: 'default', workflow_ref: 'project:root', step: 'delegate', kind: 'agent' },
+        { workflow: 'child', workflow_ref: 'project:child', step: 'finish', kind: 'agent' },
+      ],
+    };
+    const staticPath: WorkflowRestartPoint = {
+      stack: [
+        rootRestartPoint('reviewers').stack[0]!,
+        { workflow: 'default', workflow_ref: 'project:root', step: 'worker', kind: 'agent' },
+        { workflow: 'child', workflow_ref: 'project:child', step: 'finish', kind: 'agent' },
+      ],
+    };
+
+    expect(() => validateTaskRetryRestartPoint(dynamicRoot, dynamicPath, pathContext))
+      .toThrow('Restart path cannot continue after non-call step "reviewers"');
+    expect(() => validateTaskRetryRestartPoint(staticRoot, staticPath, pathContext))
+      .toThrow('Restart path cannot continue after non-call step "reviewers"');
   });
 
   it('should reject a nested restart path when the resolved child workflow is not callable', () => {

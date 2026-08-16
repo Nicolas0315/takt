@@ -17,6 +17,7 @@ import {
 } from '../taskRetryStartPath.js';
 
 const RESUME_SELECTION_VALUE = 'resume-checkpoint';
+const TASK_RETRY_RESUME_PATH_UNRESOLVED_ERROR = 'Task retry resume path cannot be resolved';
 
 export type TaskRetryStartSelection =
   | { kind: 'resume'; resumePoint: WorkflowResumePoint }
@@ -64,7 +65,7 @@ function resolveSelectableResumePoint(
   );
   if (resolvedPath === undefined) {
     if (resumePoint.stack.at(-1)?.kind === 'workflow_call') {
-      throw new Error('Task retry resume path cannot be resolved');
+      throw new Error(TASK_RETRY_RESUME_PATH_UNRESOLVED_ERROR);
     }
     return undefined;
   }
@@ -86,6 +87,7 @@ function projectTree(
 ): ProjectedTree {
   const options: SelectOptionItem<string>[] = [];
   const selections = new Map<string, TaskRetryStartSelection>();
+  const isCallTerminatedResume = resumePath?.resumePoint.stack.at(-1)?.kind === 'workflow_call';
 
   for (const node of nodes) {
     const label = getNodeLabel(node);
@@ -99,10 +101,15 @@ function projectTree(
       continue;
     }
     if (!node.isRestartable && !node.isResumeCandidate) continue;
+    if (node.isResumeCandidate && isCallTerminatedResume && !node.isRestartable) {
+      throw new Error(TASK_RETRY_RESUME_PATH_UNRESOLVED_ERROR);
+    }
 
     const value = node.isResumeCandidate ? RESUME_SELECTION_VALUE : node.value;
     const selection = node.isResumeCandidate
-      ? { kind: 'resume' as const, resumePoint: resumePath!.resumePoint }
+      ? isCallTerminatedResume
+        ? { kind: 'restart' as const, restartPoint: node.restartPoint }
+        : { kind: 'resume' as const, resumePoint: resumePath!.resumePoint }
       : { kind: 'restart' as const, restartPoint: node.restartPoint };
     options.push({
       label,
@@ -178,9 +185,6 @@ export async function selectTaskRetryStart(
       }
       tree.toggleNavigation(navigation);
       projected = projectTree(rootWorkflow, tree.getVisibleNodes(), resumePath);
-      if (projected.selections.size === 0) {
-        throw new Error(`Workflow "${rootWorkflow.name}" has no selectable retry positions`);
-      }
       continue;
     }
 

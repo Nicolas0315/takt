@@ -2094,7 +2094,7 @@ describe('retryFailedTask', () => {
     );
   });
 
-  it('should requeue task with task.data.resume_point when save_task keeps the root workflow_call step', async () => {
+  it('should requeue task with a stateless nested restart path when save_task selects a child leaf', async () => {
     const resumePoint = {
       version: 2 as const,
       stack: [
@@ -2106,18 +2106,28 @@ describe('retryFailedTask', () => {
           occurrence: 1,
           call_instance: 1,
         },
-        {
-          workflow: 'takt/coding',
-          workflow_ref: 'takt/coding',
-          step: 'review',
-          kind: 'agent' as const,
-          occurrence: 1,
-        },
       ],
       iteration: 7,
       elapsed_ms: 183245,
       workflow_call_invocations: {},
       workflow_step_participations: {},
+    };
+    const restartPoint = {
+      stack: [
+        {
+          workflow: 'default',
+          workflow_ref: 'default',
+          step: 'delegate',
+          kind: 'workflow_call' as const,
+          call_instance: 1,
+        },
+        {
+          workflow: 'takt/coding',
+          workflow_ref: 'takt/coding',
+          step: 'review',
+          kind: 'agent' as const,
+        },
+      ],
     };
     mockLoadWorkflowByIdentifier.mockReturnValue({
       ...defaultWorkflowConfig,
@@ -2148,11 +2158,11 @@ describe('retryFailedTask', () => {
       {
         startStep: undefined,
         retryNote: '追加指示A',
-        resumePoint: resumePoint,
+        resumePoint: undefined,
         workflow: undefined,
         taskDir: undefined,
         sourceRunSlug: 'run-1',
-        restartPoint: undefined,
+        restartPoint,
       },
     );
     expect(mockStartReExecution).not.toHaveBeenCalled();

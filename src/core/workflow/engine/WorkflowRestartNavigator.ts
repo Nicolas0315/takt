@@ -5,6 +5,7 @@ import type {
   WorkflowResumePointEntry,
   WorkflowStep,
 } from '../../models/types.js';
+import { isDynamicParallelSubSteps } from '../../models/index.js';
 import { getWorkflowStepKind, isWorkflowCallStep } from '../step-kind.js';
 import {
   getWorkflowReference,
@@ -15,6 +16,7 @@ import { isWorkflowRestartTarget } from '../workflow-restart-target.js';
 
 export class WorkflowRestartNavigator {
   private active = true;
+  private readonly staticParallelTargetCalls = new Map<number, WorkflowRestartPointEntry>();
 
   constructor(private readonly restartPoint: WorkflowRestartPoint) {}
 
@@ -34,10 +36,14 @@ export class WorkflowRestartNavigator {
       );
     }
     if (!isWorkflowCallStep(targetStep)) {
-      if (this.restartPoint.stack.length !== 1) {
+      const targetCall = this.findStaticParallelTargetCall(targetStep, 1);
+      if (targetCall !== undefined) {
+        this.staticParallelTargetCalls.set(0, targetCall);
+      } else if (this.restartPoint.stack.length !== 1) {
         throw new Error(`Restart path cannot continue after non-call step "${rootEntry.step}"`);
+      } else {
+        this.active = false;
       }
-      this.active = false;
     }
     return targetStep.name;
   }
@@ -49,6 +55,9 @@ export class WorkflowRestartNavigator {
     if (!this.active) {
       return undefined;
     }
+    if (this.isStaticParallelSiblingCall(callStack)) {
+      return undefined;
+    }
     this.assertCallStackMatches(callStack);
 
     const nextEntry = this.restartPoint.stack[callStack.length];
@@ -58,10 +67,14 @@ export class WorkflowRestartNavigator {
     }
     const targetStep = this.resolveEntryStep(nextEntry, childWorkflow, 'child');
     if (!isWorkflowCallStep(targetStep)) {
-      if (callStack.length + 1 !== this.restartPoint.stack.length) {
+      const targetCall = this.findStaticParallelTargetCall(targetStep, callStack.length + 1);
+      if (targetCall !== undefined) {
+        this.staticParallelTargetCalls.set(callStack.length, targetCall);
+      } else if (callStack.length + 1 !== this.restartPoint.stack.length) {
         throw new Error(`Restart path cannot continue after non-call step "${nextEntry.step}"`);
+      } else {
+        this.active = false;
       }
-      this.active = false;
     }
     return targetStep.name;
   }
@@ -97,15 +110,70 @@ export class WorkflowRestartNavigator {
     for (let index = 0; index < callStack.length; index += 1) {
       const runtimeEntry = callStack[index]!;
       const selectedEntry = this.restartPoint.stack[index]!;
+      const isStaticParallelParent = this.staticParallelTargetCalls.has(index);
+      const kindMatches = runtimeEntry.kind === selectedEntry.kind
+        || (isStaticParallelParent
+          && selectedEntry.kind === 'agent'
+          && runtimeEntry.kind === 'parallel');
       if (
         !workflowRestartEntryMatchesRuntime(runtimeEntry, selectedEntry)
         || runtimeEntry.step !== selectedEntry.step
-        || runtimeEntry.kind !== selectedEntry.kind
+        || !kindMatches
       ) {
         throw new Error(
           `Runtime workflow_call stack does not match restart path at "${selectedEntry.workflow} > ${selectedEntry.step}"`,
         );
       }
     }
+  }
+
+  private findStaticParallelTargetCall(
+    parentStep: WorkflowStep,
+    nextEntryIndex: number,
+  ): WorkflowRestartPointEntry | undefined {
+    const nextEntry = this.restartPoint.stack[nextEntryIndex];
+    if (
+      nextEntry === undefined
+      || isWorkflowCallStep(parentStep)
+      || parentStep.parallel === undefined
+      || isDynamicParallelSubSteps(parentStep.parallel)
+    ) {
+      return undefined;
+    }
+    const subStep = parentStep.parallel.find((candidate) => (
+      candidate.name === nextEntry.step
+      && getWorkflowStepKind(candidate) === nextEntry.kind
+    ));
+    return subStep !== undefined && isWorkflowCallStep(subStep) ? nextEntry : undefined;
+  }
+
+  private isStaticParallelSiblingCall(
+    callStack: readonly WorkflowResumePointEntry[],
+  ): boolean {
+    for (const [parentIndex, targetCall] of this.staticParallelTargetCalls) {
+      const runtimeParent = callStack[parentIndex];
+      const runtimeCall = callStack[parentIndex + 1];
+      const selectedParent = this.restartPoint.stack[parentIndex];
+      if (
+        runtimeParent === undefined
+        || runtimeCall === undefined
+        || selectedParent === undefined
+        || !workflowRestartEntryMatchesRuntime(runtimeParent, selectedParent)
+        || runtimeParent.workflow_ref !== selectedParent.workflow_ref
+        || runtimeParent.step !== selectedParent.step
+        || runtimeParent.kind !== 'parallel'
+        || selectedParent.kind !== 'agent'
+      ) {
+        continue;
+      }
+      if (
+        runtimeCall.kind === 'workflow_call'
+        && runtimeCall.workflow_ref === targetCall.workflow_ref
+        && runtimeCall.step !== targetCall.step
+      ) {
+        return true;
+      }
+    }
+    return false;
   }
 }

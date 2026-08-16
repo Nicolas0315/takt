@@ -4,6 +4,7 @@ import type {
   WorkflowConfig,
   WorkflowRestartPoint,
   WorkflowResumePointEntry,
+  WorkflowStep,
   WorkflowState,
 } from '../core/models/index.js';
 import { WorkflowCallExecutor } from '../core/workflow/engine/WorkflowCallExecutor.js';
@@ -50,6 +51,15 @@ function makeCallStep(name: string, call: string): WorkflowCallStep {
   };
 }
 
+function makeParallelStep(name: string, parallel: WorkflowStep[]): WorkflowStep {
+  return {
+    name,
+    persona: `${name}-persona`,
+    instruction: `${name} instruction`,
+    parallel,
+  };
+}
+
 function makeRuntimeCallEntry(
   workflow: string,
   step: string,
@@ -64,6 +74,20 @@ function makeRuntimeCallEntry(
     occurrence: callInstance,
     call_instance: callInstance,
     ...(stepIterations === undefined ? {} : { step_iterations: stepIterations }),
+  };
+}
+
+function makeRuntimeParallelEntry(
+  workflow: string,
+  step: string,
+  occurrence = 1,
+): WorkflowResumePointEntry {
+  return {
+    workflow,
+    workflow_ref: workflow,
+    step,
+    kind: 'parallel',
+    occurrence,
   };
 }
 
@@ -240,6 +264,105 @@ async function consumeNestedWorkflowCallRestart() {
 }
 
 describe('WorkflowCallExecutor nested restart contract', () => {
+  it('should continue through a static parallel parent to the selected child leaf', () => {
+    const root = makeWorkflow('default', 'reviewers', [
+      makeParallelStep('reviewers', [makeCallStep('delegate', 'coding')]),
+    ]);
+    const child = makeWorkflow('coding', 'review', [
+      { name: 'review', persona: 'reviewer', instruction: 'Review' },
+    ]);
+    const restartPoint: WorkflowRestartPoint = {
+      stack: [
+        { workflow: 'default', workflow_ref: 'default', step: 'reviewers', kind: 'agent' },
+        {
+          workflow: 'default',
+          workflow_ref: 'default',
+          step: 'delegate',
+          kind: 'workflow_call',
+          call_instance: 1,
+        },
+        { workflow: 'coding', workflow_ref: 'coding', step: 'review', kind: 'agent' },
+      ],
+    };
+    const navigator = new WorkflowRestartNavigator(restartPoint);
+
+    expect(navigator.resolveRootStartStep(root, undefined)).toBe('reviewers');
+    expect(navigator.resolveChildStartStep(child, [
+      makeRuntimeParallelEntry('default', 'reviewers'),
+      makeRuntimeCallEntry('default', 'delegate'),
+    ])).toBe('review');
+    expect(navigator.isActive()).toBe(false);
+  });
+
+  it('should leave a non-target static parallel sibling call outside the selected path', () => {
+    const root = makeWorkflow('default', 'reviewers', [
+      makeParallelStep('reviewers', [
+        makeCallStep('delegate', 'coding'),
+        makeCallStep('notify', 'coding'),
+      ]),
+    ]);
+    const child = makeWorkflow('coding', 'review', [
+      { name: 'review', persona: 'reviewer', instruction: 'Review' },
+    ]);
+    const restartPoint: WorkflowRestartPoint = {
+      stack: [
+        { workflow: 'default', workflow_ref: 'default', step: 'reviewers', kind: 'agent' },
+        {
+          workflow: 'default',
+          workflow_ref: 'default',
+          step: 'delegate',
+          kind: 'workflow_call',
+          call_instance: 1,
+        },
+        { workflow: 'coding', workflow_ref: 'coding', step: 'review', kind: 'agent' },
+      ],
+    };
+    const navigator = new WorkflowRestartNavigator(restartPoint);
+    navigator.resolveRootStartStep(root, undefined);
+    const parallelFrame = makeRuntimeParallelEntry('default', 'reviewers');
+
+    expect(navigator.resolveChildStartStep(child, [
+      parallelFrame,
+      makeRuntimeCallEntry('default', 'notify'),
+    ])).toBeUndefined();
+    expect(navigator.isActive()).toBe(true);
+    expect(navigator.resolveChildStartStep(child, [
+      parallelFrame,
+      makeRuntimeCallEntry('default', 'delegate'),
+    ])).toBe('review');
+    expect(navigator.isActive()).toBe(false);
+  });
+
+  it('should reject a static parallel target call with the wrong runtime identity', () => {
+    const root = makeWorkflow('default', 'reviewers', [
+      makeParallelStep('reviewers', [makeCallStep('delegate', 'coding')]),
+    ]);
+    const child = makeWorkflow('coding', 'review', [
+      { name: 'review', persona: 'reviewer', instruction: 'Review' },
+    ]);
+    const restartPoint: WorkflowRestartPoint = {
+      stack: [
+        { workflow: 'default', workflow_ref: 'default', step: 'reviewers', kind: 'agent' },
+        {
+          workflow: 'default',
+          workflow_ref: 'default',
+          step: 'delegate',
+          kind: 'workflow_call',
+          call_instance: 1,
+        },
+        { workflow: 'coding', workflow_ref: 'coding', step: 'review', kind: 'agent' },
+      ],
+    };
+    const navigator = new WorkflowRestartNavigator(restartPoint);
+    navigator.resolveRootStartStep(root, undefined);
+
+    expect(() => navigator.resolveChildStartStep(child, [
+      makeRuntimeParallelEntry('default', 'reviewers'),
+      makeRuntimeCallEntry('default', 'delegate', 2),
+    ])).toThrow(/does not match restart path/i);
+    expect(navigator.isActive()).toBe(true);
+  });
+
   it('should consume a terminal authored system step when resolving the root start', () => {
     const restartPoint: WorkflowRestartPoint = {
       stack: [{ workflow: 'default', workflow_ref: 'default', step: 'checkpoint', kind: 'system' }],
