@@ -6,6 +6,12 @@
 
 フォーマットは [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) に基づいています。
 
+## [0.59.1] - 2026-08-16
+
+### Fixed
+
+- ビルトインの review-fix ループが `review-resolution.md` の過去 finding を再裁定しなくなりました (#1393)。裁定開始時に存在する `review-resolution.md` は裁定履歴および当該ステップの出力先として扱い、finding の提出元にはしません。actionable 集合に入れるのは、直前に完了したレビューラウンドのレビュアーレポートが提出した finding だけです。セレクターによるレビュアー継続は現在の `Actionable Families` セクションのみを根拠とし、履歴・disposition・carry-forward の行では継続されません。また、最新ラウンドが finding なしで承認しているのに検証済みの修正が resolution ファイル上で繰り返されるだけの場合、ループモニターはレビュアーや同じ修正の再実行ではなく、宣言済みの非再試行の結果を選びます。
+
 ## [0.59.0] - 2026-08-16
 
 ### Added
