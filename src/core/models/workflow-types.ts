@@ -62,6 +62,7 @@ export type {
   CursorProviderOptions,
   CopilotProviderOptions,
   KiroProviderOptions,
+  DeepSeekHarnessProviderOptions,
   PiProviderOptions,
   StepProviderOptions,
   WorkflowStepKind,

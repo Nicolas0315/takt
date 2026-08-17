@@ -121,6 +121,7 @@ export class CompanionStructuredCaller {
               model: options.resolution.model,
               providerOptions: options.resolution.providerOptions,
               permissionMode: 'readonly',
+              permissionModeSource: request.provider.permissionMode === undefined ? 'synthetic' : 'explicit',
             },
           });
         } finally {
