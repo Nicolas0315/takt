@@ -59,6 +59,7 @@ export interface DecomposeTaskOptions {
   failureDir?: RunAgentOptions['failureDir'];
   mcpServers?: RunAgentOptions['mcpServers'];
   inspectTools?: string[];
+  inspectGuidance?: boolean;
   onPromptResolved?: (promptParts: {
     systemPrompt: string;
     userInstruction: string;
@@ -69,7 +70,7 @@ export interface DecomposeTaskOptions {
 
 export type MorePartsOptions = Omit<
   DecomposeTaskOptions,
-  'inspectTools' | 'onPromptResolved'
+  'onPromptResolved'
 > & {
   cancellablePartIds: readonly string[];
 };
@@ -101,6 +102,7 @@ export async function requestDecompositionRawResponse(
         maxInitialParts,
         language: options.language,
         inspectTools: options.inspectTools,
+        inspectGuidance: options.inspectGuidance === true,
         rejectedDecomposition,
       },
     ), loadDecompositionSchema(maxInitialParts), {
@@ -199,6 +201,8 @@ export async function requestMorePartsRawResponse(
     existingIds,
     options.language,
     options.cancellablePartIds,
+    options.inspectTools,
+    options.inspectGuidance === true,
   );
 
   let response: AgentResponse;
@@ -217,6 +221,7 @@ export async function requestMorePartsRawResponse(
         providerOptions: options.resolvedProviderOptions,
         permissionMode: options.permissionMode,
       },
+      ...(options.inspectTools === undefined ? {} : { allowedTools: options.inspectTools }),
       mcpServers: options.mcpServers,
       onStream: createPublicationGuardedStreamCallback(options.onStream, options.abortSignal),
       onActivity: options.onActivity,

@@ -2,6 +2,10 @@ import { describe, expect, it } from 'vitest';
 import type { PartDefinition, WorkflowStep } from '../core/models/types.js';
 import { createPartStep, createTeamLeaderPlanningStep } from '../core/workflow/engine/team-leader-common.js';
 import {
+  summarizePartResultForFeedback,
+  TEAM_LEADER_FEEDBACK_SUMMARY_MAX_CHARS,
+} from '../core/workflow/engine/team-leader-part-report.js';
+import {
   resolveDirectStepProviderOptions,
   resolveStepCapabilityProviderOptions,
 } from '../infra/config/providerOptions.js';
@@ -271,5 +275,20 @@ describe('createTeamLeaderPlanningStep', () => {
     expect(parentPrompt).toContain('TAIL_FINDING: preserve this');
     expect(parentPrompt).toContain('a'.repeat(2500));
     expect(memberPrompt).not.toContain('TAIL_FINDING: preserve this');
+  });
+});
+
+describe('summarizePartResultForFeedback', () => {
+  it('returns the full content when it does not exceed the max chars', () => {
+    const content = 'x'.repeat(TEAM_LEADER_FEEDBACK_SUMMARY_MAX_CHARS);
+    expect(summarizePartResultForFeedback(content)).toBe(content);
+  });
+
+  it('keeps the whole summary, including the truncation notice, within the max chars', () => {
+    const content = 'y'.repeat(TEAM_LEADER_FEEDBACK_SUMMARY_MAX_CHARS + 1234);
+    const result = summarizePartResultForFeedback(content);
+    expect(result.length).toBeLessThanOrEqual(TEAM_LEADER_FEEDBACK_SUMMARY_MAX_CHARS);
+    expect(result.startsWith('yyyy')).toBe(true);
+    expect(result).toMatch(/\[truncated: \d+ chars; see report file for full content\]$/);
   });
 });
