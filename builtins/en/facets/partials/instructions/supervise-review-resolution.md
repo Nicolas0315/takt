@@ -6,6 +6,10 @@ Determine requirement fulfillment, resolution of preceding findings, and recurre
 **Current review resolution:**
 {report:review-resolution.md}
 
+**Depth of fulfillment judgment:**
+
+Judge a requirement fulfilled only after confirming the path by which the required result actually holds in the code. The mere existence of a call to a function that validates, saves, or propagates is not a basis. When using a call site as evidence of fulfillment, open the callees relevant to the required result and confirm with file:line that the necessary path connects the required input to the observable result (the save destination path, the output format, or propagation to consumers). Never cite a file you have not opened. Do not mark an inspectable code path fulfilled while it remains unverified. For requirements that current code and the current review resolution cannot decide, apply the REJECT / BLOCKED conditions below.
+
 1. Split the original requirements into the smallest independently decidable units and map them to current code
 2. Recheck each preceding finding against its original acceptance criteria and determine whether it is resolved
 3. Copy the carry-forward source and every row from Invariant Register Carry-forward in the current review-resolution.md unchanged into the section with the same name in the final review-resolution.md
