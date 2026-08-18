@@ -195,6 +195,7 @@ The list view shows all tasks organized by status (pending, running, completed, 
 |--------|-------------|
 | **View diff** | Show full diff against the default branch in a pager |
 | **Instruct** | Open an AI conversation to craft additional instructions, then re-execute |
+| **Create PR** | Commit, push, and create a pull request from the task branch |
 | **Merge from root** | Merge the root branch HEAD into the task branch; conflicts are auto-resolved with AI |
 | **Pull from remote** | Pull the latest changes from remote origin (fast-forward only) |
 | **Try merge** | Squash merge (stages changes without committing, for manual review) |
@@ -207,6 +208,8 @@ The list view shows all tasks organized by status (pending, running, completed, 
 |--------|-------------|
 | **Requeue** | Select a resume or restart position and return the task to `pending` without a conversation |
 | **Retry** | Open a retry conversation with failure context, then re-execute |
+| **Instruct** | Open an AI conversation against the run's working tree to craft additional instructions, then requeue |
+| **Create PR** | Commit, push, and create a pull request from the failed run's changes |
 | **Delete** | Remove the failed task record |
 
 ### Actions for Pending Tasks
@@ -230,7 +233,7 @@ The list view shows all tasks organized by status (pending, running, completed, 
 
 ### Actions for PR-Failed Tasks
 
-Tasks with `pr_failed` status (workflow succeeded but PR creation or push failed) show the PR error message and offer the same actions as completed tasks.
+Tasks with `pr_failed` status (workflow succeeded but PR creation or push failed) show the PR error message and offer the same actions as completed tasks, except **Create PR**.
 
 ### Instruct Mode
 
@@ -247,6 +250,8 @@ You can discuss what additional changes are needed, and the AI helps refine the 
 - **Continue editing** -- Keep refining the instructions in the conversation
 
 To re-execute immediately, use `/accept` (use the latest assistant response) or `/replay` (resubmit the previous order). Use `/cancel` to discard and return to the list.
+
+**Instruct** on a failed task uses the same conversation, targeting the run's uncommitted working tree instead of a committed branch. Its conversation is additionally pre-loaded with a summary of the final adjudication report (fulfilled requirements, unresolved findings, unverified gates) and an overview of the working-tree diff.
 
 ### Retry Mode
 

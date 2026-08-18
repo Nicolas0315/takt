@@ -189,6 +189,7 @@ takt list
 |------|------|
 | **View diff** | 在 pager 中查看相对默认分支的完整 diff |
 | **Instruct** | 打开 AI 对话编写追加指令，然后重新执行 |
+| **Create PR** | 提交并 push，从任务分支创建 pull request |
 | **Merge from root** | 将根分支 HEAD 合并到任务分支，使用 AI 辅助解决冲突 |
 | **Pull from remote** | 从 remote origin 拉取最新修改（仅 fast-forward） |
 | **Try merge** | squash merge（只 stage，不 commit，便于人工检查） |
@@ -201,6 +202,8 @@ takt list
 |------|------|
 | **Requeue** | 选择 resume 或 restart 位置，将任务重新置为 `pending`，不打开对话 |
 | **Retry** | 打开带失败上下文的 retry 对话，然后重新执行 |
+| **Instruct** | 针对该 run 的工作树打开 AI 对话编写追加指令，然后 requeue |
+| **Create PR** | 将失败 run 的修改提交并 push，创建 pull request |
 | **Delete** | 删除失败任务记录 |
 
 ### Pending 任务的操作
@@ -224,7 +227,7 @@ takt list
 
 ### PR-Failed 任务的操作
 
-`pr_failed` 表示 workflow 成功但 PR 创建或 push 失败。这类任务显示 PR 错误信息，并提供与已完成任务相同的操作。
+`pr_failed` 表示 workflow 成功但 PR 创建或 push 失败。这类任务显示 PR 错误信息，并提供与已完成任务相同的操作（**Create PR** 除外）。
 
 ### Instruct 模式
 
@@ -241,6 +244,8 @@ takt list
 - **Continue editing** — 继续在对话中完善指令
 
 要立即重新执行，可使用 `/accept`（使用最新 assistant response）或 `/replay`（重新提交上一次 order）；使用 `/cancel` 放弃并返回列表。
+
+失败任务的 **Instruct** 使用相同的对话，但目标是该 run 未提交的工作树，而不是已提交的分支。对话中会额外预加载最终裁定报告的摘要（已满足的需求、未解决的 finding、未验证的 gate）以及工作树 diff 的概览。
 
 ### Retry 模式
 
