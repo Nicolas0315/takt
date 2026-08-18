@@ -1,6 +1,6 @@
-[English](./task-management.md)
-
 # タスク管理
+
+[English](./task-management.md) | [日本語](./task-management.ja.md) | [简体中文](./task-management.zh-CN.md)
 
 ## 概要
 

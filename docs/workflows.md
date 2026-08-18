@@ -1,6 +1,6 @@
 # Workflow Guide
 
-[日本語](./workflows.ja.md)
+[English](./workflows.md) | [日本語](./workflows.ja.md) | [简体中文](./workflows.zh-CN.md)
 
 This guide explains how to create and customize TAKT workflows.
 

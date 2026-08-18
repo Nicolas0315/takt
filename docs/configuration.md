@@ -1,6 +1,6 @@
 # Configuration
 
-[日本語](./configuration.ja.md)
+[English](./configuration.md) | [日本語](./configuration.ja.md) | [简体中文](./configuration.zh-CN.md)
 
 This document is a reference for all TAKT configuration options. For a quick start, see the main [README](../README.md).
 For phase-level usage events and analysis, see the [Observability Guide](./observability.md).
@@ -441,6 +441,8 @@ Separately from config-key overrides, `TAKT_NOTIFY_WEBHOOK` sets a Slack Incomin
 ## API Key Configuration
 
 TAKT supports Claude, Codex, OpenCode, Pi, the official DeepSeek Harness SDK, Cursor, Copilot, and Kiro providers. Claude/Codex/OpenCode use their SDK credentials, Pi uses the Pi SDK credential store or provider environment variables, DeepSeek Harness uses the official `DEEPSEEK_API_KEY` environment variable, Kiro uses an API key, Cursor can use either API key or existing `cursor-agent login` session, and Copilot uses a GitHub token.
+
+The global configuration schema also retains API-key fields for some legacy or provider integrations that are not currently selectable as top-level providers. These fields do not activate a provider by themselves; use the authentication variables and keys documented for the selected provider below.
 
 ### Environment Variables (Recommended)
 

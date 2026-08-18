@@ -17,7 +17,8 @@
 
 <p align="center">
   <a href="./README.md">English</a> |
-  <a href="./docs/README.ja.md">日本語</a>
+  <a href="./docs/README.ja.md">日本語</a> |
+  <a href="./docs/README.zh-CN.md">简体中文</a>
 </p>
 
 <p align="center">
@@ -538,6 +539,12 @@ See [External Integrations](./docs/external-integrations.md) for other community
 | [CI/CD Integration](./docs/ci-cd.md) | GitHub Actions and pipeline mode |
 | [External Integrations](./docs/external-integrations.md) | Community examples that extend TAKT without modifying core (audit trails, etc.) |
 | [Changelog](./CHANGELOG.md) ([日本語](./docs/CHANGELOG.ja.md)) | Version history |
+
+### Simplified Chinese documentation
+
+Simplified Chinese documentation uses the `.zh-CN.md` suffix so it can coexist with the English and Japanese pages. Start with the [Chinese documentation index](./docs/README.zh-CN.md).
+
+Translated coverage includes the onboarding path (README, tutorial, configuration, and CLI reference), workflow authoring, provider/external integrations, and task management. The remaining catalog, observability, design, prompting, token-saving, repertoire, CI/CD, testing, contributing, changelog, and internal design/development pages remain available in English or Japanese and are intentionally not duplicated here.
 
 ## Sponsors
 

@@ -1,4 +1,4 @@
-[日本語](./tutorial.ja.md)
+[English](./tutorial.md) | [日本語](./tutorial.ja.md) | [简体中文](./tutorial.zh-CN.md)
 
 # Tutorial
 

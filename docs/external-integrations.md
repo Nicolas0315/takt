@@ -1,6 +1,6 @@
 # External Integrations
 
-[日本語](./external-integrations.ja.md)
+[English](./external-integrations.md) | [日本語](./external-integrations.ja.md) | [简体中文](./external-integrations.zh-CN.md)
 
 This page is a catalog of community-built third-party integrations. For the official GitHub/GitLab integration, see [Configuration](./configuration.md) and [CI/CD](./ci-cd.md).
 

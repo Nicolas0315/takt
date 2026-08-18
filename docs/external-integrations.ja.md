@@ -1,6 +1,6 @@
 # External Integrations
 
-[English](./external-integrations.md)
+[English](./external-integrations.md) | [日本語](./external-integrations.ja.md) | [简体中文](./external-integrations.zh-CN.md)
 
 本ページはコミュニティ製サードパーティ統合のカタログです。公式の GitHub/GitLab 連携については [Configuration](./configuration.ja.md) と [CI/CD](./ci-cd.ja.md) を参照してください。
 

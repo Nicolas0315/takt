@@ -1,6 +1,6 @@
 # CLI Reference
 
-[日本語](./cli-reference.ja.md)
+[English](./cli-reference.md) | [日本語](./cli-reference.ja.md) | [简体中文](./cli-reference.zh-CN.md)
 
 This document provides a complete reference for all TAKT CLI commands and options.
 

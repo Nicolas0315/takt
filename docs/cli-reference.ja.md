@@ -1,6 +1,6 @@
 # CLI リファレンス
 
-[English](./cli-reference.md)
+[English](./cli-reference.md) | [日本語](./cli-reference.ja.md) | [简体中文](./cli-reference.zh-CN.md)
 
 このドキュメントは TAKT CLI の全コマンドとオプションの完全なリファレンスです。
 
