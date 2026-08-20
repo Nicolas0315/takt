@@ -179,6 +179,12 @@ describe('loadWorkflowByIdentifier', () => {
     expect(workflow!.name).toBe('default');
   });
 
+  it('should load the builtin loop-analysis workflow under the existing loader rules', () => {
+    const workflow = loadWorkflowByIdentifier('loop-analysis', process.cwd());
+    expect(workflow).not.toBeNull();
+    expect(workflow!.name).toBe('loop-analysis');
+  });
+
   it('should load workflow by absolute path', () => {
     const filePath = join(tempDir, 'test.yaml');
     writeFileSync(filePath, SAMPLE_WORKFLOW);

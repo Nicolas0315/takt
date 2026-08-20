@@ -86,16 +86,13 @@ function mergeRuntimeProviderFiles(
         enabled: global.companion?.enabled !== false
           && project.companion?.enabled !== false,
       };
-  return provider
-    ? {
-        version: RUNTIME_PROVIDER_VERSION,
-        ...(companion === undefined ? {} : { companion }),
-        provider,
-      }
-    : {
-        version: RUNTIME_PROVIDER_VERSION,
-        ...(companion === undefined ? {} : { companion }),
-      };
+  const loopAnalysis = project.loop_analysis ?? global.loop_analysis;
+  return {
+    version: RUNTIME_PROVIDER_VERSION,
+    ...(companion === undefined ? {} : { companion }),
+    ...(loopAnalysis === undefined ? {} : { loop_analysis: loopAnalysis }),
+    ...(provider === undefined ? {} : { provider }),
+  };
 }
 
 function mergeProviderSections(

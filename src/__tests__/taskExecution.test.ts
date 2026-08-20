@@ -284,6 +284,48 @@ describe('executeAndCompleteTask', () => {
     expect(workflowExecutionOptions.startStep).toBe('delegate');
   });
 
+  it('Given a task whose resolution enables auto_pr, When the task executes, Then the resolved autoPr reaches workflow execution options', async () => {
+    const task = createTask('task-auto-pr-propagation');
+    mockResolveTaskExecution.mockResolvedValueOnce({
+      execCwd: '/project',
+      workflowIdentifier: 'default',
+      isWorktree: false,
+      autoPr: true,
+      draftPr: false,
+      managedPr: false,
+      shouldPublishBranchToOrigin: true,
+      reportDirName: '20260216-task-auto-pr-propagation',
+    });
+
+    await executeAndCompleteTaskWithoutWorkflow(
+      task,
+      createTaskRunnerMock() as never,
+      '/project',
+    );
+
+    expect(mockExecuteWorkflow).toHaveBeenCalledTimes(1);
+    const workflowExecutionOptions = mockExecuteWorkflow.mock.calls[0]?.[3] as {
+      autoPr?: boolean;
+    };
+    expect(workflowExecutionOptions.autoPr).toBe(true);
+  });
+
+  it('Given a task whose resolution disables auto_pr, When the task executes, Then workflow execution options carry autoPr false', async () => {
+    const task = createTask('task-no-auto-pr-propagation');
+
+    await executeAndCompleteTaskWithoutWorkflow(
+      task,
+      createTaskRunnerMock() as never,
+      '/project',
+    );
+
+    expect(mockExecuteWorkflow).toHaveBeenCalledTimes(1);
+    const workflowExecutionOptions = mockExecuteWorkflow.mock.calls[0]?.[3] as {
+      autoPr?: boolean;
+    };
+    expect(workflowExecutionOptions.autoPr).toBe(false);
+  });
+
   it('Given silent task adapter options, When a task is executed, Then outputMode reaches executeWorkflow', async () => {
     const task = createTask('task-silent-output');
 

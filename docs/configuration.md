@@ -602,6 +602,40 @@ declarations and the structural validation of `targets.companions` remain in
 place, but no companion provider is resolved or executed — a workflow that
 declares companions runs without any companion provider configuration.
 
+### Loop analysis (loop_analysis)
+
+Post-run loop analysis is an opt-in feature. Enable it with the top-level
+`loop_analysis` section:
+
+```yaml
+version: 1
+loop_analysis:
+  enabled: true
+  output: file        # file | pr-comment (default: file)
+```
+
+When enabled, every workflow run that reaches a terminal state — success,
+failure, or cancellation — automatically launches the builtin `loop-analysis`
+workflow as a detached background run. The analysis run reads the finished
+run's session logs, `trace.md`, and reports, then proposes prompt improvements
+(facet file paths plus concrete amendments) that reduce unnecessary loops. The
+source run never waits for the analysis run, and a launch failure is only
+logged; it never changes the source run's outcome. Analysis runs do not launch
+further analysis runs.
+
+The analysis report is always written to the analysis run's own
+`.takt/runs/<run>/reports/loop-analysis.md` via the normal output contract
+mechanism. With `output: pr-comment`, the finished analysis run additionally
+posts the identical report content as a comment on the source branch's pull
+request, but only when the source run resolved `auto_pr: true` and a pull
+request exists for the source branch. When `auto_pr` is unset or false, or
+when the source run has no PR, the report stays file-only.
+
+Provider assignment for the analysis agents uses the ordinary routing
+(`provider.targets.steps` / `personas` / internal agent seats); the
+`loop_analysis` section itself accepts no provider fields. Unknown `output`
+values fail at load time.
+
 Runtime mode is enabled by the presence of an active `provider` section, not by the file existing. A file that only contains `version: 1` is inactive and leaves the legacy `config.yaml` provider resolution in place.
 
 ### Configuration example

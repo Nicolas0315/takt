@@ -352,3 +352,113 @@ describe('runtime-provider loader', () => {
     expect(resolveRuntimeProviderFile({ globalConfigDir: globalDir, projectConfigDir: projectDir })).toBeUndefined();
   });
 });
+
+describe('runtime.yaml loop_analysis section', () => {
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'takt-runtime-provider-loader-'));
+    globalDir = join(root, 'global-.takt');
+    projectDir = join(root, 'project-.takt');
+  });
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('Given loop_analysis with enabled only, When loading, Then it loads with output defaulting to file and no provider.defaults required', () => {
+    writeRuntimeYaml(globalDir, [
+      'version: 1',
+      'loop_analysis:',
+      '  enabled: true',
+    ]);
+    const loaded = loadRuntimeProviderFileAt(join(globalDir, RUNTIME_PROVIDER_FILENAME));
+    expect(loaded?.loop_analysis).toEqual({ enabled: true, output: 'file' });
+  });
+
+  it('Given loop_analysis with an explicit pr-comment output, When loading, Then the explicit output is preserved', () => {
+    writeRuntimeYaml(globalDir, [
+      'version: 1',
+      'loop_analysis:',
+      '  enabled: true',
+      '  output: pr-comment',
+    ]);
+    const loaded = loadRuntimeProviderFileAt(join(globalDir, RUNTIME_PROVIDER_FILENAME));
+    expect(loaded?.loop_analysis).toEqual({ enabled: true, output: 'pr-comment' });
+  });
+
+  it('Given loop_analysis explicitly disabled, When loading, Then it loads as disabled', () => {
+    writeRuntimeYaml(globalDir, [
+      'version: 1',
+      'loop_analysis:',
+      '  enabled: false',
+    ]);
+    const loaded = loadRuntimeProviderFileAt(join(globalDir, RUNTIME_PROVIDER_FILENAME));
+    expect(loaded?.loop_analysis).toEqual({ enabled: false, output: 'file' });
+  });
+
+  it('Given an unknown loop_analysis output value, When loading, Then it throws naming the failing file path', () => {
+    writeRuntimeYaml(globalDir, [
+      'version: 1',
+      'loop_analysis:',
+      '  enabled: true',
+      '  output: slack',
+    ]);
+    const filePath = join(globalDir, RUNTIME_PROVIDER_FILENAME);
+    expect(() => loadRuntimeProviderFileAt(filePath)).toThrow(filePath);
+  });
+
+  it('Given a provider assignment field inside loop_analysis, When loading, Then it throws naming the failing file path', () => {
+    writeRuntimeYaml(globalDir, [
+      'version: 1',
+      'loop_analysis:',
+      '  enabled: true',
+      '  provider: mock',
+    ]);
+    const filePath = join(globalDir, RUNTIME_PROVIDER_FILENAME);
+    expect(() => loadRuntimeProviderFileAt(filePath)).toThrow(filePath);
+  });
+
+  it('Given loop_analysis without enabled, When loading, Then it throws naming the failing file path', () => {
+    writeRuntimeYaml(globalDir, [
+      'version: 1',
+      'loop_analysis:',
+      '  output: file',
+    ]);
+    const filePath = join(globalDir, RUNTIME_PROVIDER_FILENAME);
+    expect(() => loadRuntimeProviderFileAt(filePath)).toThrow(filePath);
+  });
+
+  it('Given no loop_analysis section, When resolving, Then loop_analysis remains unset', () => {
+    writeRuntimeYaml(projectDir, ['version: 1']);
+    const resolved = resolveRuntimeProviderFile({ globalConfigDir: globalDir, projectConfigDir: projectDir });
+    expect(resolved).toBeDefined();
+    expect(resolved?.loop_analysis).toBeUndefined();
+  });
+
+  it('Given only the global file has loop_analysis, When resolving with an unrelated project file, Then the global loop_analysis is preserved', () => {
+    writeRuntimeYaml(globalDir, [
+      'version: 1',
+      'loop_analysis:',
+      '  enabled: true',
+      '  output: pr-comment',
+    ]);
+    writeRuntimeYaml(projectDir, ['version: 1']);
+    const resolved = resolveRuntimeProviderFile({ globalConfigDir: globalDir, projectConfigDir: projectDir });
+    expect(resolved?.loop_analysis).toEqual({ enabled: true, output: 'pr-comment' });
+  });
+
+  it('Given both files have loop_analysis, When resolving, Then the project loop_analysis wins', () => {
+    writeRuntimeYaml(globalDir, [
+      'version: 1',
+      'loop_analysis:',
+      '  enabled: true',
+    ]);
+    writeRuntimeYaml(projectDir, [
+      'version: 1',
+      'loop_analysis:',
+      '  enabled: false',
+      '  output: pr-comment',
+    ]);
+    const resolved = resolveRuntimeProviderFile({ globalConfigDir: globalDir, projectConfigDir: projectDir });
+    expect(resolved?.loop_analysis).toEqual({ enabled: false, output: 'pr-comment' });
+  });
+});

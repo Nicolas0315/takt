@@ -1,0 +1,36 @@
+name: loop-analysis
+description: Post-run loop analysis. Analyzes a finished run's session logs and reports, proposes prompt improvements that reduce unnecessary loops, and reviews the proposals with a bounded rework loop.
+max_steps: 6
+initial_step: analyze
+steps:
+  - name: analyze
+    edit: false
+    capabilities: readonly
+    persona: loop-analyzer
+    instruction: loop-analysis
+    output_contracts:
+      report:
+        - name: loop-analysis.md
+          format: loop-analysis
+    rules:
+      - condition: Analysis and proposals are complete
+        next: review
+      - condition: The run artifacts cannot be analyzed
+        next: ABORT
+
+  - name: review
+    edit: false
+    capabilities: readonly
+    persona: loop-analysis-reviewer
+    pass_previous_response: false
+    instruction: loop-analysis-review
+    output_contracts:
+      report:
+        - name: loop-analysis.md
+          format: loop-analysis
+          use_judge: false
+    rules:
+      - condition: approved
+        next: COMPLETE
+      - condition: rejected
+        next: analyze

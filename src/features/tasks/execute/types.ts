@@ -289,6 +289,8 @@ export interface WorkflowExecutionOptions {
   traceTaskMetadata?: WorkflowTraceTaskMetadata;
   /** Structured PR context used as prompt input. */
   prContext?: PullRequestContext;
+  /** Whether the source run creates a PR after execution (gates loop-analysis PR comments). */
+  autoPr?: boolean;
 }
 
 export interface TaskExecutionOptions {
@@ -377,6 +379,8 @@ export interface ExecuteTaskOptions {
   traceTaskMetadata?: WorkflowTraceTaskMetadata;
   /** Structured PR context used as prompt input. */
   prContext?: PullRequestContext;
+  /** Whether the source run creates a PR after execution (gates loop-analysis PR comments). */
+  autoPr?: boolean;
 }
 
 export interface PipelineExecutionOptions {

@@ -181,6 +181,7 @@ export async function executeTaskAndCompleteWithDetails(
       maxStepsOverride,
       initialIterationOverride,
       currentTaskIssueNumber: issueNumber,
+      autoPr,
       traceTaskMetadata: buildTraceTaskMetadata({
         task,
         taskContent: taskSpec?.taskPrompt ?? task.content,

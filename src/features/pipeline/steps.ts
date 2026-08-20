@@ -336,7 +336,7 @@ export async function runWorkflow(
   workflow: string,
   task: string,
   execCwd: string,
-  options: Pick<PipelineExecutionOptions, 'provider' | 'model' | 'autoStrategy' | 'issueNumber' | 'prNumber'>,
+  options: Pick<PipelineExecutionOptions, 'provider' | 'model' | 'autoStrategy' | 'issueNumber' | 'prNumber' | 'autoPr'>,
   context: ExecutionContext,
 ): Promise<boolean> {
   const safeWorkflow = sanitizeTerminalText(workflow);
@@ -358,6 +358,7 @@ export async function runWorkflow(
       workflowIdentifier: workflow,
       projectCwd,
       agentOverrides,
+      autoPr: options.autoPr,
       traceTaskContext: buildPipelineTraceTaskContext(options, context),
       ...(context.prContext ? { prContext: context.prContext } : {}),
     });

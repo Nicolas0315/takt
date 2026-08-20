@@ -141,6 +141,7 @@ export async function executeTaskWorkflow(
     maxStepsOverride,
     initialIterationOverride,
     currentTaskIssueNumber,
+    autoPr,
     prContext,
   } = options;
   const traceTaskMetadata = resolveTraceTaskMetadata(options);
@@ -217,6 +218,7 @@ export async function executeTaskWorkflow(
     initialIterationOverride,
     currentTaskIssueNumber,
     traceTaskMetadata,
+    ...(autoPr === undefined ? {} : { autoPr }),
     ...(prContext ? { prContext } : {}),
   });
 }

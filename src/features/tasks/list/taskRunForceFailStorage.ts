@@ -4,6 +4,7 @@ import {
   type RunMeta,
 } from '../../../core/workflow/run/run-meta.js';
 import { resolveCloneBaseDir } from '../../../infra/task/clone.js';
+import { resolveWorkflowConfigValue } from '../../../infra/config/index.js';
 import type { TaskListItem } from '../../../infra/task/types.js';
 import { isPathInside } from '../../../shared/utils/index.js';
 import {
@@ -32,6 +33,10 @@ export function createTaskRunForceFailStorage(input: {
     meta: run.meta,
     cwd: run.cwd,
     projectDir: input.projectDir,
+    ...(input.task.branch === undefined ? {} : { gitBranch: input.task.branch }),
+    sourceAutoPr: input.task.data?.auto_pr
+      ?? resolveWorkflowConfigValue(input.projectDir, 'autoPr')
+      ?? false,
   });
 }
 

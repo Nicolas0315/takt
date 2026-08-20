@@ -27,11 +27,14 @@ import type {
   WorkflowRunForceFailHandle,
 } from './workflowRunAdmin.js';
 import type { RunFinalization } from './workflowRunExecution.js';
+import { launchLoopAnalysisOnRunTerminal } from './loopAnalysisHook.js';
 
 interface TaskRunForceFailAdapterContext
   extends WorkflowRunForceFailContext {
   readonly projectDir: string;
   readonly cwd: string;
+  readonly gitBranch?: string;
+  readonly sourceAutoPr?: boolean;
 }
 
 const RUN_LOG_SIDECAR_FILE_SUFFIXES = Object.freeze([
@@ -68,6 +71,16 @@ class FileTaskRunForceFailStorage implements WorkflowRunForceFailHandle {
       iteration: payload.iterations,
       reason,
     }, payload);
+    await launchLoopAnalysisOnRunTerminal({
+      projectCwd: this.context.projectDir,
+      runRootAbs: runPaths.runRootAbs,
+      reportsAbs: runPaths.reportsAbs,
+      status: 'failed',
+      ...(this.context.gitBranch === undefined
+        ? {}
+        : { gitBranch: this.context.gitBranch }),
+      sourceAutoPr: this.context.sourceAutoPr === true,
+    });
     return result;
   }
 }

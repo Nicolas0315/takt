@@ -74,6 +74,7 @@ import {
   prepareWorkflowExecutionBundle,
   publishWorkflowExecutionBundle,
 } from './workflowExecutionBundle.js';
+import { launchLoopAnalysisOnRunTerminal } from './loopAnalysisHook.js';
 
 export type { WorkflowExecutionResult, WorkflowExecutionOptions };
 
@@ -265,6 +266,10 @@ async function executeWorkflowInternal(
       projectCwd: options.projectCwd,
       primaryError: bootstrapError,
       resumeLineage,
+      ...(options.traceTaskMetadata?.gitBranch === undefined
+        ? {}
+        : { gitBranch: options.traceTaskMetadata.gitBranch }),
+      sourceAutoPr: options.autoPr === true,
     });
   }
   const executionBundle = loadWorkflowExecutionBundle(activeRun.runPaths);
@@ -555,6 +560,16 @@ async function executeWorkflowInternal(
         );
         finalizationIssues.push(...finalization.issues);
         committedPublication = terminalPublication;
+        await launchLoopAnalysisOnRunTerminal({
+          projectCwd: options.projectCwd,
+          runRootAbs: bootstrap.runPaths.runRootAbs,
+          reportsAbs: bootstrap.runPaths.reportsAbs,
+          status: terminalStatus,
+          ...(options.traceTaskMetadata?.gitBranch === undefined
+            ? {}
+            : { gitBranch: options.traceTaskMetadata.gitBranch }),
+          sourceAutoPr: options.autoPr === true,
+        });
       } catch (error) {
         terminalizationErrors.push(error);
       }
@@ -631,6 +646,8 @@ async function terminalizeBootstrapFailure(input: {
   readonly projectCwd: string;
   readonly primaryError: unknown;
   readonly resumeLineage?: WorkflowExecutionResumeLineage;
+  readonly gitBranch?: string;
+  readonly sourceAutoPr?: boolean;
 }): Promise<never> {
   const reason = getErrorMessage(input.primaryError);
   const finalizationErrors: unknown[] = [];
@@ -704,6 +721,14 @@ async function terminalizeBootstrapFailure(input: {
       reason,
     }, payload);
     finalizationErrors.push(...finalization.issues);
+    await launchLoopAnalysisOnRunTerminal({
+      projectCwd: input.projectCwd,
+      runRootAbs: input.activeRun.runPaths.runRootAbs,
+      reportsAbs: input.activeRun.runPaths.reportsAbs,
+      status: 'failed',
+      ...(input.gitBranch === undefined ? {} : { gitBranch: input.gitBranch }),
+      sourceAutoPr: input.sourceAutoPr === true,
+    });
   } catch (error) {
     finalizationErrors.push(error);
   }
