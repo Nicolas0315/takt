@@ -9,7 +9,7 @@ import {
   parseNdjsonRecord,
 } from '../../../infra/fs/index.js';
 import type { InteractiveMetadata } from './types.js';
-import { createLogger, isDebugEnabled, writePromptLog } from '../../../shared/utils/index.js';
+import { createLogger, isDebugEnabled } from '../../../shared/utils/index.js';
 import type { PromptLogRecord, NdjsonRecord } from '../../../shared/utils/index.js';
 import type { WorkflowResumePointEntry, WorkflowStep, AgentResponse, WorkflowState } from '../../../core/models/index.js';
 import type {
@@ -48,6 +48,7 @@ import type {
   NdjsonCompanionReviewRound,
 } from '../../../shared/utils/types.js';
 import {
+  appendPrivateFile,
   PrivateArtifactPublicationConflictError,
   readPrivateFileState,
   writePrivateFileWithModeExpected,
@@ -172,6 +173,7 @@ function sameTerminalSessionRecord(
 export class SessionLogger {
   private readonly ndjsonLogPath: string;
   private readonly allowSensitiveData: boolean;
+  private readonly promptLogPath: string | undefined;
   private readonly phaseTracker = new SessionLoggerPhaseTracker();
   private readonly activeStepIterations = new Map<string, number>();
   private readonly ndjsonRecords: NdjsonRecord[] = [];
@@ -179,9 +181,10 @@ export class SessionLogger {
   private workflowTerminalLogged = false;
   private companionAuditWriteFailureReported = false;
 
-  constructor(ndjsonLogPath: string, allowSensitiveData: boolean) {
+  constructor(ndjsonLogPath: string, allowSensitiveData: boolean, promptLogPath?: string) {
     this.ndjsonLogPath = ndjsonLogPath;
     this.allowSensitiveData = allowSensitiveData;
+    this.promptLogPath = promptLogPath;
   }
 
   writeInteractiveMetadata(meta: InteractiveMetadata): void {
@@ -285,7 +288,7 @@ export class SessionLogger {
         completedAt,
         this.sanitizeText.bind(this),
       );
-      writePromptLog(promptRecord);
+      this.appendPromptRecord(promptRecord);
       this.promptRecords.push(promptRecord);
     }
   }
@@ -441,6 +444,20 @@ export class SessionLogger {
   private appendRecord(record: NdjsonRecord): void {
     this.ndjsonRecords.push(record);
     appendNdjsonLine(this.ndjsonLogPath, record);
+  }
+
+  private appendPromptRecord(record: PromptLogRecord): void {
+    if (this.promptLogPath === undefined) {
+      return;
+    }
+    try {
+      appendPrivateFile(this.promptLogPath, `${JSON.stringify(record)}\n`);
+    } catch (error) {
+      // デバッグ用 prompt ログの書き込み失敗で workflow 本体を止めない。
+      log.warn('Debug prompt record could not be persisted; continuing workflow', {
+        error: safeExternalErrorMessage(error),
+      });
+    }
   }
 
   private appendCompanionAuditRecord(

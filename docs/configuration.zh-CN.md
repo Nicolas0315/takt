@@ -1047,7 +1047,7 @@ logging:
   debug: true
 ```
 
-debug 日志以 NDJSON 写入 `.takt/runs/debug-{timestamp}/logs/debug-{timestamp}.log`，prompt/response 日志写入同目录的 `debug-{timestamp}-prompts.jsonl`。
+debug 日志以 NDJSON 写入 `.takt/runs/debug-{timestamp}/logs/debug-{timestamp}.log`，prompt/response 日志按 workflow run 写入 `.takt/runs/{run}/logs/{sessionId}-prompts.jsonl`。
 
 ### 详细控制台输出
 

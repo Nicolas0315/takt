@@ -2,7 +2,7 @@
  * Integration tests: debug prompt log wiring in executeWorkflow().
  */
 
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, it, expect, beforeEach, vi } from 'vitest';
@@ -12,9 +12,10 @@ import { buildPhaseExecutionId } from '../shared/utils/phaseExecutionId.js';
 const {
   disabledObservability,
   mockIsDebugEnabled,
-  mockWritePromptLog,
   mockInitNdjsonLog,
   mockAppendNdjsonLine,
+  traceWriterCalls,
+  traceFullState,
   MockWorkflowEngine,
 } = vi.hoisted(() => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -25,7 +26,8 @@ const {
   const path = require('node:path') as typeof import('node:path');
 
   const mockIsDebugEnabled = vi.fn().mockReturnValue(true);
-  const mockWritePromptLog = vi.fn();
+  const traceWriterCalls: Array<{ tracePath: string; promptLogPath?: string }> = [];
+  const traceFullState = { enabled: false };
   const mockInitNdjsonLog = vi.fn((
     sessionId: string,
     task: string,
@@ -49,14 +51,16 @@ const {
   class MockWorkflowEngine extends EE {
     private config: WorkflowConfig;
     private task: string;
+    private cwd: string;
 
-    constructor(config: WorkflowConfig, _cwd: string, task: string, _options: unknown) {
+    constructor(config: WorkflowConfig, cwd: string, task: string, _options: unknown) {
       super();
       if (task === 'constructor-throw-task') {
         throw new Error('mock constructor failure');
       }
       this.config = config;
       this.task = task;
+      this.cwd = cwd;
     }
 
     abort(): void {}
@@ -100,9 +104,9 @@ const {
           userInstruction: 'phase prompt second',
         }, executePhaseSecondId, 1);
       } else {
-        this.emit('phase:start', step, 1, 'execute', shouldEmitSensitive ? 'token=plain-secret' : 'phase prompt', {
-          systemPrompt: shouldEmitSensitive ? 'Authorization: Bearer super-secret-token' : '../agents/coder.md',
-          userInstruction: shouldEmitSensitive ? 'api_key=plain-secret' : 'phase prompt',
+        this.emit('phase:start', step, 1, 'execute', shouldEmitSensitive ? 'token=plain-secret' : `phase prompt for ${this.task}`, {
+          systemPrompt: shouldEmitSensitive ? 'Authorization: Bearer super-secret-token' : `system prompt for ${this.task}`,
+          userInstruction: shouldEmitSensitive ? 'api_key=plain-secret' : `user instruction for ${this.task}`,
         }, executePhaseId, 1);
       }
       this.emit('phase:start', step, 3, 'judge', 'phase3 prompt', {
@@ -136,7 +140,7 @@ const {
         this.emit('phase:complete', step, 1, 'execute', 'phase response second', 'done', undefined, executePhaseSecondId, 1);
         this.emit('phase:complete', step, 1, 'execute', 'phase response first', 'done', undefined, executePhaseId, 1);
       } else {
-        this.emit('phase:complete', step, 1, 'execute', shouldEmitSensitive ? 'password=plain-secret' : 'phase response', 'done', undefined, executePhaseId, 1);
+        this.emit('phase:complete', step, 1, 'execute', shouldEmitSensitive ? 'password=plain-secret' : `phase response for ${this.task} in ${this.cwd}`, 'done', undefined, executePhaseId, 1);
       }
       if (shouldDuplicatePhase) {
         this.emit('phase:start', step, 1, 'execute', 'phase prompt second', {
@@ -151,7 +155,7 @@ const {
         {
           persona: step.personaDisplayName,
           status: 'done',
-          content: 'step response',
+          content: `step response for ${this.task}`,
           timestamp,
         },
         'step instruction',
@@ -209,9 +213,10 @@ const {
       usageEventsPhase: false,
     },
     mockIsDebugEnabled,
-    mockWritePromptLog,
     mockInitNdjsonLog,
     mockAppendNdjsonLine,
+    traceWriterCalls,
+    traceFullState,
     MockWorkflowEngine,
   };
 });
@@ -258,16 +263,16 @@ vi.mock('../infra/config/index.js', () => ({
   updateWorktreeSession: vi.fn(),
   loadProjectConfig: vi.fn(() => ({})),
   loadGlobalConfig: vi.fn(() => ({})),
-  resolveWorkflowConfigValues: vi.fn().mockReturnValue({
+  resolveWorkflowConfigValues: vi.fn().mockImplementation(() => ({
     notificationSound: true,
     notificationSoundEvents: {},
     provider: 'claude',
     runtime: undefined,
     preventSleep: false,
     model: undefined,
-    logging: undefined,
+    logging: traceFullState.enabled ? { trace: true } : undefined,
     observability: disabledObservability,
-  }),
+  })),
   saveSessionState: vi.fn(),
   ensureDir: vi.fn(),
   writeFileAtomic: vi.fn(),
@@ -301,6 +306,10 @@ vi.mock('../features/tasks/execute/traceReportWriter.js', async () => {
         reason?: string;
       };
     }) => {
+      traceWriterCalls.push({
+        tracePath: input.tracePath,
+        ...(input.promptLogPath === undefined ? {} : { promptLogPath: input.promptLogPath }),
+      });
       const markdown = renderTraceReportFromLogs(
         {
           tracePath: input.tracePath,
@@ -366,7 +375,8 @@ vi.mock('../infra/fs/index.js', async (importOriginal) => ({
   appendNdjsonLine: mockAppendNdjsonLine,
 }));
 
-vi.mock('../shared/utils/index.js', () => ({
+vi.mock('../shared/utils/index.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   createLogger: vi.fn().mockReturnValue({
     debug: vi.fn(),
     info: vi.fn(),
@@ -377,8 +387,6 @@ vi.mock('../shared/utils/index.js', () => ({
   notifyError: vi.fn(),
   preventSleep: vi.fn(),
   isDebugEnabled: mockIsDebugEnabled,
-  writePromptLog: mockWritePromptLog,
-  getDebugPromptsLogFile: vi.fn().mockReturnValue(null),
   generateReportDir: vi.fn().mockReturnValue('test-report-dir'),
   isValidReportDirName: vi.fn().mockImplementation((value: string) => /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value)),
 }));
@@ -402,11 +410,14 @@ import { appendNdjsonLine } from '../infra/fs/index.js';
 import { normalizeRule } from '../infra/config/loaders/workflowRuleNormalizer.js';
 
 describe('executeWorkflow debug prompts logging', () => {
+  const TEST_SESSION_ID = 'test-session-id';
   let projectDir: string;
 
   beforeEach(() => {
-    projectDir = mkdtempSync(join(tmpdir(), 'takt-debug-prompts-'));
+    projectDir = mkdtempSync(join(realpathSync(tmpdir()), 'takt-debug-prompts-'));
     vi.clearAllMocks();
+    traceWriterCalls.length = 0;
+    traceFullState.enabled = false;
     mockIsDebugEnabled.mockReturnValue(true);
   });
 
@@ -432,22 +443,79 @@ describe('executeWorkflow debug prompts logging', () => {
     };
   }
 
-  it('should write prompt log record when debug is enabled', async () => {
-    mockIsDebugEnabled.mockReturnValue(true);
+  function runLogsDir(cwd: string, runSlug: string): string {
+    return join(cwd, '.takt', 'runs', runSlug, 'logs');
+  }
 
+  function runPromptsLogPath(cwd: string, runSlug: string): string {
+    return join(runLogsDir(cwd, runSlug), `${TEST_SESSION_ID}-prompts.jsonl`);
+  }
+
+  function readRunPromptRecords(cwd: string, runSlug: string): Array<Record<string, unknown>> {
+    return readFileSync(runPromptsLogPath(cwd, runSlug), 'utf-8')
+      .split('\n')
+      .filter((line) => line.length > 0)
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+  }
+
+  function readWrittenTrace(runSlug: string): string | undefined {
+    const call = vi.mocked(writeFileAtomic).mock.calls.find(
+      (entry) => String(entry[0]).endsWith(`${runSlug}/trace.md`),
+    );
+    return call === undefined ? undefined : String(call[1]);
+  }
+
+  function expectIsolatedRunArtifacts(alphaCwd: string, betaCwd: string): void {
+    const alphaRecords = readRunPromptRecords(alphaCwd, 'run-alpha');
+    const betaRecords = readRunPromptRecords(betaCwd, 'run-beta');
+    expect(alphaRecords.length).toBeGreaterThan(0);
+    expect(betaRecords.length).toBeGreaterThan(0);
+    const alphaPhaseOne = alphaRecords.find((record) => record.phase === 1)!;
+    const betaPhaseOne = betaRecords.find((record) => record.phase === 1)!;
+    expect(alphaPhaseOne.scope).toBe(betaPhaseOne.scope);
+    expect(alphaPhaseOne.phaseExecutionId).toBe(betaPhaseOne.phaseExecutionId);
+    expect(JSON.stringify(alphaRecords)).toContain('alpha-task-body');
+    expect(JSON.stringify(alphaRecords)).not.toContain('beta-task-body');
+    expect(JSON.stringify(betaRecords)).toContain('beta-task-body');
+    expect(JSON.stringify(betaRecords)).not.toContain('alpha-task-body');
+
+    const alphaTrace = readWrittenTrace('run-alpha');
+    const betaTrace = readWrittenTrace('run-beta');
+    expect(alphaTrace).toBeDefined();
+    expect(betaTrace).toBeDefined();
+    expect(alphaTrace!).toContain('alpha-task-body');
+    expect(alphaTrace!).not.toContain('beta-task-body');
+    expect(alphaTrace!).not.toContain(betaCwd);
+    expect(betaTrace!).toContain('beta-task-body');
+    expect(betaTrace!).not.toContain('alpha-task-body');
+    expect(betaTrace!).not.toContain(alphaCwd);
+
+    const alphaTraceCall = traceWriterCalls.find((call) => call.tracePath.includes('run-alpha'));
+    const betaTraceCall = traceWriterCalls.find((call) => call.tracePath.includes('run-beta'));
+    expect(alphaTraceCall?.promptLogPath).toBe(runPromptsLogPath(alphaCwd, 'run-alpha'));
+    expect(betaTraceCall?.promptLogPath).toBe(runPromptsLogPath(betaCwd, 'run-beta'));
+
+    for (const [cwd, runSlug, task] of [
+      [alphaCwd, 'run-alpha', 'alpha-task-body'],
+      [betaCwd, 'run-beta', 'beta-task-body'],
+    ] as const) {
+      const sessionLines = readFileSync(join(runLogsDir(cwd, runSlug), `${TEST_SESSION_ID}.jsonl`), 'utf-8')
+        .split('\n')
+        .filter((line) => line.length > 0);
+      const firstRecord = JSON.parse(sessionLines[0]!) as { type: string; task: string };
+      expect(firstRecord.type).toBe('workflow_start');
+      expect(firstRecord.task).toBe(task);
+    }
+  }
+
+  it('should write prompt log records to the run-scoped prompts log when debug is enabled', async () => {
     await executeWorkflow(makeConfig(), 'task', projectDir, {
       projectCwd: projectDir,
+      reportDirName: 'debug-run',
     });
 
-    expect(mockWritePromptLog).toHaveBeenCalledTimes(2);
-    const records = mockWritePromptLog.mock.calls.map((call) => call[0]) as Array<{
-      step: string;
-      phase: number;
-      iteration: number;
-      prompt: string;
-      response: string;
-      timestamp: string;
-    }>;
+    const records = readRunPromptRecords(projectDir, 'debug-run');
+    expect(records).toHaveLength(2);
     const record = records.find((entry) => entry.phase === 1)!;
     expect(record.step).toBe('implement');
     expect(record.phase).toBe(1);
@@ -457,49 +525,123 @@ describe('executeWorkflow debug prompts logging', () => {
     expect(record.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 
-  it('should separate system prompt and user instruction in debug prompt records', async () => {
-    mockIsDebugEnabled.mockReturnValue(true);
-
+  it('should separate system prompt and user instruction in run-scoped prompt records', async () => {
     await executeWorkflow(makeConfig(), 'task', projectDir, {
       projectCwd: projectDir,
+      reportDirName: 'debug-run',
     });
 
-    expect(mockWritePromptLog).toHaveBeenCalledTimes(2);
-    const records = mockWritePromptLog.mock.calls.map((call) => call[0]) as Array<Record<string, unknown> & { phase: number }>;
+    const records = readRunPromptRecords(projectDir, 'debug-run');
     const record = records.find((entry) => entry.phase === 1)!;
-    expect(record).toHaveProperty('systemPrompt');
-    expect(record).toHaveProperty('userInstruction');
     expect(record.systemPrompt).toBeTypeOf('string');
     expect(record.userInstruction).toBeTypeOf('string');
   });
 
-  it('should not write prompt log record when debug is disabled', async () => {
+  it('should not create a prompts log file when debug is disabled', async () => {
     mockIsDebugEnabled.mockReturnValue(false);
 
     await executeWorkflow(makeConfig(), 'task', projectDir, {
       projectCwd: projectDir,
+      reportDirName: 'debug-disabled-run',
     });
 
-    expect(mockWritePromptLog).not.toHaveBeenCalled();
+    const logEntries = readdirSync(runLogsDir(projectDir, 'debug-disabled-run'));
+    expect(logEntries.filter((entry) => entry.endsWith('-prompts.jsonl'))).toEqual([]);
+    const traceCall = traceWriterCalls.find((call) => call.tracePath.includes('debug-disabled-run'));
+    expect(traceCall?.promptLogPath).toBeUndefined();
   });
 
-  it('should handle repeated phase starts for same step and phase without missing debug prompt', async () => {
-    mockIsDebugEnabled.mockReturnValue(true);
-
+  it('should keep repeated phase starts in the same run as distinct prompt records', async () => {
     await executeWorkflow(makeConfig(), 'duplicate-phase-task', projectDir, {
       projectCwd: projectDir,
+      reportDirName: 'debug-run',
     });
 
-    expect(mockWritePromptLog).toHaveBeenCalledTimes(3);
-    const records = mockWritePromptLog.mock.calls.map((call) => call[0]) as Array<{
-      phase: number;
-      response: string;
-    }>;
+    const records = readRunPromptRecords(projectDir, 'debug-run');
+    expect(records).toHaveLength(3);
     const phase1Responses = records
       .filter((record) => record.phase === 1)
       .map((record) => record.response);
     expect(phase1Responses).toHaveLength(2);
     expect(phase1Responses.every((response) => typeof response === 'string' && response.length > 0)).toBe(true);
+  });
+
+  it('should write the run-scoped prompts log as a private file with sanitized records', async () => {
+    await executeWorkflow(makeConfig(), 'sensitive-content-task', projectDir, {
+      projectCwd: projectDir,
+      reportDirName: 'debug-sensitive-run',
+    });
+
+    const promptsPath = runPromptsLogPath(projectDir, 'debug-sensitive-run');
+    expect(statSync(promptsPath).mode & 0o777).toBe(0o600);
+    const content = readFileSync(promptsPath, 'utf-8');
+    expect(content).toContain('[REDACTED]');
+    expect(content).not.toContain('plain-secret');
+    expect(content).not.toContain('super-secret-token');
+  });
+
+  it('should isolate prompt records and traces between sequential runs in the same process', async () => {
+    const alphaCwd = join(projectDir, 'alpha-work');
+    const betaCwd = join(projectDir, 'beta-work');
+    mkdirSync(alphaCwd, { recursive: true });
+    mkdirSync(betaCwd, { recursive: true });
+
+    await executeWorkflow(makeConfig(), 'alpha-task-body', alphaCwd, {
+      projectCwd: projectDir,
+      reportDirName: 'run-alpha',
+    });
+    await executeWorkflow(makeConfig(), 'beta-task-body', betaCwd, {
+      projectCwd: projectDir,
+      reportDirName: 'run-beta',
+    });
+
+    expectIsolatedRunArtifacts(alphaCwd, betaCwd);
+  });
+
+  it('should isolate prompt records and traces between concurrent runs in the same process', async () => {
+    const alphaCwd = join(projectDir, 'alpha-work');
+    const betaCwd = join(projectDir, 'beta-work');
+    mkdirSync(alphaCwd, { recursive: true });
+    mkdirSync(betaCwd, { recursive: true });
+
+    await Promise.all([
+      executeWorkflow(makeConfig(), 'alpha-task-body', alphaCwd, {
+        projectCwd: projectDir,
+        reportDirName: 'run-alpha',
+      }),
+      executeWorkflow(makeConfig(), 'beta-task-body', betaCwd, {
+        projectCwd: projectDir,
+        reportDirName: 'run-beta',
+      }),
+    ]);
+
+    expectIsolatedRunArtifacts(alphaCwd, betaCwd);
+  });
+
+  it('should not mix task body, cwd, or response across runs in full trace mode', async () => {
+    traceFullState.enabled = true;
+    const alphaCwd = join(projectDir, 'alpha-work');
+    const betaCwd = join(projectDir, 'beta-work');
+    mkdirSync(alphaCwd, { recursive: true });
+    mkdirSync(betaCwd, { recursive: true });
+
+    await executeWorkflow(makeConfig(), 'alpha-task-body', alphaCwd, {
+      projectCwd: projectDir,
+      reportDirName: 'run-alpha',
+    });
+    await executeWorkflow(makeConfig(), 'beta-task-body', betaCwd, {
+      projectCwd: projectDir,
+      reportDirName: 'run-beta',
+    });
+
+    expectIsolatedRunArtifacts(alphaCwd, betaCwd);
+
+    const alphaTrace = readWrittenTrace('run-alpha');
+    const betaTrace = readWrittenTrace('run-beta');
+    expect(alphaTrace!).toContain(`phase response for alpha-task-body in ${alphaCwd}`);
+    expect(alphaTrace!).not.toContain('phase response for beta-task-body');
+    expect(betaTrace!).toContain(`phase response for beta-task-body in ${betaCwd}`);
+    expect(betaTrace!).not.toContain('phase response for alpha-task-body');
   });
 
   it('should fail fast when taskPrefix is provided without taskColorIndex', async () => {

@@ -7,6 +7,7 @@ import {
   renderTraceReportFromRecords,
   renderTraceReportMarkdown,
 } from '../features/tasks/execute/traceReport.js';
+import { buildWorkflowStepScopeKey } from '../features/tasks/execute/workflowStepScope.js';
 
 describe('traceReport', () => {
   it('returns no optional trace report when session records are absent', () => {
@@ -376,6 +377,106 @@ describe('traceReport', () => {
     expect(markdown).not.toContain('xyz987');
     expect(markdown).not.toContain('ghp_abcdef1234567890');
     expect(markdown).not.toContain('xoxb-1234abcd-5678efgh');
+  });
+
+  it('correlates a prompt log record to its phase by scope and phaseExecutionId', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'trace-report-prompt-correlation-'));
+    const sessionPath = join(dir, 'session.jsonl');
+    const promptsPath = join(dir, 'prompts.jsonl');
+    writeFileSync(sessionPath, [
+      JSON.stringify({ type: 'workflow_start', task: 'task', workflowName: 'workflow', startTime: '2026-03-04T11:59:00.000Z' }),
+      JSON.stringify({ type: 'phase_start', step: 'plan', iteration: 1, phase: 1, phaseName: 'execute', phaseExecutionId: 'plan:1:1:1', timestamp: '2026-03-04T11:59:02.000Z' }),
+      JSON.stringify({ type: 'phase_complete', step: 'plan', iteration: 1, phase: 1, phaseName: 'execute', phaseExecutionId: 'plan:1:1:1', status: 'done', content: 'phase response from session', timestamp: '2026-03-04T11:59:03.000Z' }),
+      JSON.stringify({ type: 'workflow_complete', iterations: 1, endTime: '2026-03-04T12:00:00.000Z' }),
+      '',
+    ].join('\n'));
+    writeFileSync(promptsPath, [
+      JSON.stringify({
+        step: 'plan',
+        phase: 1,
+        iteration: 1,
+        scope: buildWorkflowStepScopeKey('plan', undefined),
+        phaseExecutionId: 'plan:1:1:1',
+        prompt: 'user instruction from prompt log',
+        systemPrompt: 'system prompt from prompt log',
+        userInstruction: 'user instruction from prompt log',
+        response: 'phase response from session',
+        timestamp: '2026-03-04T11:59:03.000Z',
+      }),
+      '',
+    ].join('\n'));
+
+    const markdown = renderTraceReportFromLogs(
+      {
+        tracePath: join(dir, 'trace.md'),
+        workflowName: 'workflow',
+        task: 'task',
+        runSlug: 'run-prompt-correlation',
+        status: 'completed',
+        iterations: 1,
+        endTime: '2026-03-04T12:00:00.000Z',
+      },
+      sessionPath,
+      promptsPath,
+      'full',
+    );
+
+    expect(markdown).toBeDefined();
+    expect(markdown).toContain('system prompt from prompt log');
+    expect(markdown).toContain('user instruction from prompt log');
+  });
+
+  it('throws when one run holds duplicate prompt records for the same scope and phaseExecutionId', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'trace-report-duplicate-prompt-'));
+    const sessionPath = join(dir, 'session.jsonl');
+    const promptsPath = join(dir, 'prompts.jsonl');
+    writeFileSync(sessionPath, [
+      JSON.stringify({ type: 'workflow_start', task: 'task', workflowName: 'workflow', startTime: '2026-03-04T11:59:00.000Z' }),
+      '',
+    ].join('\n'));
+    const scope = buildWorkflowStepScopeKey('plan', undefined);
+    writeFileSync(promptsPath, [
+      JSON.stringify({
+        step: 'plan',
+        phase: 1,
+        iteration: 1,
+        scope,
+        phaseExecutionId: 'plan:1:1:1',
+        prompt: 'prompt text',
+        systemPrompt: 'system prompt',
+        userInstruction: 'prompt text',
+        response: 'first response',
+        timestamp: '2026-03-04T11:59:03.000Z',
+      }),
+      JSON.stringify({
+        step: 'plan',
+        phase: 1,
+        iteration: 1,
+        scope,
+        phaseExecutionId: 'plan:1:1:1',
+        prompt: 'prompt text',
+        systemPrompt: 'system prompt',
+        userInstruction: 'prompt text',
+        response: 'second response',
+        timestamp: '2026-03-04T11:59:04.000Z',
+      }),
+      '',
+    ].join('\n'));
+
+    expect(() => renderTraceReportFromLogs(
+      {
+        tracePath: join(dir, 'trace.md'),
+        workflowName: 'workflow',
+        task: 'task',
+        runSlug: 'run-duplicate-prompt',
+        status: 'completed',
+        iterations: 1,
+        endTime: '2026-03-04T12:00:00.000Z',
+      },
+      sessionPath,
+      promptsPath,
+      'full',
+    )).toThrow('Duplicate prompt execution');
   });
 
 });

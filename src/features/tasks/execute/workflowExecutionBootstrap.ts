@@ -51,7 +51,7 @@ import { TaskPrefixWriter } from '../../../shared/ui/TaskPrefixWriter.js';
 import { getErrorMessage } from '../../../shared/utils/error.js';
 import {
   createLogger,
-  getDebugPromptsLogFile,
+  isDebugEnabled,
   isValidReportDirName,
   preventSleep,
 } from '../../../shared/utils/index.js';
@@ -60,6 +60,7 @@ import { sanitizeTerminalText } from '../../../shared/utils/text.js';
 import { createUsageEventLogger, isUsageEventsEnabled } from '../../../core/logging/usageEventLogger.js';
 import { initializeOtelFoundation, type OtelFoundationHandle } from '../../../infra/observability/otelFoundation.js';
 import {
+  DEBUG_PROMPTS_LOG_FILE_SUFFIX,
   OTEL_SESSION_SHADOW_LOG_FILE_SUFFIX,
   PHASE_USAGE_EVENTS_LOG_FILE_SUFFIX,
 } from '../../../core/logging/contracts.js';
@@ -517,7 +518,13 @@ export async function createWorkflowExecutionBootstrap(
       startTime: runBootstrap.startedAt,
     },
   );
-  const sessionLogger = new SessionLogger(ndjsonLogPath, allowSensitiveData);
+  // debug prompt ログは terminal trace の入力になるため、process 共通ではなく
+  // run 専用ファイル（logs/{sessionId}-prompts.jsonl）へ分離する。別 run の
+  // 同一 phaseExecutionId が共有ファイルで衝突する問題（#1428）を防ぐ。
+  const promptLogPath = isDebugEnabled()
+    ? join(runPaths.logsAbs, `${workflowSessionId}${DEBUG_PROMPTS_LOG_FILE_SUFFIX}`)
+    : undefined;
+  const sessionLogger = new SessionLogger(ndjsonLogPath, allowSensitiveData, promptLogPath);
   if (options.interactiveMetadata) {
     sessionLogger.writeInteractiveMetadata(options.interactiveMetadata);
   }
@@ -676,7 +683,6 @@ export async function createWorkflowExecutionBootstrap(
         updateWorktreeSession(projectCwd, cwd, personaName, personaSessionId, currentProvider)
     : (persona: string, personaSessionId: string | undefined) =>
         updatePersonaSession(projectCwd, persona, personaSessionId, currentProvider);
-  const promptLogPath = getDebugPromptsLogFile() ?? undefined;
   const observabilityOptions = globalConfig.observability.enabled
     && (
       globalConfig.observability.sessionLogExporter
