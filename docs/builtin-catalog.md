@@ -105,12 +105,10 @@ Run `takt` to choose a workflow interactively.
 | Persona | Description |
 |---------|-------------|
 | **planner** | Task analysis, spec investigation, implementation planning |
-| **architect-planner** | Task analysis and design planning: investigates code, resolves unknowns, creates implementation plans |
 | **coder** | Feature implementation, bug fixing |
 | **ai-antipattern-reviewer** | AI-specific antipattern review (non-existent APIs, incorrect assumptions, scope creep) |
 | **architecture-reviewer** | Architecture and code quality review, spec compliance verification |
 | **coding-reviewer** | Implementation-level code review: concrete bugs, regressions, security risks, and missing tests against the task intent and diff |
-| **implementation-semantics-reviewer** | Implementation semantics review: data structure choice, state normalization, naming-meaning alignment, fail-fast at boundaries |
 | **frontend-reviewer** | Frontend (React/Next.js) code quality and best practices review |
 | **cqrs-es-reviewer** | CQRS+Event Sourcing architecture and implementation review |
 | **security-reviewer** | Security vulnerability assessment |
@@ -124,14 +122,11 @@ Run `takt` to choose a workflow interactively.
 | **test-planner** | Test strategy analysis and comprehensive test planning |
 | **testing-reviewer** | Testing-focused code review with integration test requirements analysis |
 | **review-adjudicator** | Adjudicates review findings from evidence and establishes the authoritative remediation set |
-| **contract-lifecycle-reviewer** | Contract lifecycle review across definition, producer, consumer, validation, and migration paths |
-| **robustness-reviewer** | Robustness review for failure handling, boundary conditions, and operational resilience |
 | **terraform-coder** | Terraform IaC implementation |
 | **terraform-reviewer** | Terraform IaC review |
 | **melchior** | MAGI deliberation system: MELCHIOR-1 (scientist perspective) |
 | **balthasar** | MAGI deliberation system: BALTHASAR-2 (mother perspective) |
 | **casper** | MAGI deliberation system: CASPER-3 (woman perspective) |
-| **pr-commenter** | Posts review findings as GitHub PR comments |
 
 `exec-assistant` and `exec-worker` also exist as builtin persona files, but they are internal personas for `exec`-generated workflows and are not intended for direct use in custom workflows.
 

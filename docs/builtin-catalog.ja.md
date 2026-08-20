@@ -104,12 +104,10 @@ workflow YAML 自体には provider/model/provider-options field はありませ
 | Persona | 説明 |
 |---------|-------------|
 | **planner** | タスク分析、仕様調査、実装計画 |
-| **architect-planner** | タスク分析と設計計画: コード調査、不明点の解消、実装計画の作成 |
 | **coder** | 機能実装、バグ修正 |
 | **ai-antipattern-reviewer** | AI 固有のアンチパターンレビュー（存在しない API、誤った前提、スコープクリープ） |
 | **architecture-reviewer** | アーキテクチャとコード品質のレビュー、仕様準拠の検証 |
 | **coding-reviewer** | 実装レベルのコードレビュー: タスク意図と差分に対する具体的なバグ、リグレッション、セキュリティリスク、テスト不足 |
-| **implementation-semantics-reviewer** | 実装セマンティクスレビュー: データ構造の選択、状態の正規化、命名と意味の整合、境界での fail-fast |
 | **frontend-reviewer** | フロントエンド (React/Next.js) のコード品質とベストプラクティスのレビュー |
 | **cqrs-es-reviewer** | CQRS+Event Sourcing のアーキテクチャと実装のレビュー |
 | **security-reviewer** | セキュリティ脆弱性の評価 |
@@ -123,14 +121,11 @@ workflow YAML 自体には provider/model/provider-options field はありませ
 | **test-planner** | テスト戦略の分析と包括的なテスト計画 |
 | **testing-reviewer** | テスト重視のコードレビューとインテグレーションテスト要件分析 |
 | **review-adjudicator** | 証拠に基づいてレビュー指摘を裁定し、正式な修正対象セットを確定する |
-| **contract-lifecycle-reviewer** | 契約の定義・生成・利用・検証・移行経路を横断して確認するレビュー |
-| **robustness-reviewer** | 障害処理、境界条件、運用上の耐性を確認する堅牢性レビュー |
 | **terraform-coder** | Terraform IaC の実装 |
 | **terraform-reviewer** | Terraform IaC のレビュー |
 | **melchior** | MAGI 合議システム: MELCHIOR-1（科学者の観点） |
 | **balthasar** | MAGI 合議システム: BALTHASAR-2（母親の観点） |
 | **casper** | MAGI 合議システム: CASPER-3（女性の観点） |
-| **pr-commenter** | レビュー結果を GitHub PR コメントとして投稿 |
 
 `exec-assistant` と `exec-worker` もビルトイン persona ファイルとして存在しますが、これらは `exec` 生成ワークフロー用の内部ペルソナであり、カスタム workflow から直接使うことは想定されていません。
 
