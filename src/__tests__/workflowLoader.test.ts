@@ -199,6 +199,12 @@ describe('loadWorkflowByIdentifier', () => {
     expect(workflow!.name).toBe('default');
   });
 
+  it('should load the loop analysis builtin workflow', () => {
+    const workflow = loadWorkflowByIdentifier('loop-analysis', process.cwd());
+
+    expect(workflow?.name).toBe('loop-analysis');
+  });
+
   it('TEST-NEW-review-fix-contract keeps review-fix aligned with default peer-review wiring', () => {
     for (const language of ['en', 'ja'] as const) {
       const projectDir = join(tempDir, language);

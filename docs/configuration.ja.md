@@ -594,6 +594,45 @@ companion が有効な間だけです。無効時も companion 宣言と `target
 維持されますが、companion の provider 解決と実行は行われません — companion を宣言した
 ワークフローは、companion 用の provider 設定なしで実行できます。
 
+### run 完了後のループ分析
+
+ループ分析は opt-in 機能です。run の終端成果物が確定した後に分析するには、トップレベルの
+`loop_analysis` を追加します。
+
+```yaml
+version: 1
+loop_analysis:
+  enabled: true
+  output: file # file | pr-comment。既定値は file
+```
+
+有効時は、成功・失敗・中断したすべての元 run から builtin の `loop-analysis` workflow を
+非同期で起動します。元 run は分析の完了を待たず、分析の起動・実行失敗も元 run の結果を
+変更しません。手動で force-fail した run も、終端成果物の確定直後に分析対象になります。
+分析 run から別の分析 run は起動しません。同一 run の解析ジョブは1回だけ作成されます。
+
+終端成果物の確定直後にプロセスが OS の強制終了（`SIGKILL`）を受け、解析ジョブの永続化まで
+到達しなかった場合、そのプロセス自身から解析を起動することはできません。dispatch claim は意図的に
+at-most-once であるため、claim がプロセス終了直前に永続化されていた場合、task 一覧から run を
+force-fail しても、この状態を自動復旧できる保証はありません。
+
+分析 agent は元 run に存在する JSONL ログ、trace、monitor data、report、保存済みのワークフロー定義と、
+各 step が参照した facets を読みます。複数 step で共有する不変条件はワークフロー全体の rule、step 固有の
+問題は対応する facet の変更として提案します。reviewer は、根拠不足、過剰な個別最適化、対象となる
+ワークフロー動作の誤りがある場合、明示的な再分析を最大2回まで要求できます。再分析では各指摘を
+対応済みまたは根拠付きの対応不能に分類し、対応不能な案を撤回した上で再び reviewer が判定します。
+最終 report は常に分析 run の `reports/loop-analysis.md` へ保存されます。
+
+`output: pr-comment` の場合、元 run で auto-PR が有効で、その branch の PR が既に存在するときだけ、
+保存済み report と同一内容をコメントします。PR が存在しない場合は report ファイルだけを残します。
+`loop_analysis` 内に provider、model、provider options は指定できません。通常の runtime provider
+target で分析 step を割り当ててください。global と project の両方が `loop_analysis` を定義した場合、
+project のセクションが global のセクション全体を置き換えます。
+
+公開前に、TAKTは認識できたsecret、credential、token、個人識別情報、絶対ローカルパス、runnerを
+特定できるmetadataを除去します。除去によって内容が変わる場合は保存済みreportも安全化後の内容で
+置き換え、ファイルとPRコメントを同一に保ちます。
+
 runtime モードはファイルの存在ではなく、有効な `provider` セクションの有無で有効化されます。`version: 1` だけのファイルは inactive で、従来の `config.yaml` による provider 解決がそのまま使われます。
 
 ### 設定例

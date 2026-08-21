@@ -603,6 +603,55 @@ declarations and the structural validation of `targets.companions` remain in
 place, but no companion provider is resolved or executed — a workflow that
 declares companions runs without any companion provider configuration.
 
+### Post-run loop analysis
+
+Loop analysis is opt-in. Add the top-level `loop_analysis` section to analyze
+completed runs after their terminal artifacts have been finalized:
+
+```yaml
+version: 1
+loop_analysis:
+  enabled: true
+  output: file # file | pr-comment; defaults to file
+```
+
+When enabled, every successful, failed, or interrupted source run starts the
+builtin `loop-analysis` workflow asynchronously. The source run does not wait
+for analysis, and an analysis startup or execution failure does not change the
+source result. Analysis runs do not schedule another analysis run.
+Runs terminalized through manual force-fail are also scheduled immediately after
+their terminal artifacts are committed. Each source run creates at most one
+analysis job.
+
+If the process receives an OS-level forced termination (`SIGKILL`) after the
+terminal artifacts are committed but before the analysis job is persisted, that
+process cannot start the analysis itself. The dispatch claim is intentionally
+at-most-once, so force-failing the run from the task list is not an automatic
+recovery guarantee for a claim that was persisted immediately before the
+process was killed.
+
+The analyzer reads the source run's available JSONL logs, trace, monitor data,
+reports, saved workflow definition, and the facets referenced by each step. It
+expresses invariants shared by multiple steps as workflow-wide rules and
+step-specific problems as changes to the responsible facet. The reviewer can
+request explicit reanalysis up to two times when a proposal is unsupported,
+over-specialized, or targets the wrong workflow behavior. Reanalysis classifies
+each finding as addressed or unable to be addressed with evidence, withdraws
+the affected proposal in the latter case, and returns it to the reviewer. The
+final report is always written to the analysis run's `reports/loop-analysis.md`.
+
+With `output: pr-comment`, the same persisted report content is also posted when
+the source run has auto-PR enabled and its branch already has a pull request. If
+no pull request exists, only the report file is retained. Provider, model, and
+provider options are not valid inside `loop_analysis`; configure the analysis
+steps through normal runtime provider targets. When both runtime files define
+`loop_analysis`, the project section replaces the global section as a unit.
+
+Before publication, TAKT removes recognized secrets, credentials, tokens,
+personally identifiable data, absolute local paths, and runner-identifying
+metadata. If redaction changes the report, the sanitized content replaces the
+persisted report so the file and pull-request comment remain identical.
+
 Runtime mode is enabled by the presence of an active `provider` section, not by the file existing. A file that only contains `version: 1` is inactive and leaves the legacy `config.yaml` provider resolution in place.
 
 ### Configuration example
