@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises';
+import { realpathSync } from 'node:fs';
 import * as path from 'node:path';
 import {
   createBashToolDefinition,
@@ -198,6 +199,9 @@ function resolvePiModel(
 function assertSafeExtensionSources(sources: readonly string[]): void {
   for (const source of sources) {
     const trimmedSource = source.trim();
+    if (trimmedSource.startsWith('npm:') && !getSafeNpmPackageName(trimmedSource)) {
+      throw new Error('Pi npm extension sources must use a valid package name');
+    }
     const candidate = trimmedSource.startsWith('git:') && !trimmedSource.startsWith('git://')
       ? trimmedSource.slice('git:'.length)
       : trimmedSource;
@@ -248,30 +252,166 @@ function enabledResourcePaths(paths: ResolvedPaths, key: keyof ResolvedPaths): s
     .map((resource) => resource.path);
 }
 
+function countEnabledResolvedResources(paths: ResolvedPaths): number {
+  return enabledResourcePaths(paths, 'extensions').length
+    + enabledResourcePaths(paths, 'skills').length
+    + enabledResourcePaths(paths, 'prompts').length
+    + enabledResourcePaths(paths, 'themes').length;
+}
+
+function isNpmExtensionSource(source: string): boolean {
+  return source.trim().startsWith('npm:');
+}
+
+function getSafeNpmPackageName(source: string): string | undefined {
+  const spec = source.trim().slice('npm:'.length);
+  const versionDelimiter = spec.startsWith('@')
+    ? spec.indexOf('@', spec.indexOf('/') + 1)
+    : spec.indexOf('@');
+  const packageName = versionDelimiter >= 0 ? spec.slice(0, versionDelimiter) : spec;
+  const unscopedName = /^[a-z0-9][a-z0-9._~-]*$/u;
+  const scopedName = /^@[a-z0-9][a-z0-9._~-]*\/[a-z0-9][a-z0-9._~-]*$/u;
+  return unscopedName.test(packageName) || scopedName.test(packageName)
+    ? packageName
+    : undefined;
+}
+
+function isVersionQualifiedNpmExtensionSource(source: string): boolean {
+  const spec = source.trim().slice('npm:'.length);
+  return spec.startsWith('@') ? spec.indexOf('@', 1) >= 0 : spec.includes('@');
+}
+
+interface InstalledPackageLookup {
+  getInstalledPath(source: string): string | undefined;
+}
+
+type ExtensionPackageManager = Pick<
+  DefaultPackageManager,
+  'getInstalledPath' | 'resolveExtensionSources'
+>;
+
+function createProjectInstalledPackageLookup(
+  cwd: string,
+  agentDir: string,
+): InstalledPackageLookup {
+  // This manager exists only to pass the SDK's project-storage trust guard for
+  // a read-only existence lookup. Its settings are in-memory, it is never given
+  // to the resource loader, and no mutating or resolving methods escape.
+  const lookupSettingsManager = SettingsManager.inMemory({}, { projectTrusted: true });
+  const lookupPackageManager = new DefaultPackageManager({
+    cwd,
+    agentDir,
+    settingsManager: lookupSettingsManager,
+  });
+  const projectPackageRoot = path.resolve(cwd, '.pi', 'npm', 'node_modules');
+  return {
+    getInstalledPath: (source) => {
+      const installedPath = lookupPackageManager.getInstalledPath(source, 'project');
+      if (!installedPath) {
+        return undefined;
+      }
+      let canonicalProjectPackageRoot: string;
+      let canonicalInstalledPath: string;
+      try {
+        canonicalProjectPackageRoot = realpathSync(projectPackageRoot);
+        canonicalInstalledPath = realpathSync(installedPath);
+      } catch {
+        return undefined;
+      }
+      const relativePath = path.relative(canonicalProjectPackageRoot, canonicalInstalledPath);
+      if (relativePath === '' || relativePath === '..' || relativePath.startsWith(`..${path.sep}`)
+        || path.isAbsolute(relativePath)) {
+        return undefined;
+      }
+      return canonicalInstalledPath;
+    },
+  };
+}
+
+async function resolveExtensionSourcePaths(
+  packageManager: ExtensionPackageManager,
+  projectLookup: InstalledPackageLookup,
+  source: string,
+  abortSignal: AbortSignal | undefined,
+): Promise<ResolvedPaths> {
+  if (!isNpmExtensionSource(source) || isVersionQualifiedNpmExtensionSource(source)) {
+    const sourcePaths = await packageManager.resolveExtensionSources([source], { temporary: true });
+    if (isAbortRequested(abortSignal)) {
+      throw new Error('Pi session aborted');
+    }
+    return sourcePaths;
+  }
+
+  const existingInstallLookups: InstalledPackageLookup[] = [
+    projectLookup,
+    {
+      getInstalledPath: (npmSource) => packageManager.getInstalledPath(npmSource, 'user'),
+    },
+  ];
+  for (const lookup of existingInstallLookups) {
+    let installedPath: string | undefined;
+    try {
+      installedPath = lookup.getInstalledPath(source);
+    } catch {
+      // A read-only lookup failure must not prevent checking the next existing
+      // install or the temporary fallback.
+    }
+    if (isAbortRequested(abortSignal)) {
+      throw new Error('Pi session aborted');
+    }
+
+    if (installedPath) {
+      try {
+        // Resolve the discovered absolute path as a local source. Passing the original
+        // npm spec here would make the SDK install a missing package into that scope.
+        const sourcePaths = await packageManager.resolveExtensionSources(
+          [installedPath],
+          { temporary: true },
+        );
+        if (isAbortRequested(abortSignal)) {
+          throw new Error('Pi session aborted');
+        }
+        if (countEnabledResolvedResources(sourcePaths) > 0) {
+          return sourcePaths;
+        }
+      } catch {
+        if (isAbortRequested(abortSignal)) {
+          throw new Error('Pi session aborted');
+        }
+      }
+    }
+  }
+
+  const sourcePaths = await packageManager.resolveExtensionSources([source], { temporary: true });
+  if (isAbortRequested(abortSignal)) {
+    throw new Error('Pi session aborted');
+  }
+  return sourcePaths;
+}
+
 async function resolvePiResources(
   cwd: string,
   agentDir: string,
   options: PiCallOptions,
   settingsManager: SettingsManager,
 ): Promise<ResolvedPaths> {
-  const sources = options.providerOptions?.extensions ?? [];
+  const sources = (options.providerOptions?.extensions ?? []).map((source) => source.trim());
   if (sources.length === 0) {
     return { extensions: [], skills: [], prompts: [], themes: [] };
   }
 
   assertSafeExtensionSources(sources);
   const packageManager = new DefaultPackageManager({ cwd, agentDir, settingsManager });
+  const projectLookup = createProjectInstalledPackageLookup(cwd, agentDir);
   const resolved: ResolvedPaths = { extensions: [], skills: [], prompts: [], themes: [] };
   for (const source of sources) {
-    const sourcePaths = await packageManager.resolveExtensionSources([source], { temporary: true });
-    if (isAbortRequested(options.abortSignal)) {
-      throw new Error('Pi session aborted');
-    }
-    const resolvedCount = sourcePaths.extensions.length
-      + sourcePaths.skills.length
-      + sourcePaths.prompts.length
-      + sourcePaths.themes.length;
-    if (resolvedCount === 0) {
+    const sourcePaths = await resolveExtensionSourcePaths(
+      packageManager,
+      projectLookup,
+      source,
+      options.abortSignal,
+    );
+    if (countEnabledResolvedResources(sourcePaths) === 0) {
       throw new Error('Pi extension source could not be resolved');
     }
     resolved.extensions.push(...sourcePaths.extensions);
@@ -569,8 +709,8 @@ async function createPiSession(
     throw new Error('Pi session aborted');
   }
   // Explicit provider options are trusted input. Project-local Pi resources are
-  // not: keep implicit .pi discovery disabled while still loading temporary
-  // extension sources passed through additionalExtensionPaths.
+  // not: keep implicit .pi discovery disabled while loading only explicitly
+  // resolved extension paths through additionalExtensionPaths.
   const settingsManager = SettingsManager.inMemory({}, { projectTrusted: false });
   const runtime = await createModelRuntime(agentDir);
   if (isAbortRequested(options.abortSignal)) {
