@@ -1,6 +1,6 @@
-Review this cumulative work-in-progress diff without tools.
+Review this cumulative work-in-progress diff as the current state.
 
-Task contract: move request-token normalization to `normalizeRequestToken` and migrate every current producer and consumer that applies the same trim-and-lowercase invariant. Telemetry label formatting is a separate behavior and must remain unchanged.
+Task contract: move request-token normalization to `normalizeRequestToken`, migrate every current producer and consumer that applies the same trim-and-lowercase invariant, and preserve the web path's rejection of an empty normalized request token. Telemetry label formatting is a separate behavior and must remain unchanged.
 
 ```diff
 diff --git a/src/token-normalization.ts b/src/token-normalization.ts
@@ -19,10 +19,14 @@ diff --git a/src/web-request.ts b/src/web-request.ts
 index 3333333..4444444 100644
 --- a/src/web-request.ts
 +++ b/src/web-request.ts
-@@ -1,5 +1,5 @@
+@@ -1,8 +1,5 @@
 +import { normalizeRequestToken } from './token-normalization.js';
  export function webToken(raw: string): string {
--  return raw.trim().toLowerCase();
+-  const token = raw.trim().toLowerCase();
+-  if (token === '') {
+-    throw new Error('Request token must not be empty');
+-  }
+-  return token;
 +  return normalizeRequestToken(raw);
  }
 diff --git a/src/cli-request.ts b/src/cli-request.ts
@@ -43,4 +47,4 @@ index 6666666..6666666 100644
  }
 ```
 
-A note mentions a possible mobile consumer, but no mobile file or diff is supplied.
+A note mentions a possible mobile consumer, but no mobile file or evidence is supplied.
