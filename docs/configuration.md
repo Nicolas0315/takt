@@ -1284,7 +1284,9 @@ Categories can be configured in:
 # ~/.takt/preferences/workflow-categories.yaml (or the file set by workflow_categories_file)
 workflow_categories:
   Development:
-    workflows: [default, simple]
+    workflows:
+      - default: "Standard coding workflow"   # name: description adds it to the selection label
+      - simple
     Backend:
       workflows: [dual-cqrs]
     Frontend:
@@ -1300,6 +1302,7 @@ others_category_name: "Other Workflows"  # Name for uncategorized category
 
 - **Nested categories** — unlimited depth for hierarchical organization; under a category, every key other than `workflows` is treated as a child category name (there is no `children:` key)
 - **Per-category workflow lists** — under each category, `workflows:` holds workflow names to show in that group
+- **Workflow descriptions** — write a `workflows:` entry as `- name: description` to append a short description to its selection label (plain string entries still work). For a workflow listed in multiple categories, write the same description at each occurrence; conflicting descriptions for the same workflow in one file are rejected as a validation error. User overlay entries override builtin entries by workflow name and may add user-only names
 - **Others category** — collects workflows not listed under any category (disable with `show_others_category: false`)
 - **Builtin workflow filtering** — turn off all builtins with `enable_builtin_workflows: false`, or specific names with `disabled_builtins: [name1, name2]`
 
