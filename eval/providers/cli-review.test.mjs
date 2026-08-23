@@ -95,7 +95,7 @@ test('abort terminates the entire CLI process tree', {
   await verifyTreeTermination('abort');
 });
 
-test('zero and default timeout modes run every shell wrapper without starting a watchdog', {
+test('zero and default timeout modes run non-inactivity shell wrappers without starting a watchdog', {
   skip: process.platform === 'win32',
 }, () => {
   const directory = mkdtempSync(join(tmpdir(), 'takt-review-wrapper-'));
@@ -146,13 +146,11 @@ test('zero and default timeout modes run every shell wrapper without starting a 
       if (timeoutMode === 'explicit-zero') {
         env.CLAUDE_CODER_TIMEOUT_SECONDS = '0';
         env.CLAUDE_REVIEW_TIMEOUT_SECONDS = '0';
-        env.CODEX_REVIEW_TIMEOUT_SECONDS = '0';
         env.CLAUDE_JUDGE_TIMEOUT_SECONDS = '0';
         env.CODEX_JUDGE_TIMEOUT_SECONDS = '0';
       } else {
         delete env.CLAUDE_CODER_TIMEOUT_SECONDS;
         delete env.CLAUDE_REVIEW_TIMEOUT_SECONDS;
-        delete env.CODEX_REVIEW_TIMEOUT_SECONDS;
         delete env.CLAUDE_JUDGE_TIMEOUT_SECONDS;
         delete env.CODEX_JUDGE_TIMEOUT_SECONDS;
       }
@@ -174,16 +172,6 @@ test('zero and default timeout modes run every shell wrapper without starting a 
       ], { cwd: EVAL_DIR, env, encoding: 'utf8' });
       assert.equal(claudeCoder.status, 0, claudeCoder.stderr);
       assert.equal(claudeCoder.stdout, 'claude-ok\n');
-
-      const codex = spawnSync('bash', [
-        'providers/codex-review.sh',
-        'fake-sol',
-        'max',
-        'fixtures/review-adjudication',
-        'prompt',
-      ], { cwd: EVAL_DIR, env, encoding: 'utf8' });
-      assert.equal(codex.status, 0, codex.stderr);
-      assert.equal(codex.stdout, 'codex-ok\n');
 
       const claudeJudge = spawnSync('bash', [
         'providers/claude-judge.sh',

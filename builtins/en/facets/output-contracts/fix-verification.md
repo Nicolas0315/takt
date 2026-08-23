@@ -1,38 +1,54 @@
 ```markdown
-# Repair Completion Verification
+# Fix Completion Verification
 
-## Result
-{State briefly whether the planned repair is complete, implementation or evidence remains insufficient, or the plan needs revision}
+## Result: verified / incomplete / plan_invalid
+
+When a plan omission or other plan defect coexists with an implementation or evidence gap, record every gap of both kinds in the unmet or unverified items — never drop one kind of gap because the other exists. For an item affected by both conditions, record both applicable conditions, their evidence, and the required actions.
 
 ## Summary
-{Decision and key evidence}
+{Decision and primary evidence}
 
-## Plan Consistency
-| Repair Unit | Findings | Cause, Repair Boundary, and Verification Method | Decision |
-|-------------|----------|--------------------------------------------------|----------|
-| {Name from the plan} | {ID list} | {Result of checking current code and applicable constraints} | {Whether the plan remains valid or needs revision} |
+## Invariant Recurrence Record
+| Fix Unit | Family ID | Invariant Name | Responsible Source | Current Verification Number | Previous Verification Number | Previous Path | Current Path | Same-Invariant / Recurrence Judgment | Cumulative `incomplete` Count | Recurrence on a Different Path Confirmed? | Enforcement-Point Candidate | Record Integrity |
+|----------|-----------|----------------|-------------------|-----------------------------|--------------------------------|---------------|--------------|--------------------------------------|-------------------------------|-------------------------------------------|-----------------------------|----------------|
+| {One row for every invariant in the fix plan} | {Family ID from the plan} | {Invariant name from the plan} | {Responsible source from the plan: the single responsibility and source that defines the invariant and guarantees it holds} | {Current verification number when currently incomplete; otherwise carry unchanged} | {Number of the preceding incomplete verification when currently incomplete; otherwise carry unchanged} | {Complete affected-path set from the preceding incomplete verification when currently incomplete; otherwise carry unchanged} | {Complete current violating-path set when currently incomplete; otherwise carry unchanged} | {same / different / recurrent / not recurrent / maintained / cannot determine / cannot determine (first verification); `different` requires the current set to contain a path absent from the preceding incomplete set, and removals alone do not qualify} | {Increment at most once only when currently incomplete; otherwise carry unchanged; use cannot determine with reason when history cannot be reconstructed} | {Keep a carried `confirmed` even when other fields are deficient. Otherwise, with a complete record, use `confirmed` when the same invariant has broken on different paths at least twice and `not confirmed` for a complete first verification; use `cannot determine` only when the value cannot be reconstructed and no carried `confirmed` is known. A recorded `confirmed` may become `not confirmed` only after an explicit plan change whose reason is recorded} | {Required when recurrence on a different path is confirmed; otherwise carry unchanged, Not applicable, or the cautious response when it cannot be determined} | {complete / artifact deficiency / plan deficiency, with reason} |
 
-## Independent Completion Checks
-| Repair Unit | Condition | Path or State Checked | Independently Chosen Method | Observation | Evidence | Decision |
-|-------------|-----------|-----------------------|-----------------------------|-------------|----------|----------|
-| {Name from the plan} | {Acceptance criterion, consumer migration, obsolete-path removal, or preservation of an existing condition} | {Actual path or state} | {Failure example, boundary case, search, or code tracing selected without treating the repair report as ground truth} | {Observed fact} | {Code, diff, focused test, or reproduction result} | {Whether the condition was verified or implementation, evidence, or plan revision remains necessary} |
+Do not treat association with an existing record alone as evidence for the current path. Update the current path and cumulative count only when this completed verification finds the invariant `incomplete` on the associated path.
 
-## Violated or Unverified Items
-| Repair Unit | Kind | Evidence | Why the Earlier Check Missed It | Scope Rechecked with the Same Method | Required Action |
-|-------------|------|----------|---------------------------------|--------------------------------------|-----------------|
-| {Affected unit} | {What remains insufficient} | {Observed fact} | {Unvisited path, weak observation, incorrect assumption, incomplete migration, or missing report} | {Items marked complete under the same premise and their results} | {Repair or plan revision work} |
+## Fix Unit Compatibility
+| Fix Unit | Target Findings | Cause, Repair Boundary, Assumptions, Methods, and Evidentiary Power | Decision |
+|----------|-----------------|---------------------------------------------------------------------|----------|
+| {Fix-unit name from the plan} | {IDs} | {Result of comparison with active constraints and current code} | {compatible / plan invalid} |
 
-## Follow-up That Cannot Be Demonstrated in This Environment
-| Subject | Environmental Limitation | Why the Repository Cannot Resolve It | Alternative Evidence Checked | Follow-up |
-|---------|--------------------------|--------------------------------------|------------------------------|-----------|
-| {Acceptance criterion or none} | {Missing OS, capability, or external environment} | {Why repetition in the same environment adds no evidence} | {Static check, focused test, or execution path} | {Check to perform where execution is possible} |
+## Fix Plan State and Path Check
+| Fix Unit | Authoritative Source | Applicable Member or State | Actual Path from Entry to Terminal | Comparison with Plan | Decision |
+|----------|----------------------|----------------------------|------------------------------------|----------------------|----------|
+| {Fix-unit name from the plan} | {Requirement, specification, schema, type, state transition, or current implementation} | {One independently derived member or state; repeat it for each distinct path} | {One complete entry-to-terminal path using actual names and only applicable stages} | {recorded / required path omitted / out-of-scope path included} | {compatible / plan invalid} |
+
+For every applicable member or state, record each distinct entry-to-terminal path as its own row. When no finite set or state dimension applies, record each existing path governed by the same invariant as its own row. Record current implementation as authoritative only where a definition separate from the behavior under repair establishes the applicable set, state transition, or public contract; never use the behavior under repair as its own source of truth. Do not construct unsupported combinations of dimensions.
+
+## Independent Completion Obligation Verification
+| Fix Unit | Obligation ID | Target Findings | Invariant and Affected Path | Independently Chosen Counterexample or Observation | Observed Result | Evidence | Decision |
+|----------|---------------|-----------------|-----------------------------|----------------------------------------------------|-----------------|----------|----------|
+| {Fix-unit name from the plan} | {ID corresponding to the fix report, or an ID added by independent verification} | {IDs} | {One behavior-correction, consumer-migration, obsolete-path-removal, or existing-contract-preservation obligation and its path} | {Method selected without treating the fix report as an answer key} | {holds / violated / unverified} | {Code, diff, targeted test, search} | {complete / incomplete / plan invalid} |
+
+## Unmet or Unverified Items
+| Fix Unit | Obligation ID | Type | Evidence | Why the Fix Report Evidence Could Not Detect It | Scope Re-audited with the Same Detection Pattern | Required Action |
+|----------|---------------|------|----------|--------------------------------------------------|--------------------------------------------------|-----------------|
+| {Affected unit} | {Obligation ID} | {implementation gap / evidence gap / plan constraint violation / other plan defect} | {Observed fact} | {Unscanned path, weak observation, incomplete migration, unexecuted counterexample, or not reported} | {Fix units and obligations checked by applying the same pattern, with results} | {Action for fix or fix-plan} |
+
+## Follow-up That Cannot Be Demonstrated Due to Environmental Factors (Non-blocking)
+| Target | Environmental Factor | Why the Repository Cannot Resolve It | Alternative Evidence Verified Now | Follow-up |
+|--------|----------------------|--------------------------------------|-----------------------------------|-----------|
+| {Acceptance criterion or None} | {Missing OS, capability, or external environment} | {Why repetition in the same environment cannot increase evidence} | {Deterministic tests, static inspection, execution path, or CI wiring} | {What to verify in an environment where it can run} |
 
 ## Execution Evidence
-| Subject | Method | Result | Connection to the Plan, Diff, or Preserved Condition | Treatment |
-|---------|--------|--------|------------------------------------------------------|-----------|
-| {Acceptance criterion or failure example} | {Command or check} | {Observed result} | {Verified reference path, diff evidence, or baseline comparison} | {How it affects the completion decision} |
+| Target | Method | Result | Connection to the Plan, Diff, or Preserved Condition | Treatment |
+|--------|--------|--------|------------------------------------------------------|-----------|
+| {Acceptance criterion or counterexample} | {Command or inspection method} | {passed / failed / unverified} | {Verified reference path, diff evidence, or baseline comparison} | {How it affects the completion decision} |
 ```
 
-- Do not stop after the first gap; inspect every repair unit related by the same cause or verification method
-- Keep the result statement consistent with the satisfied, violated, or unverified items and required actions recorded in the tables
-- When only an environmental follow-up remains, record why that limitation cannot be resolved within the repository
+For `verified`, state "None" under unmet or unverified items. Follow-up that cannot be demonstrated due to environmental factors may remain, but it is neither successful evidence nor a reason for `incomplete` or `plan_invalid`; state "None" when no such follow-up exists. For `incomplete` or `plan_invalid`, do not stop at the first gap: verify every completion obligation and list every item blocking verification.
+
+- Do not stop after the first gap; inspect every fix unit related by the same cause or verification method.
+- Keep the result statement consistent with the satisfied, violated, or unverified items and required actions recorded in the tables.

@@ -253,6 +253,25 @@ const TARGETS = [
       candidateIds: ['cli'],
     },
   },
+  {
+    id: 'fix-verifier-family-boundary',
+    workflow: 'review-remediation',
+    step: 'fix-verifier',
+    fixture: 'eval/fixtures/fix-verifier-family-boundary',
+  },
+  {
+    id: 'fix-verifier-state-closure',
+    workflow: 'review-remediation',
+    step: 'fix-verifier',
+    fixture: 'eval/fixtures/fix-verifier-state-closure',
+  },
+  {
+    id: 'fix-verifier-state-routing',
+    workflow: 'review-remediation',
+    step: 'fix-verifier',
+    fixture: 'eval/fixtures/fix-verifier-state-closure',
+    phase: 'phase3',
+  },
   { id: 'review-adjudication', workflow: 'peer-review', step: 'review-adjudication', fixture: 'eval/fixtures/review-adjudication' },
   {
     id: 'review-adjudication-phase2',
