@@ -24,7 +24,7 @@
 
 ### Changed
 
-- **BREAKING:** ビルトイン workflow のカタログを再編しました (#1424, #1433, #1448)。旧 `experimental` / `takt-experimental` が新しい `default` / `takt-default` になり、旧 `simple` は `pure` に改名され、`simple` はその dynamic facet 版になりました。`review-default` は `review` に改名され `development-review` 経由でレビュアーを自動選択します。`review-fix-default` は動的な `review-fix` に置き換わり、`default-high` / `default-mini` は削除されました。既存コードの流儀を尊重して開発する `maintenance` workflow を新設し、ビルトインの fix 系ステップに有界の completion retry（`max_retry: 1`）を再導入しました。削除された名前（`experimental`・`takt-experimental`・`review-default`・`review-fix-default`・`default-high`・`default-mini`）を明示参照している設定は更新してください。
+- **BREAKING:** ビルトイン workflow のカタログを再編しました (#1424, #1433, #1448)。旧 `experimental` / `takt-experimental` が新しい `default` / `takt-default` になり、旧 `simple` は `pure` に改名され、`simple` はその dynamic facet 版になりました。`review-default` は `review` に改名され `development-review` 経由でレビュアーを自動選択します。`review-fix-default` は動的な `review-fix` に置き換わり、`default-high` / `default-mini` は削除されました。既存コードの流儀を尊重して開発する `maintenance` workflow を新設しました。削除された名前（`experimental`・`takt-experimental`・`review-default`・`review-fix-default`・`default-high`・`default-mini`）を明示参照している設定は更新してください。
 - `assistant.gherkin` を廃止しました (#1431)。この旧キーは警告後に無視し、変換・永続化・設定ファイル更新は行いません。対話プロンプトと最終タスク指示書プロンプトでは Gherkin のガイダンスを常時有効にしました。
 - Team Leader ステップで `companion` と `dynamic_facets` を使えるようにし (#1402, #1409)、team leader の selector と companion の呼び出しをプロバイダの無活動デッドラインに拘束しました。
 - Companion レビュアーが自分でリポジトリを調査するようになりました (#1439)。インライン差分だけで判断せず、定義された調査範囲内でローカル作業ツリーを読み取り専用で調査し、ラウンドごとの独立した発見を保ちます。
@@ -39,6 +39,8 @@
 - 再開位置ピッカーが実行可能ステップの単一ツリーを表示するようになりました (#1437)。`workflow_call` のコンテナ項目は提示せず、再開の起点になれる実ステップだけを選択できます。
 - プロンプト/レスポンスのデバッグログが workflow run 単位になりました (#1428, #1446)。`.takt/runs/<run>/logs/<sessionId>-prompts.jsonl` に書き出すため、並列 run がプロセス共通の1ファイルで混線しません。一般デバッグログは従来どおりプロセス単位です。
 - Retry と Instruct がタスクの指示書を確認つきで改訂するようになりました (#1442)。両経路とも改訂後の `order.md` を提案して承認を求め、承認時にタスクの指示書を置き換えます。再実行は古い指示書に会話メモを重ねる形ではなく改訂済みの指示書を実行します。ロケールと診断情報は保持され、否認した場合は会話へ戻ります。
+- タスク実行中の Ctrl-C が確実に効くようになりました (#1475, #1483)。run / watch の割り込みハンドラは他のコンポーネントが stdin を pause しても再開して監視を続けるため、長い並列実行の途中でも Ctrl-C が効き続けます。kitty keyboard protocol（CSI-u）でエンコードされた Ctrl-C も割り込みとして認識します。
+- Phase 3 の状態判定と AI judge が分離実行されるようになりました (#1476)。judge の呼び出しには空のツール allowlist を与え MCP サーバも渡さないため、判定が作業ツリーや外部ツールに触れることはありません。この問題への回避策だったビルトイン workflow の `use_judge: false` を削除しました。
 - 対話モードの入力をユーザーコメントとして明示するようになりました (#1460)。assistant / grill-me の各メッセージにユーザーコメントであることを示すヘッダを付け、システムプロンプトに成果物は常にタスク指示書でありコード変更ではないことを明記しました。システムプロンプトをユーザーターンへ連結するプロバイダ（Codex など）が修正依頼の形のコメントを実装依頼として解釈しなくなります。
 
 ### Internal
@@ -46,6 +48,7 @@
 - `npm test` のユニット shard を `availableParallelism()` ベースの適応型（上限8）にし、PR CI のユニット matrix を4から8へ拡大しました (#1464)。補助ゲートの `/ci` は厳格な1回限りの birpc ノイズ再計測にオプトインします。
 - prompt-eval プローブのライフサイクルの Windows フレークを、プローブの報告と cleanup の分離で解消しました (#1438)。ACP プロンプトテストをユーザーコメントフレーミング後の契約に追従させ (#1461)、release 検証のフレークを安定化しました (#1420)。
 - 未使用の LocalLLM 由来レビュー facet と取り残し facet を削除し、implement/fix 系の quality gate に軽量統合テストを追加し (#1467)、存在しないステップ名を指すゲート設定を削除し (#1468)、TAKT 開発のドッグフーディングでのテスト実行範囲を軽量化しました (#1472)。
+- プロンプト評価スイートを suite registry に集約し、不要になった recurrence ledger 系のケースを削除しました (#1415)。
 - README をランディングページとして再構成して内部仕様を docs へ退避し、日本語ドキュメント全体から AI 的な言い回しと過剰な読点を除去しました (#1450)。
 
 ## [0.60.0] - 2026-08-18
