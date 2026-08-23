@@ -385,7 +385,13 @@ takt workflow init review-flow --template faceted --global
 # workflow 名または YAML パスを検証
 takt workflow doctor sample-flow
 takt workflow doctor .takt/workflows/sample-flow.yaml
+
+# workflow の設定と解決ソースを検査
+takt workflow inspect sample-flow
+takt workflow inspect .takt/workflows/sample-flow.yaml
 ```
+
+`takt workflow inspect` は workflow の設定と各解決値の由来を、実行時と同じ解決（`--auto-strategy` を含む）で報告します。
 
 ### takt clear
 

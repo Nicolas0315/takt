@@ -386,7 +386,13 @@ takt workflow init review-flow --template faceted --global
 # Validate workflows by name or path
 takt workflow doctor sample-flow
 takt workflow doctor .takt/workflows/sample-flow.yaml
+
+# Inspect a workflow's configuration and resolution sources
+takt workflow inspect sample-flow
+takt workflow inspect .takt/workflows/sample-flow.yaml
 ```
+
+`takt workflow inspect` reports the workflow's configuration and where each resolved value comes from, using the same resolution a run would use — including `--auto-strategy`.
 
 ### takt clear
 
