@@ -28,7 +28,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `assistant.gherkin` is deprecated (#1431). It is warned about and ignored without conversion, persistence, or configuration-file updates; Gherkin guidance is now always enabled for interactive and final task-instruction prompts.
 - Team Leader steps accept `companion` and `dynamic_facets` (#1402, #1409), and team-leader selector and companion calls are bound to the provider inactivity deadline.
 - Companion reviewers inspect the repository themselves (#1439). Instead of judging only an inlined diff, reviewers investigate the local working tree read-only within a defined inspection scope, preserving independent discovery per round.
-- Builtin review and verification prompts decide from recorded evidence (#1443, #1453, #1469). Review convergence uses evidence-based problem tracking, reviewers and the final synthesis judge only from recorded evidence, and the fix verifier re-enumerates each bounded set and state axis before its final result, records each gap per element with its classification, and keeps out-of-scope plan lines from becoming remediation targets while still checking unchanged-preservation boundaries.
+- Builtin review and verification prompts decide from recorded evidence (#1443, #1453, #1469, #1473). Review convergence uses evidence-based problem tracking, reviewers and the final synthesis judge only from recorded evidence, and the fix verifier re-enumerates each bounded set and state axis before its final result, records each gap per element with its classification, keeps out-of-scope plan lines from becoming remediation targets while still checking unchanged-preservation boundaries, and stays read-only — it records findings instead of editing the working tree.
 - The Node.js requirement was lowered to >= 22.22.0 (#1451). The floor is set by dependency engines; the compiled `dist/` output already ran on Node 22.
 
 ### Fixed
@@ -45,7 +45,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - `npm test` launches an adaptive number of concurrent unit shards (up to 8 from `availableParallelism()`), and the PR CI unit matrix widened from 4 to 8 jobs (#1464); the on-demand `/ci` workflow opts into the strict one-time birpc-noise re-measurement.
 - Windows flakes in the prompt-eval probe lifecycle were fixed by separating probe reporting from cleanup (#1438), the ACP prompt tests follow the user-comment framing contract (#1461), and release verification flakes were stabilized (#1420).
-- Unused LocalLLM-era review facets and leftover facets were removed, the implement/fix quality gates run the light integration suite (#1467), and gate settings naming nonexistent steps were dropped (#1468).
+- Unused LocalLLM-era review facets and leftover facets were removed, the implement/fix quality gates run the light integration suite (#1467), gate settings naming nonexistent steps were dropped (#1468), and the dogfooding test scope for TAKT development was lightened (#1472).
 - The README was reorganized as a landing page with internal specifications moved into docs, and AI-sounding phrasing and excess punctuation were cleaned up across the Japanese docs (#1450).
 
 ## [0.60.0] - 2026-08-18
