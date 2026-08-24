@@ -381,7 +381,13 @@ takt workflow init review-flow --template faceted --global
 # 按名称或路径验证 workflow
 takt workflow doctor sample-flow
 takt workflow doctor .takt/workflows/sample-flow.yaml
+
+# 检查 workflow 的配置与解析来源
+takt workflow inspect sample-flow
+takt workflow inspect .takt/workflows/sample-flow.yaml
 ```
+
+`takt workflow inspect` 按运行时相同的解析（包括 `--auto-strategy`）报告 workflow 的配置以及每个解析值的来源。
 
 ### `takt clear`
 
