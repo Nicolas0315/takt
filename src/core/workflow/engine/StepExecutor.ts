@@ -100,11 +100,15 @@ import {
   type Phase1Attempt,
 } from './phase1-empty-recovery.js';
 import { buildCompanionInstructionContext } from '../companion/instruction-context.js';
-import { runCompanionFixLoop } from '../companion/fix-loop.js';
+import { runCompanionFixPolicy } from '../companion/fix-policy.js';
 import { CompanionStepRuntime } from '../companion/step-runtime.js';
 import type { CompanionAgentPurpose } from '../companion/review-runner.js';
 import type { RunAgentOptions } from '../../../agents/types.js';
 import { isAbortError } from '../companion/abort.js';
+import {
+  DEFAULT_COMPANION_FIX_POLICY,
+  type CompanionFixPolicy,
+} from '../../models/companion-types.js';
 import {
   buildCompletionRetryJudgePrompt,
   formatCompletionRetryDiagnostic,
@@ -202,6 +206,7 @@ export interface StepExecutorDeps {
   readonly getRunPathNamespace: () => readonly string[];
   readonly companionEnabled: boolean;
   readonly companionReviewMode: CompanionReviewMode;
+  readonly companionFixPolicy?: CompanionFixPolicy;
   readonly companionDefinitions?: WorkflowConfig['companions'];
   readonly companionProviders?: WorkflowEngineOptions['companionProviders'];
   readonly companionSelectorProvider?: WorkflowEngineOptions['selectorProvider'];
@@ -524,10 +529,13 @@ export class StepExecutor {
     readonly companionRuntime: CompanionStepRuntime | undefined;
     readonly providerInfo: StepProviderInfo;
     readonly nextSequence: () => number;
+    readonly onSingleFixSettled?: () => void;
   }): Promise<AgentResponse> {
     if (input.companionRuntime === undefined) return input.initialResponse;
     input.companionRuntime.beginReviewAttempt();
-    const fixLoop = await runCompanionFixLoop({
+    const fixPolicy = this.deps.companionFixPolicy ?? DEFAULT_COMPANION_FIX_POLICY;
+    const fixResult = await runCompanionFixPolicy({
+      policy: fixPolicy,
       initialResponse: input.initialResponse,
       phase1Options: input.agentOptions,
       completeReview: ({ implementerResponse, followUpRound }) => (
@@ -687,17 +695,24 @@ export class StepExecutor {
       },
       abortSignal: this.resolveAbortSignal(),
     });
-    if (fixLoop.followUpFailureReason === undefined) {
+    if (fixResult.followUpFailureReason === undefined) {
       const companionState = requireActiveCompanionState(input.state, input.eventStep.name);
-      input.state.companion = { ...companionState, followUpRounds: fixLoop.followUpRounds };
+      input.state.companion = { ...companionState, followUpRounds: fixResult.followUpRounds };
+      if (fixPolicy === 'single' && fixResult.followUpRounds > 0) {
+        input.companionRuntime.completeSingleFix(input.state, fixResult.followUpRounds);
+        input.onSingleFixSettled?.();
+      }
     } else {
       input.companionRuntime.completeFollowUpFailure(
         input.state,
-        fixLoop.followUpRounds,
-        fixLoop.followUpFailureReason,
+        fixResult.followUpRounds,
+        fixResult.followUpFailureReason,
       );
+      if (fixPolicy === 'single' && fixResult.followUpRounds > 0) {
+        input.onSingleFixSettled?.();
+      }
     }
-    return fixLoop.phaseResponse;
+    return fixResult.phaseResponse;
   }
 
   private resolveDynamicFacetPool(step: NormalOrTeamLeaderWorkflowStep): ResolvedFacetPool | undefined {
@@ -798,6 +813,7 @@ export class StepExecutor {
         selectorProvider: this.deps.companionSelectorProvider,
         diffReader: companionDiffReader,
         reviewMode: this.deps.companionReviewMode,
+        fixPolicy: this.deps.companionFixPolicy ?? DEFAULT_COMPANION_FIX_POLICY,
         abortSignal: runtimeAbortSignal,
         buildProviderCallCallbacks: ({
           agentName,
@@ -1674,6 +1690,7 @@ export class StepExecutor {
     }
 
     let reviewerPhaseExecutionSequence = phase1Result.finalAttempt.sequence + 1;
+    let companionSingleFixSettled = false;
     response = await this.completeReviewerCompanion({
       eventStep: step,
       executableStep,
@@ -1684,6 +1701,9 @@ export class StepExecutor {
       companionRuntime: activeCompanionRuntime,
       providerInfo,
       nextSequence: () => reviewerPhaseExecutionSequence++,
+      onSingleFixSettled: () => {
+        companionSingleFixSettled = true;
+      },
     });
     if (response.sessionId !== undefined) {
       updatePersonaSession(sessionKey, response.sessionId);
@@ -1779,6 +1799,9 @@ export class StepExecutor {
               usage,
             ),
           });
+          if (companionSingleFixSettled) {
+            return normalized;
+          }
           return this.completeReviewerCompanion({
             eventStep: step,
             executableStep,
@@ -1789,6 +1812,9 @@ export class StepExecutor {
             companionRuntime: activeCompanionRuntime,
             providerInfo,
             nextSequence: () => reviewerPhaseExecutionSequence++,
+            onSingleFixSettled: () => {
+              companionSingleFixSettled = true;
+            },
           });
         },
       });

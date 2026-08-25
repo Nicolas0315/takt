@@ -28,7 +28,7 @@ import type { RuntimeProviderFile } from '../infra/config/runtime-provider/schem
  * - fail fast when an active runtime section coexists with legacy provider settings.
  */
 
-const WORKFLOW: Pick<WorkflowConfig, 'name' | 'provider' | 'model' | 'autoRouting'> = {
+const WORKFLOW: Pick<WorkflowConfig, 'name'> = {
   name: 'aux-entry-workflow',
 };
 
@@ -87,7 +87,7 @@ describe('resolveAuxiliaryProviderEnvironment', () => {
     writeGlobalConfig(['language: en']);
     writeGlobalRuntimeFile({
       ...activeRuntimeSection(),
-      companion: { enabled: true, review_mode: 'live' },
+      companion: { enabled: true, review_mode: 'live', fix_policy: 'loop' },
     } as unknown as RuntimeProviderFile);
     invalidateGlobalConfigCache();
     invalidateAllResolvedConfigCache();
@@ -95,6 +95,21 @@ describe('resolveAuxiliaryProviderEnvironment', () => {
     const env = resolveAuxiliaryRuntimeEnvironment(projectCwd, WORKFLOW);
 
     expect((env as unknown as { companionReviewMode?: string }).companionReviewMode).toBe('live');
+    expect((env as unknown as { companionFixPolicy?: string }).companionFixPolicy).toBe('loop');
+  });
+
+  it('resolves single as the effective default companion fix policy through the auxiliary runtime environment', () => {
+    writeGlobalConfig(['language: en']);
+    writeGlobalRuntimeFile({
+      ...activeRuntimeSection(),
+      companion: { enabled: true },
+    } as unknown as RuntimeProviderFile);
+    invalidateGlobalConfigCache();
+    invalidateAllResolvedConfigCache();
+
+    const env = resolveAuxiliaryRuntimeEnvironment(projectCwd, WORKFLOW);
+
+    expect((env as unknown as { companionFixPolicy?: string }).companionFixPolicy).toBe('single');
   });
 
   it('passes legacy config.yaml provider/model through unchanged when no active runtime section exists', () => {
