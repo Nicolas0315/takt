@@ -1,14 +1,23 @@
 import { render } from 'ink-testing-library';
+import chalk from 'chalk';
+import { render as renderInk, renderToString } from 'ink';
+import { PassThrough } from 'node:stream';
+import type { ReactNode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import {
   ConversationView,
   type ConversationExit,
   type ConversationUiText,
+  type ConversationViewProps,
 } from '../features/tui/ConversationView.js';
 import type { InteractiveModeResult } from '../features/interactive/interactive.js';
 import type { PastedImage } from '../features/interactive/inlineImagePaste.js';
 import type { EditorDraft } from '../features/tui/editorState.js';
-import type { TranscriptEntry } from '../features/tui/TranscriptEntryView.js';
+import {
+  TranscriptEntryView,
+  type TranscriptEntry,
+} from '../features/tui/TranscriptEntryView.js';
+import { PromptInput } from '../features/tui/PromptInput.js';
 import {
   createTuiConversation,
   type TuiConversation,
@@ -26,6 +35,7 @@ import {
   createImageAttachmentStore,
   createSessionImageAttachmentStore,
 } from '../features/interactive/imageAttachments.js';
+import { stripAnsi } from '../shared/utils/text.js';
 import { makeProvider } from './test-helpers.js';
 
 const PNG_BYTES = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
@@ -192,6 +202,8 @@ interface RenderOverrides {
   readonly initialQueue?: readonly string[];
   readonly modelLabel?: () => string;
   readonly residentSession?: boolean;
+  readonly userMessageColors?: ConversationViewProps['userMessageColors'];
+  readonly finalizeTranscript?: ConversationViewProps['finalizeTranscript'];
 }
 
 function renderConversation(
@@ -206,6 +218,10 @@ function renderConversation(
       lang="en"
       conversation={conversation}
       initialEntries={INITIAL_ENTRIES}
+      userMessageColors={overrides.userMessageColors ?? {
+        background: '#42454b',
+        foreground: '#ffffff',
+      }}
       submitMode={submitMode}
       autoSubmit={overrides.autoSubmit ?? false}
       initialHistory={overrides.initialHistory ?? []}
@@ -213,10 +229,226 @@ function renderConversation(
       initialQueue={overrides.initialQueue ?? []}
       residentSession={overrides.residentSession ?? false}
       modelLabel={overrides.modelLabel ?? (() => MODEL_LABEL)}
+      finalizeTranscript={overrides.finalizeTranscript ?? (() => undefined)}
       onExit={onExit}
     />,
   );
 }
+
+const USER_MESSAGE_BACKGROUND = '\x1b[48;2;66;69;75m';
+const DEFAULT_FOREGROUND = '\x1b[39m';
+const USER_MESSAGE_FOREGROUND = '\x1b[38;2;255;255;255m';
+const DIM_TEXT = '\x1b[2m';
+const FALLBACK_USER_MESSAGE_COLORS = { background: '#42454b', foreground: '#ffffff' } as const;
+const THEMED_USER_MESSAGE_COLORS = { background: '#d7d7d7' } as const;
+
+function renderWithColors(node: ReactNode, columns: number): string {
+  const originalChalkLevel = chalk.level;
+  try {
+    chalk.level = 3;
+    return renderToString(node, { columns });
+  } finally {
+    chalk.level = originalChalkLevel;
+  }
+}
+
+class ResizableOutput extends PassThrough {
+  columns: number;
+  readonly rows = 40;
+  readonly isTTY = true;
+  readonly frames: string[] = [];
+
+  constructor(columns: number) {
+    super();
+    this.columns = columns;
+    this.on('data', (chunk: Buffer) => {
+      this.frames.push(chunk.toString());
+    });
+  }
+
+  resize(columns: number): void {
+    this.columns = columns;
+    this.emit('resize');
+  }
+}
+
+function createTestInput(): NodeJS.ReadStream {
+  const input = new PassThrough();
+  Object.assign(input, {
+    isTTY: true,
+    setRawMode: () => input,
+    ref: () => input,
+    unref: () => input,
+  });
+  return input as unknown as NodeJS.ReadStream;
+}
+
+describe('TranscriptEntryView', () => {
+  it('should render a submitted user message as a full-width dark band with white text and one padded row on each side', () => {
+    const columns = 24;
+    const output = renderWithColors(
+      <TranscriptEntryView
+        entry={{ role: 'user', content: 'submitted message' }}
+        userMessageColors={FALLBACK_USER_MESSAGE_COLORS}
+      />,
+      columns,
+    );
+    const [topPadding, content, bottomPadding, outsideBand] = output.split('\n');
+
+    expect(stripAnsi(topPadding ?? '')).toBe(' '.repeat(columns));
+    expect(topPadding?.startsWith(USER_MESSAGE_BACKGROUND)).toBe(true);
+    expect(stripAnsi(content ?? '').trimEnd()).toBe('❯ submitted message');
+    expect(stripAnsi(content ?? '')).toHaveLength(columns);
+    expect(content?.startsWith(USER_MESSAGE_BACKGROUND)).toBe(true);
+    expect(content).toContain(
+      `${USER_MESSAGE_FOREGROUND}❯ submitted message${DEFAULT_FOREGROUND}`,
+    );
+    expect(content).not.toContain(DIM_TEXT);
+    expect(stripAnsi(bottomPadding ?? '')).toBe(' '.repeat(columns));
+    expect(bottomPadding?.startsWith(USER_MESSAGE_BACKGROUND)).toBe(true);
+    expect(outsideBand ?? '').not.toContain(USER_MESSAGE_BACKGROUND);
+  });
+
+  it('should reflow the existing user-message band when the mounted terminal is resized', async () => {
+    const message = 'alpha beta gamma delta';
+    const narrowColumns = 14;
+    const wideColumns = 26;
+    const conversation = createScriptedConversation(NO_LOCAL_COMMANDS, NO_ORDER_COMMANDS);
+    const stdout = new ResizableOutput(wideColumns);
+    const stderr = new PassThrough();
+    const originalChalkLevel = chalk.level;
+    let app: ReturnType<typeof renderInk> | undefined;
+
+    try {
+      chalk.level = 3;
+      app = renderInk(
+        <ConversationView
+          ui={UI}
+          lang="en"
+          conversation={conversation}
+          userMessageColors={FALLBACK_USER_MESSAGE_COLORS}
+          initialEntries={[
+            { role: 'user', content: message },
+            { role: 'assistant', content: 'answer' },
+            { role: 'system', content: 'notice' },
+          ]}
+          submitMode="chat"
+          autoSubmit={false}
+          initialHistory={[]}
+          initialDraft={{ text: 'not submitted', cursor: 13 }}
+          initialQueue={[]}
+          residentSession={false}
+          modelLabel={() => MODEL_LABEL}
+          finalizeTranscript={() => undefined}
+          onExit={() => undefined}
+        />,
+        {
+          stdout: stdout as unknown as NodeJS.WriteStream,
+          stderr: stderr as unknown as NodeJS.WriteStream,
+          stdin: createTestInput(),
+          debug: true,
+          exitOnCtrlC: false,
+          interactive: true,
+          patchConsole: false,
+        },
+      );
+      await flushFrames();
+      const wideFrame = stdout.frames.at(-1) ?? '';
+
+      stdout.resize(narrowColumns);
+      await flushFrames();
+      const narrowFrame = stdout.frames.at(-1) ?? '';
+
+      stdout.resize(wideColumns);
+      await flushFrames();
+      const widenedFrame = stdout.frames.at(-1) ?? '';
+
+      const selectBandLines = (frame: string): string[] => frame
+        .split('\n')
+        .filter((line) => line.startsWith(USER_MESSAGE_BACKGROUND));
+      const selectContentLines = (frame: string): string[] => selectBandLines(frame)
+        .filter((line) => stripAnsi(line).trim() !== '');
+
+      expect(selectContentLines(wideFrame)).toHaveLength(1);
+      expect(selectContentLines(narrowFrame)).toHaveLength(2);
+      expect(selectContentLines(widenedFrame)).toHaveLength(1);
+      expect(selectBandLines(narrowFrame)
+        .every((line) => stripAnsi(line).length === narrowColumns)).toBe(true);
+      expect(selectBandLines(widenedFrame)
+        .every((line) => stripAnsi(line).length === wideColumns)).toBe(true);
+      const narrowText = stripAnsi(narrowFrame);
+      expect(narrowText).toContain('● answer');
+      expect(narrowText).toContain('  notice');
+      expect(narrowText).toContain('not subm');
+    } finally {
+      app?.unmount();
+      await app?.waitUntilExit();
+      app?.cleanup();
+      chalk.level = originalChalkLevel;
+    }
+  });
+
+  it('should use the resolved background and terminal-default foreground in the user band', () => {
+    const output = renderWithColors(
+      <TranscriptEntryView
+        entry={{ role: 'user', content: 'submitted message' }}
+        userMessageColors={THEMED_USER_MESSAGE_COLORS}
+      />,
+      24,
+    );
+    const [, content] = output.split('\n');
+
+    expect(output).toContain('\x1b[48;2;215;215;215m');
+    expect(content?.startsWith('\x1b[48;2;215;215;215m')).toBe(true);
+    expect(stripAnsi(output)).toContain('❯ submitted message');
+    expect(output).not.toContain(USER_MESSAGE_FOREGROUND);
+    expect(output).not.toContain(USER_MESSAGE_BACKGROUND);
+  });
+
+  it('should apply the submitted-message band only to user transcript entries', () => {
+    const user = renderWithColors(
+      <TranscriptEntryView
+        entry={{ role: 'user', content: 'submitted' }}
+        userMessageColors={FALLBACK_USER_MESSAGE_COLORS}
+      />,
+      30,
+    );
+    const assistant = renderWithColors(
+      <TranscriptEntryView
+        entry={{ role: 'assistant', content: 'answer' }}
+        userMessageColors={FALLBACK_USER_MESSAGE_COLORS}
+      />,
+      30,
+    );
+    const system = renderWithColors(
+      <TranscriptEntryView
+        entry={{ role: 'system', content: 'notice' }}
+        userMessageColors={FALLBACK_USER_MESSAGE_COLORS}
+      />,
+      30,
+    );
+    const draft = renderWithColors(
+      <PromptInput
+        text="not submitted"
+        cursor={13}
+        contentWidth={24}
+        placeholder="Type a message"
+        hint="Enter: send"
+        completions={[]}
+        completionIndex={0}
+        disabled={false}
+      />,
+      30,
+    );
+
+    expect(user).toContain(USER_MESSAGE_BACKGROUND);
+    expect(assistant).not.toContain(USER_MESSAGE_BACKGROUND);
+    expect(system).not.toContain(USER_MESSAGE_BACKGROUND);
+    expect(draft).not.toContain(USER_MESSAGE_BACKGROUND);
+    expect(stripAnsi(assistant).trimEnd()).toBe('● answer');
+    expect(stripAnsi(system).trimEnd()).toBe('  notice');
+  });
+});
 
 describe('ConversationView', () => {
   it.each([
@@ -274,11 +506,12 @@ describe('ConversationView', () => {
 
   it('should commit the resume command and exit so the picker can run', async () => {
     const onExit = vi.fn();
+    const finalizeTranscript = vi.fn();
     const conversation = createScriptedConversation(
       new Map<string, TuiLocalCommand>([['/resume', { kind: 'resume_session' }]]),
       NO_ORDER_COMMANDS,
     );
-    const app = renderConversation(conversation, 'chat', onExit);
+    const app = renderConversation(conversation, 'chat', onExit, { finalizeTranscript });
     await flushFrames();
 
     app.stdin.write('/resume');
@@ -291,6 +524,13 @@ describe('ConversationView', () => {
     expect(onExit).toHaveBeenCalledExactlyOnceWith(
       { kind: 'resume_session' },
       { history: ['/resume'], queue: [] },
+    );
+    expect(finalizeTranscript).toHaveBeenCalledExactlyOnceWith(
+      [
+        ...INITIAL_ENTRIES,
+        { role: 'user', content: '/resume' },
+      ],
+      100,
     );
     app.unmount();
 
@@ -307,6 +547,27 @@ describe('ConversationView', () => {
     expect(frame).toContain('/resume');
 
     resumed.unmount();
+  });
+
+  it('should report transcript finalization failure instead of the requested exit', async () => {
+    const failure = new Error('transcript output failed');
+    const onExit = vi.fn();
+    const conversation = createScriptedConversation(NO_LOCAL_COMMANDS, NO_ORDER_COMMANDS);
+    const app = renderConversation(conversation, 'chat', onExit, {
+      finalizeTranscript: () => {
+        throw failure;
+      },
+    });
+    await flushFrames();
+
+    app.stdin.write(CTRL_C);
+    await flushFrames();
+
+    expect(onExit).toHaveBeenCalledExactlyOnceWith(
+      { kind: 'failed', error: failure },
+      { history: [], queue: [] },
+    );
+    app.unmount();
   });
 
   it('should keep the image store open across a hand-off and seal on the last exit', async () => {
@@ -2152,7 +2413,8 @@ describe('ConversationView', () => {
   it('should route the first input through createInstruction in summarize mode', async () => {
     const conversation = createScriptedConversation(NO_LOCAL_COMMANDS, NO_ORDER_COMMANDS);
     const onExit = vi.fn();
-    const app = renderConversation(conversation, 'summarize', onExit);
+    const finalizeTranscript = vi.fn();
+    const app = renderConversation(conversation, 'summarize', onExit, { finalizeTranscript });
     await flushFrames();
 
     app.stdin.write('add a cache layer');
@@ -2164,12 +2426,24 @@ describe('ConversationView', () => {
     expect(conversation.instructionCalls).toHaveLength(1);
     expect(conversation.instructionCalls[0]?.text).toBe('add a cache layer');
 
-    conversation.resolveWith({ kind: 'task_instruction', task: 'Add a cache layer' });
+    conversation.resolveWith({
+      kind: 'task_instruction',
+      task: 'Add a cache layer',
+      notices: ['native image input'],
+    });
     await flushFrames();
 
     expect(onExit).toHaveBeenCalledExactlyOnceWith(
       { kind: 'choose_action', task: 'Add a cache layer' },
       expect.objectContaining({ history: expect.any(Array) }),
+    );
+    expect(finalizeTranscript).toHaveBeenCalledExactlyOnceWith(
+      [
+        ...INITIAL_ENTRIES,
+        { role: 'user', content: 'add a cache layer' },
+        { role: 'system', content: 'native image input' },
+      ],
+      100,
     );
 
     app.unmount();

@@ -17,6 +17,7 @@ import type { ImageAttachmentStore } from '../features/interactive/imageAttachme
 
 const {
   mockRender,
+  mockRenderToString,
   mockCreateTuiConversation,
   mockDetermineWorkflow,
   mockSelectInteractiveMode,
@@ -35,6 +36,7 @@ const {
   realTuiConversation,
 } = vi.hoisted(() => ({
   mockRender: vi.fn(),
+  mockRenderToString: vi.fn(),
   mockCreateTuiConversation: vi.fn(),
   mockDetermineWorkflow: vi.fn(),
   mockSelectInteractiveMode: vi.fn(),
@@ -59,11 +61,12 @@ const mockCreateStore = (cwd: string): unknown => storeOverride.current?.(cwd);
 
 vi.mock('ink', () => ({
   render: (...args: unknown[]) => mockRender(...args),
+  renderToString: (...args: unknown[]) => mockRenderToString(...args),
   Box: () => null,
-  Static: () => null,
   Text: () => null,
   useInput: () => undefined,
   useStdout: () => ({ stdout: undefined }),
+  useWindowSize: () => ({ columns: 100, rows: 24 }),
 }));
 
 vi.mock('../features/tui/tuiConversation.js', async (importOriginal) => {
@@ -255,6 +258,7 @@ afterEach(() => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockRenderToString.mockReturnValue('final transcript');
   realTuiConversation.current = false;
   // clearAllMocks keeps implementations, and some cases install a throwing one.
   mockCreateTuiConversation.mockReset();
@@ -1493,6 +1497,63 @@ describe('runTui', () => {
   });
 
   describe('selectors between mounts', () => {
+    it('should hold the finalized transcript until Ink clears the live frame', async () => {
+      const written = vi.spyOn(process.stdout, 'write').mockImplementation((() => true) as typeof process.stdout.write);
+      const tree = scriptRender();
+      const run = startRun();
+      await waitForMount(tree, 1);
+      const entries = [
+        { role: 'user', content: 'question' },
+        { role: 'assistant', content: 'answer' },
+      ] as const;
+
+      const conversation = tree.conversationProps();
+      conversation.finalizeTranscript(entries, 14);
+
+      expect(mockRenderToString).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          props: expect.objectContaining({
+            entries,
+            userMessageColors: conversation.userMessageColors,
+          }),
+        }),
+        { columns: 14 },
+      );
+      expect(written.mock.calls.flat().map(String)).not.toContain('final transcript\n');
+
+      conversation.onExit(
+        { kind: 'result', result: { action: 'cancel', task: '' } },
+        { history: [], queue: [] },
+      );
+      await run;
+
+      expect(written.mock.calls.flat().map(String)
+        .filter((chunk) => chunk === 'final transcript\n')).toHaveLength(1);
+    });
+
+    it('should fail after unmount when writing the finalized transcript fails', async () => {
+      const failure = new Error('transcript write failed');
+      vi.spyOn(process.stdout, 'write').mockImplementation(((chunk: string | Uint8Array) => {
+        if (String(chunk) === 'final transcript\n') {
+          throw failure;
+        }
+        return true;
+      }) as typeof process.stdout.write);
+      const tree = scriptRender();
+      const run = startRun();
+      await waitForMount(tree, 1);
+
+      const conversation = tree.conversationProps();
+      conversation.finalizeTranscript([{ role: 'user', content: 'question' }], 14);
+      conversation.onExit(
+        { kind: 'result', result: { action: 'cancel', task: '' } },
+        { history: [], queue: [] },
+      );
+
+      await expect(run).rejects.toBe(failure);
+      expect(tree.unmount).toHaveBeenCalledOnce();
+    });
+
     it('should run the action selector with Ink unmounted and finish on its choice', async () => {
       const tree = scriptRender();
       mockSelectAction.mockImplementation(() => {
@@ -1549,6 +1610,7 @@ describe('runTui', () => {
       expect(second.autoSubmit).toBe(false);
       // The same session object carries the conversation across the remount.
       expect(second.conversation).toBe(first.conversation);
+      expect(second.userMessageColors).toBe(first.userMessageColors);
 
       second.onExit({ kind: 'result', result: { action: 'cancel', task: '' } }, { history: [], queue: [] });
       await run;
