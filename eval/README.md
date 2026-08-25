@@ -129,6 +129,17 @@ remain available as incident knowledge assets and run only when requested by
 the retained tier command or by individual suite name. Explicit suite names
 always work regardless of tier or execution metadata.
 
+Suite configurations are grouped by what they execute:
+
+- `agents/<step>/<suite>.yaml` runs one TAKT agent step. Upstream reports and
+  other context are fixed inputs.
+- `scenarios/<flow>/<suite>.yaml` runs multiple steps or roles and verifies the
+  handoff between them.
+
+The suite ID is the YAML filename without its extension and must be unique
+across both trees. Provider and model matrices stay inside the suite and do not
+affect its directory.
+
 The `review-impact-path-coverage` suite measures first-round coverage of paths
 affected by the same cause on Claude Opus 5, Codex Luna Max, and Codex Sol High. It needs
 both CLI logins and is excluded from the default suite run; invoke it with
@@ -210,11 +221,10 @@ in `eval/asserts/` that inspect the files the agent actually wrote.
 
 The `issue-plan-samples` and `plan-report-source-authority` suites are the
 exceptions to the reviewer fixture rule: `eval/scripts/prepare.mjs` uses
-`fixture: '.'` and their promptfoo configurations use `working_dir: ..`
-(resolved from `eval/`), so their repository context and provider working
-directory both point at the checked-out repository root. The former reads it in
-read-only mode; the latter renders the report-phase prompt. Reproduce either
-suite from the repository root after preparing it.
+`fixture: '.'` and their promptfoo configurations use `working_dir: ../../..`,
+which is resolved from `eval/agents/plan/` to the checked-out repository root.
+The former reads it in read-only mode; the latter renders the report-phase
+prompt. Reproduce either suite from the repository root after preparing it.
 
 `plan-report-source-authority` measures the rendered Phase 2 instruction and
 report content, not TAKT's runtime tool suppression. The promptfoo Codex SDK
@@ -321,8 +331,15 @@ npx promptfoo view               # browse results in the web UI
 Do not use `--repeat` with mutable coder suites such as `fix-closure`,
 `frontend-coder`, or `cqrs-coder`; independent trials require a fresh work copy.
 
-Run from the repo root. Note: `working_dir` in the configs is resolved
-relative to the config file's directory (`eval/`), not the process cwd.
+Run from the repo root. The custom providers resolve `working_dir` and prompt
+paths in their provider config relative to `eval/`, regardless of the config
+file's location. Promptfoo built-in providers such as `openai:codex-sdk` instead
+resolve `working_dir` relative to the config file's directory, so configs under
+`eval/agents/plan/` use `../../..` to reach the repository root. Promptfoo
+resolves `file://` references in `prompts:`,
+`providers[].id`, and `vars` relative to the config file, so configs under
+`eval/agents/<step>/` and `eval/scenarios/<flow>/` use `file://../../...` to
+reach `eval/prompts`, `eval/providers`, `eval/cases`, and `eval/asserts`.
 `run-evals.mjs` keeps going when a suite fails and prints a summary
 (promptfoo exits non-zero on test failures, which would break `&&` chains).
 
@@ -359,7 +376,8 @@ provider follows the same rule with `timeout_ms`.
 
 ```text
 eval/
-  promptfooconfig.<suite>.yaml   provider + tests + assertions per suite
+  agents/<step>/<suite>.yaml    single-agent provider + tests + assertions
+  scenarios/<flow>/<suite>.yaml multi-step or multi-role scenario evals
   suite-registry.mjs             tier, reason, execution metadata, prepare targets
   scripts/prepare.mjs            facet placement + prompt rendering
   scripts/run-evals.mjs          suite runner (failures don't stop the batch)
@@ -374,9 +392,10 @@ eval/
 
 ## Extending
 
-- New target: add an entry to `TARGETS` in `scripts/prepare.mjs`, add a
-  `promptfooconfig.<suite>.yaml`, and classify the suite once in
-  `suite-registry.mjs`. Registry validation rejects unclassified configs.
+- New target: add an entry to `TARGETS` in `scripts/prepare.mjs`, add a uniquely
+  named YAML under `agents/<step>/` or `scenarios/<flow>/`, and classify the
+  suite once in `suite-registry.mjs`. Registry validation rejects unclassified
+  configs and duplicate suite IDs.
 - More planted bugs: each fixture bug should map to a specific policy line,
   and get one `metric:`-labelled assertion (recall). Clean cases guard
   precision.
