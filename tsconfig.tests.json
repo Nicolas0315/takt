@@ -12,6 +12,7 @@
     "rootDir": "."
   },
   "include": [
+    "src/__tests__/agent-usecases.test.ts",
     "src/__tests__/ai-caller-output-mode.test.ts",
     "src/__tests__/assistant-provider-parity.test.ts",
     "src/__tests__/claude-mcp-runtime.test.ts",
@@ -25,6 +26,7 @@
     "src/__tests__/conversationLoop-resume.test.ts",
     "src/__tests__/conversationSession.test.ts",
     "src/__tests__/e2e-terminal-output.test.ts",
+    "src/__tests__/engine-team-leader.test.ts",
     "src/__tests__/exec-assistant-failure.test.ts",
     "src/__tests__/exec-command.test.ts",
     "src/__tests__/exec-tui-conversation.test.ts",
@@ -68,7 +70,11 @@
     "src/__tests__/runtime-mcp.integration.test.ts",
     "src/__tests__/safeExternalErrorMessage.test.ts",
     "src/__tests__/selector-guidance-resolution.test.ts",
+    "src/__tests__/team-leader-common.test.ts",
+    "src/__tests__/team-leader-execution.test.ts",
+    "src/__tests__/team-leader-runner-structured-caller.test.ts",
     "src/__tests__/team-leader-schema-loader.test.ts",
+    "src/__tests__/team-leader-structured-output.test.ts",
     "src/__tests__/tui-conversation-view.test.tsx",
     "src/__tests__/tui-conversation.test.ts",
     "src/__tests__/tui-display-text.test.ts",
@@ -79,9 +85,11 @@
     "src/__tests__/tui-run.test.ts",
     "src/__tests__/tui-task-conversation.test.ts",
     "src/__tests__/tui-terminal-ownership.test.ts",
+    "src/__tests__/workflow-call-schema.test.ts",
     "src/__tests__/workflow-inspect.test.ts",
     "src/__tests__/workflow-preview.test.ts",
-    "src/__tests__/workflowCallResolver.test.ts"
+    "src/__tests__/workflowCallResolver.test.ts",
+    "src/__tests__/workflowLoader.test.ts"
   ],
   "exclude": []
 }

@@ -850,7 +850,7 @@ function createWorkflowStepRawSchema(options?: { relaxWorkflowCallConditions?: b
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['companion'],
-        message: 'companion is only allowed on normal agent steps',
+        message: 'companion is only allowed on normal agent steps and Team Leader steps',
       });
     }
 
@@ -861,7 +861,7 @@ function createWorkflowStepRawSchema(options?: { relaxWorkflowCallConditions?: b
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['companion'],
-        message: 'companion is only allowed on normal agent steps',
+        message: 'companion is only allowed on normal agent steps and Team Leader steps',
       });
     }
 
