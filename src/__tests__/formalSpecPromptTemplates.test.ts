@@ -1,21 +1,37 @@
 import { describe, expect, it } from 'vitest';
-import { loadTemplate } from '../shared/prompts/index.js';
 import { buildSummaryPrompt } from '../features/interactive/interactive-summary.js';
+import { buildInteractiveSystemPrompt } from '../features/interactive/conversationPlan.js';
 
-function renderInteractivePrompt(lang: 'en' | 'ja', formalSpec: boolean): string {
-  return loadTemplate('score_interactive_system_prompt', lang, {
-    grillMe: false,
+const EXPECTED_INVESTIGATION_POLICIES = {
+  assistant: {
+    currentStateScope: 'current-state-and-prerequisites',
+    implementationInvestigationOwner: 'workflow-execution',
+  },
+  grillMe: {
+    currentStateScope: 'requirements-decisions-only',
+    implementationInvestigationOwner: 'workflow-execution',
+  },
+} as const;
+
+function renderInteractivePrompt(
+  lang: 'en' | 'ja',
+  formalSpec: boolean,
+  grillMe = false,
+): string {
+  return buildInteractiveSystemPrompt(lang, {
     formalSpec,
-    hasWorkflowPreview: false,
-    workflowStructure: '',
-    stepDetails: '',
-    hasRunSession: false,
-    runTask: '',
-    runWorkflow: '',
-    runStatus: '',
-    runStepLogs: '',
-    runReports: '',
+    grillMe,
   });
+}
+
+function parseInvestigationPolicy(prompt: string): unknown {
+  const match = prompt.match(
+    /<takt-investigation-policy>\s*([\s\S]*?)\s*<\/takt-investigation-policy>/,
+  );
+  if (match === null) {
+    throw new Error('interactive investigation policy metadata is missing');
+  }
+  return JSON.parse(match[1]) as unknown;
 }
 
 function renderJapaneseSummaryPrompt(formalSpec: boolean): string {
@@ -31,6 +47,22 @@ function renderJapaneseSummaryPrompt(formalSpec: boolean): string {
     formalSpec,
   );
 }
+
+describe('interactive investigation policy template wiring', () => {
+  it.each([
+    ['en', false, EXPECTED_INVESTIGATION_POLICIES.assistant],
+    ['en', true, EXPECTED_INVESTIGATION_POLICIES.grillMe],
+    ['ja', false, EXPECTED_INVESTIGATION_POLICIES.assistant],
+    ['ja', true, EXPECTED_INVESTIGATION_POLICIES.grillMe],
+  ] as const)(
+    'renders the structured policy for %s when grillMe is %s',
+    (lang, grillMe, expectedPolicy) => {
+      const prompt = renderInteractivePrompt(lang, false, grillMe);
+
+      expect(parseInvestigationPolicy(prompt)).toEqual(expectedPolicy);
+    },
+  );
+});
 
 describe('interactive formal specification prompt templates', () => {
   it('selects English conditional Gherkin guidance without formal notation guidance when disabled', () => {
