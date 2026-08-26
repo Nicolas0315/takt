@@ -172,19 +172,22 @@ describe('resolveEffectiveProviderOptions', () => {
     });
   });
 
-  it('rejects permissionControl codex when network access survives merge', () => {
-    expect(() => mergeProviderOptions(
-      { codex: { networkAccess: true } },
-      { codex: { permissionControl: 'codex' } },
-    )).toThrow();
+  it.each([true, false])(
+    'keeps permissionControl=codex with networkAccess=%s across merge and effective resolution',
+    (networkAccess) => {
+      expect(mergeProviderOptions(
+        { codex: { networkAccess } },
+        { codex: { permissionControl: 'codex' } },
+      )).toEqual({ codex: { networkAccess, permissionControl: 'codex' } });
 
-    expect(() => resolveEffectiveProviderOptions(
-      'project',
-      undefined,
-      { codex: { networkAccess: true } },
-      { codex: { permissionControl: 'codex' } },
-    )).toThrow();
-  });
+      expect(resolveEffectiveProviderOptions(
+        'project',
+        undefined,
+        { codex: { networkAccess } },
+        { codex: { permissionControl: 'codex' } },
+      )).toEqual({ codex: { networkAccess, permissionControl: 'codex' } });
+    },
+  );
 
   it('Claude Skill enabled resolves false from config even when other Claude leaves come from the step', () => {
     const result = resolveEffectiveProviderOptions(
