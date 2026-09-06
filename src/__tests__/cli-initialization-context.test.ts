@@ -1,4 +1,5 @@
 import type { Command } from 'commander';
+import { normalize } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const initializationMocks = vi.hoisted(() => ({
@@ -47,6 +48,7 @@ vi.mock('../shared/utils/debug.js', () => ({
 }));
 
 describe('CLI execution context', () => {
+  const projectDir = normalize('/test/project');
   beforeEach(() => {
     for (const mock of Object.values(initializationMocks)) {
       mock.mockReset();
@@ -79,7 +81,7 @@ describe('CLI execution context', () => {
     const context = getCliExecutionContext();
 
     expect(() => Object.assign(context, { [property]: value })).toThrow(TypeError);
-    expect(getCliExecutionContext()).toEqual({ cwd: '/test/project', pipelineMode: true });
+    expect(getCliExecutionContext()).toEqual({ cwd: projectDir, pipelineMode: true });
   });
 
   it.each([false, true])('should initialize global, project, and Git state when pipeline mode is %s', async (pipelineMode) => {
@@ -90,12 +92,12 @@ describe('CLI execution context', () => {
     await initializeCliExecutionContext(program, '1.0.0');
 
     expect(initializationMocks.initGlobalDirs).toHaveBeenCalledWith({ nonInteractive: pipelineMode });
-    expect(initializationMocks.initProjectDirs).toHaveBeenCalledWith('/test/project');
-    expect(initializationMocks.initGitProvider).toHaveBeenCalledWith('/test/project');
+    expect(initializationMocks.initProjectDirs).toHaveBeenCalledWith(projectDir);
+    expect(initializationMocks.initGitProvider).toHaveBeenCalledWith(projectDir);
     expect(initializationMocks.createLogger).toHaveBeenCalledWith('cli');
     expect(initializationMocks.loggerInfo).toHaveBeenCalledWith('TAKT CLI starting', {
       version: '1.0.0',
-      cwd: '/test/project',
+      cwd: projectDir,
       verbose: false,
       pipelineMode,
       quietMode: false,
@@ -110,8 +112,8 @@ describe('CLI execution context', () => {
     await initializeCliExecutionContext(program, '1.0.0');
 
     expect(initializationMocks.resolveConfigValues)
-      .toHaveBeenCalledWith('/test/project', ['logging', 'minimalOutput']);
-    expect(initializationMocks.initDebugLogger).toHaveBeenCalledWith(undefined, '/test/project');
+      .toHaveBeenCalledWith(projectDir, ['logging', 'minimalOutput']);
+    expect(initializationMocks.initDebugLogger).toHaveBeenCalledWith(undefined, projectDir);
     expect(initializationMocks.setVerboseConsole).not.toHaveBeenCalled();
     expect(initializationMocks.setLogLevel).toHaveBeenCalledWith('info');
   });
@@ -127,7 +129,7 @@ describe('CLI execution context', () => {
 
     await initializeCliExecutionContext(program, '1.0.0');
 
-    expect(initializationMocks.initDebugLogger).toHaveBeenCalledWith(undefined, '/test/project');
+    expect(initializationMocks.initDebugLogger).toHaveBeenCalledWith(undefined, projectDir);
     expect(initializationMocks.setVerboseConsole).not.toHaveBeenCalled();
     expect(initializationMocks.setLogLevel).toHaveBeenCalledWith('warn');
   });
@@ -145,7 +147,7 @@ describe('CLI execution context', () => {
     await initializeCliExecutionContext(program, '1.0.0');
 
     expect(initializationMocks.initDebugLogger)
-      .toHaveBeenCalledWith({ enabled: true, trace: true }, '/test/project');
+      .toHaveBeenCalledWith({ enabled: true, trace: true }, projectDir);
     expect(initializationMocks.setVerboseConsole).toHaveBeenCalledWith(true);
     expect(initializationMocks.setLogLevel).toHaveBeenCalledWith('debug');
   });

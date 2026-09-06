@@ -171,7 +171,7 @@ describe('repertoireRemoveCommand — scan configuration', () => {
 
     // Then: the categories file path is correct
     expect(scanConfig.categoriesFiles).toContain(
-      join('/home/user/.takt', 'preferences', 'workflow-categories.yaml'),
+      '/home/user/.takt/preferences/workflow-categories.yaml',
     );
   });
 

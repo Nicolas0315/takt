@@ -64,15 +64,17 @@ describe('ejectBuiltin rollback', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     let workflowDirCreated = false;
-    mocks.existsSync.mockImplementation((path: string) => (
-      path === '/builtin/workflows/default.yaml'
-      || (path === '/project/.takt/workflows' && workflowDirCreated)
-    ));
+    const normalizePath = (path: string) => path.replace(/\\/g, '/');
+    mocks.existsSync.mockImplementation((path: string) => {
+      const normalized = normalizePath(path);
+      return normalized.endsWith('/builtin/workflows/default.yaml')
+        || (normalized.endsWith('/project/.takt/workflows') && workflowDirCreated);
+    });
     mocks.pathExistsForEject.mockImplementation((path: string) => (
-      path === '/project/.takt/workflows' && workflowDirCreated
+      normalizePath(path).endsWith('/project/.takt/workflows') && workflowDirCreated
     ));
     mocks.mkdirSync.mockImplementation((path: string) => {
-      if (path === '/project/.takt/workflows') {
+      if (normalizePath(path).endsWith('/project/.takt/workflows')) {
         workflowDirCreated = true;
       }
     });

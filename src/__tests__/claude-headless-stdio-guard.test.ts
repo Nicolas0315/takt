@@ -3,11 +3,14 @@ import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import type { ChildProcess } from 'node:child_process';
 
-vi.mock('node:child_process', () => ({
-  spawn: vi.fn(),
+const { mockCrossSpawn } = vi.hoisted(() => ({
+  mockCrossSpawn: vi.fn(),
 }));
 
-import { spawn } from 'node:child_process';
+vi.mock('cross-spawn', () => ({
+  default: mockCrossSpawn,
+}));
+
 import { runHeadlessCli } from '../infra/claude-headless/headless-spawn.js';
 import type { ClaudeHeadlessCallOptions } from '../infra/claude-headless/types.js';
 
@@ -16,7 +19,7 @@ function stubSpawn(opts: {
   stderrError?: Error;
   closeCode?: number | null;
 }): void {
-  vi.mocked(spawn).mockImplementation(() => {
+  mockCrossSpawn.mockImplementation(() => {
     const stdout = new PassThrough();
     const stderr = new PassThrough();
     const proc = new EventEmitter() as EventEmitter & Partial<ChildProcess>;
@@ -41,7 +44,7 @@ function stubSpawn(opts: {
 
 describe('runHeadlessCli stdio guard', () => {
   beforeEach(() => {
-    vi.mocked(spawn).mockReset();
+    mockCrossSpawn.mockReset();
   });
 
   it('rejects with a failure without crashing the parent process when stdout emits a stream error', async () => {

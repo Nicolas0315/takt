@@ -462,8 +462,14 @@ describe('resolveReportReferenceDetailed', () => {
     writeFileSync(join(reports, 'review.md'), 'inside report');
     writeFileSync(join(outsideReports, 'review.md'), 'outside secret');
     injectedFsError.beforeRead = () => {
-      renameSync(reports, originalReports);
-      symlinkSync(outsideReports, reports, 'dir');
+      try {
+        renameSync(reports, originalReports);
+        symlinkSync(outsideReports, reports, 'dir');
+      } catch (error) {
+        // Windows denies replacing the opened directory, preserving the
+        // already-validated handle and preventing the substitution attack.
+        if ((error as NodeJS.ErrnoException).code !== 'EPERM') throw error;
+      }
     };
 
     expect(resolveReportReferenceDetailed(reports, 'review.md', {

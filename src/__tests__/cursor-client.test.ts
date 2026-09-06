@@ -9,8 +9,9 @@ const { mockSpawn } = vi.hoisted(() => ({
   mockSpawn: vi.fn(),
 }));
 
-vi.mock('node:child_process', () => ({
-  spawn: mockSpawn,
+vi.mock('../shared/utils/index.js', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../shared/utils/index.js')>(),
+  crossSpawn: mockSpawn,
 }));
 
 import { callCursor } from '../infra/cursor/client.js';

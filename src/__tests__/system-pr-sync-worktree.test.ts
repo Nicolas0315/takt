@@ -1,3 +1,4 @@
+import { relative } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
@@ -59,8 +60,8 @@ describe('PR sync worktree paths', () => {
       const first = acquirePrSyncSession(store, '/project', 816, 'takt/816/implement-review-flow');
       const second = acquirePrSyncSession(store, '/project', 827, 'takt/827/add-trace-task-metadata');
 
-      expect(first.worktreePath).toMatch(/^\/tmp\/takt-worktrees\/pr-sync-\d+-[a-f0-9]{16}$/);
-      expect(second.worktreePath).toMatch(/^\/tmp\/takt-worktrees\/pr-sync-\d+-[a-f0-9]{16}$/);
+      expect(relative('/tmp/takt-worktrees', first.worktreePath)).toMatch(/^pr-sync-\d+-[a-f0-9]{16}$/);
+      expect(relative('/tmp/takt-worktrees', second.worktreePath)).toMatch(/^pr-sync-\d+-[a-f0-9]{16}$/);
       expect(first.worktreePath).not.toBe(second.worktreePath);
       expect(mockCloneAndIsolate).toHaveBeenCalledWith('/project', first.worktreePath);
       expect(mockCloneAndIsolate).toHaveBeenCalledWith('/project', second.worktreePath);

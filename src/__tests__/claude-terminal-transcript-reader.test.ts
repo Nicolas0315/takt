@@ -25,9 +25,11 @@ vi.mock('node:fs/promises', async (importOriginal) => {
 
 async function withTemporaryClaudeHome<T>(run: (projectDir: string) => Promise<T>): Promise<T> {
   const originalHome = process.env.HOME;
+  const originalUserProfile = process.env.USERPROFILE;
   const homeDir = await mkdtemp(join(tmpdir(), 'takt-claude-terminal-home-'));
   const projectDir = await mkdtemp(join(tmpdir(), 'takt-claude-terminal-project-'));
   process.env.HOME = homeDir;
+  process.env.USERPROFILE = homeDir;
 
   try {
     return await run(projectDir);
@@ -36,6 +38,11 @@ async function withTemporaryClaudeHome<T>(run: (projectDir: string) => Promise<T
       delete process.env.HOME;
     } else {
       process.env.HOME = originalHome;
+    }
+    if (originalUserProfile === undefined) {
+      delete process.env.USERPROFILE;
+    } else {
+      process.env.USERPROFILE = originalUserProfile;
     }
     await rm(homeDir, { recursive: true, force: true });
     await rm(projectDir, { recursive: true, force: true });
@@ -370,9 +377,11 @@ describe('Claude terminal transcript reader', () => {
 
   it('Given transcript receives a later assistant line and completion, When waiting, Then response is returned after completion', async () => {
     const originalHome = process.env.HOME;
+    const originalUserProfile = process.env.USERPROFILE;
     const homeDir = await mkdtemp(join(tmpdir(), 'takt-claude-terminal-home-'));
     const projectDir = await mkdtemp(join(tmpdir(), 'takt-claude-terminal-project-'));
     process.env.HOME = homeDir;
+    process.env.USERPROFILE = homeDir;
 
     try {
       const sessionId = 'claude-session-1';
@@ -425,6 +434,11 @@ describe('Claude terminal transcript reader', () => {
       } else {
         process.env.HOME = originalHome;
       }
+      if (originalUserProfile === undefined) {
+        delete process.env.USERPROFILE;
+      } else {
+        process.env.USERPROFILE = originalUserProfile;
+      }
       await rm(homeDir, { recursive: true, force: true });
       await rm(projectDir, { recursive: true, force: true });
     }
@@ -470,9 +484,11 @@ describe('Claude terminal transcript reader', () => {
 
   it('Given transcript has assistant text without completion, When waiting, Then partial response is not returned', async () => {
     const originalHome = process.env.HOME;
+    const originalUserProfile = process.env.USERPROFILE;
     const homeDir = await mkdtemp(join(tmpdir(), 'takt-claude-terminal-home-'));
     const projectDir = await mkdtemp(join(tmpdir(), 'takt-claude-terminal-project-'));
     process.env.HOME = homeDir;
+    process.env.USERPROFILE = homeDir;
 
     try {
       const sessionId = 'claude-session-1';
@@ -503,6 +519,11 @@ describe('Claude terminal transcript reader', () => {
         delete process.env.HOME;
       } else {
         process.env.HOME = originalHome;
+      }
+      if (originalUserProfile === undefined) {
+        delete process.env.USERPROFILE;
+      } else {
+        process.env.USERPROFILE = originalUserProfile;
       }
       await rm(homeDir, { recursive: true, force: true });
       await rm(projectDir, { recursive: true, force: true });

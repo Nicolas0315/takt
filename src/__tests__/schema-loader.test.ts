@@ -1,3 +1,4 @@
+import { join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const readFileSyncMock = vi.fn((path: string) => {
@@ -70,7 +71,7 @@ describe('schema-loader', () => {
 
     expect(first).toEqual(second);
     expect(readFileSyncMock).toHaveBeenCalledTimes(1);
-    expect(readFileSyncMock).toHaveBeenCalledWith('/mock/resources/schemas/judgment.json', 'utf-8');
+    expect(readFileSyncMock).toHaveBeenCalledWith(join('/mock/resources', 'schemas', 'judgment.json'), 'utf-8');
   });
 
   it('loadDecompositionSchema は指定された初回part数を maxItems に設定する', async () => {

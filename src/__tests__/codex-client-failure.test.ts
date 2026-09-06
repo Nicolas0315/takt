@@ -1,4 +1,4 @@
-import { basename } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CodexCallOptions } from '../infra/codex/types.js';
 import { MAX_AGENT_FAILURE_MESSAGE_BYTES } from '../shared/types/agent-failure.js';
@@ -220,7 +220,7 @@ describe('CodexClient failure handling', () => {
     expect(ensurePrivateDirectoryMock).toHaveBeenCalledWith(FAILURE_DIR);
     expect(writeNewPrivateFileWithModeMock).toHaveBeenCalledOnce();
     expect(writeNewPrivateFileWithModeMock.mock.calls[0]?.[2]).toBe(0o600);
-    expect(writtenPath.startsWith(`${FAILURE_DIR}/`)).toBe(true);
+    expect(dirname(writtenPath)).toBe(join(FAILURE_DIR));
     expect(writtenText).toBe(failureMessage);
     expect(result.error).toBeDefined();
     expect(Buffer.byteLength(result.error ?? '', 'utf8')).toBeLessThanOrEqual(MAX_AGENT_FAILURE_MESSAGE_BYTES);
@@ -229,7 +229,7 @@ describe('CodexClient failure handling', () => {
       `[TRUNCATED: `,
     );
     expect(result.error).toContain(
-      `full text: .takt/runs/run-1/failures/${basename(writtenPath)}]`,
+      `full text: ${join('.takt', 'runs', 'run-1', 'failures', basename(writtenPath))}]`,
     );
     const marker = result.error?.match(/\[TRUNCATED: (\d+) bytes, full text:/);
     expect(marker).not.toBeNull();
@@ -258,7 +258,7 @@ describe('CodexClient failure handling', () => {
     const paths = writeNewPrivateFileWithModeMock.mock.calls.map((call) => String(call[0]));
     expect(paths).toHaveLength(2);
     expect(new Set(paths).size).toBe(2);
-    expect(paths.every((path) => path.startsWith(`${FAILURE_DIR}/`))).toBe(true);
+    expect(paths.every((path) => dirname(path) === join(FAILURE_DIR))).toBe(true);
   });
 
   it('should preserve an error at the maximum byte boundary without creating a file', async () => {

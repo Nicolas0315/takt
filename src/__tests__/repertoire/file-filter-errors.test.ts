@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { join } from 'node:path';
 
 const { lstatSyncMock, readdirSyncMock } = vi.hoisted(() => ({
   lstatSyncMock: vi.fn(),
@@ -15,7 +16,7 @@ import { collectCopyTargets } from '../../features/repertoire/file-filter.js';
 
 describe('repertoire copy target collection errors', () => {
   it('should reject a discovered package directory inspection failure instead of copying a partial package', () => {
-    const directory = '/package/facets';
+    const directory = join('/package', 'facets');
     const error = Object.assign(new Error('permission denied'), { code: 'EACCES' });
     lstatSyncMock.mockImplementation((path) => {
       if (path === directory) throw error;
