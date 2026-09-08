@@ -1,6 +1,6 @@
 import { mkdtempSync, mkdirSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const injectedRootAlias = vi.hoisted(() => ({
@@ -9,18 +9,22 @@ const injectedRootAlias = vi.hoisted(() => ({
   targetPath: '',
 }));
 
+function comparablePath(path: unknown): string {
+  return String(path).replaceAll('\\', '/');
+}
+
 vi.mock('node:fs', async () => {
   const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
   return {
     ...actual,
     lstatSync(...args: Parameters<typeof actual.lstatSync>) {
-      if (String(args[0]) === injectedRootAlias.path) {
+      if (comparablePath(args[0]) === comparablePath(injectedRootAlias.path)) {
         return actual.lstatSync(injectedRootAlias.fixturePath);
       }
       return actual.lstatSync(...args);
     },
     realpathSync(...args: Parameters<typeof actual.realpathSync>) {
-      if (String(args[0]) === injectedRootAlias.path) {
+      if (comparablePath(args[0]) === comparablePath(injectedRootAlias.path)) {
         return injectedRootAlias.targetPath;
       }
       return actual.realpathSync(...args);
@@ -54,7 +58,7 @@ describe('private artifact path identity', () => {
     symlinkSync(targetRoot, aliasFixture, 'dir');
     symlinkSync(outsideDirectory, join(targetRoot, 'linked'), 'dir');
 
-    injectedRootAlias.path = '/takt-private-root-alias';
+    injectedRootAlias.path = resolve('/takt-private-root-alias');
     injectedRootAlias.fixturePath = aliasFixture;
     injectedRootAlias.targetPath = targetRoot;
 

@@ -1,5 +1,8 @@
 import type { Command } from 'commander';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const testProjectCwd = join('/', 'test', 'project');
 
 const initializationMocks = vi.hoisted(() => ({
   createLogger: vi.fn(),
@@ -79,7 +82,7 @@ describe('CLI execution context', () => {
     const context = getCliExecutionContext();
 
     expect(() => Object.assign(context, { [property]: value })).toThrow(TypeError);
-    expect(getCliExecutionContext()).toEqual({ cwd: '/test/project', pipelineMode: true });
+    expect(getCliExecutionContext()).toEqual({ cwd: testProjectCwd, pipelineMode: true });
   });
 
   it.each([false, true])('should initialize global, project, and Git state when pipeline mode is %s', async (pipelineMode) => {
@@ -90,12 +93,12 @@ describe('CLI execution context', () => {
     await initializeCliExecutionContext(program, '1.0.0');
 
     expect(initializationMocks.initGlobalDirs).toHaveBeenCalledWith({ nonInteractive: pipelineMode });
-    expect(initializationMocks.initProjectDirs).toHaveBeenCalledWith('/test/project');
-    expect(initializationMocks.initGitProvider).toHaveBeenCalledWith('/test/project');
+    expect(initializationMocks.initProjectDirs).toHaveBeenCalledWith(testProjectCwd);
+    expect(initializationMocks.initGitProvider).toHaveBeenCalledWith(testProjectCwd);
     expect(initializationMocks.createLogger).toHaveBeenCalledWith('cli');
     expect(initializationMocks.loggerInfo).toHaveBeenCalledWith('TAKT CLI starting', {
       version: '1.0.0',
-      cwd: '/test/project',
+      cwd: testProjectCwd,
       verbose: false,
       pipelineMode,
       quietMode: false,
@@ -110,8 +113,8 @@ describe('CLI execution context', () => {
     await initializeCliExecutionContext(program, '1.0.0');
 
     expect(initializationMocks.resolveConfigValues)
-      .toHaveBeenCalledWith('/test/project', ['logging', 'minimalOutput']);
-    expect(initializationMocks.initDebugLogger).toHaveBeenCalledWith(undefined, '/test/project');
+      .toHaveBeenCalledWith(testProjectCwd, ['logging', 'minimalOutput']);
+    expect(initializationMocks.initDebugLogger).toHaveBeenCalledWith(undefined, testProjectCwd);
     expect(initializationMocks.setVerboseConsole).not.toHaveBeenCalled();
     expect(initializationMocks.setLogLevel).toHaveBeenCalledWith('info');
   });
@@ -127,7 +130,7 @@ describe('CLI execution context', () => {
 
     await initializeCliExecutionContext(program, '1.0.0');
 
-    expect(initializationMocks.initDebugLogger).toHaveBeenCalledWith(undefined, '/test/project');
+    expect(initializationMocks.initDebugLogger).toHaveBeenCalledWith(undefined, testProjectCwd);
     expect(initializationMocks.setVerboseConsole).not.toHaveBeenCalled();
     expect(initializationMocks.setLogLevel).toHaveBeenCalledWith('warn');
   });
@@ -145,7 +148,7 @@ describe('CLI execution context', () => {
     await initializeCliExecutionContext(program, '1.0.0');
 
     expect(initializationMocks.initDebugLogger)
-      .toHaveBeenCalledWith({ enabled: true, trace: true }, '/test/project');
+      .toHaveBeenCalledWith({ enabled: true, trace: true }, testProjectCwd);
     expect(initializationMocks.setVerboseConsole).toHaveBeenCalledWith(true);
     expect(initializationMocks.setLogLevel).toHaveBeenCalledWith('debug');
   });
