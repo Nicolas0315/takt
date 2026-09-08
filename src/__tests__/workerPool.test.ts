@@ -207,11 +207,20 @@ describe('runWithWorkerPool', () => {
 
   it('SIGINT 後は新規タスクを開始せず、実行中タスクの完了を待つ', async () => {
     let receivedSignal: AbortSignal | undefined;
+    const existingSigintListeners = process.rawListeners('SIGINT');
     executeRunTaskAndComplete.mockImplementationOnce((_task, _runner, _cwd, _options, parallel) => {
       receivedSignal = parallel?.abortSignal;
       return new Promise<boolean>((resolve) => {
         receivedSignal?.addEventListener('abort', () => resolve(false), { once: true });
-        setImmediate(() => process.emit('SIGINT'));
+        setImmediate(() => {
+          const shutdownHandler = process.rawListeners('SIGINT').find(
+            (listener) => !existingSigintListeners.includes(listener),
+          );
+          if (shutdownHandler === undefined) {
+            throw new Error('worker pool SIGINT handler was not installed');
+          }
+          shutdownHandler();
+        });
       });
     });
 

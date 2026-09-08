@@ -3,8 +3,14 @@ import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import type { ChildProcess } from 'node:child_process';
 
+const mockSpawn = vi.hoisted(() => vi.fn());
+
 vi.mock('node:child_process', () => ({
-  spawn: vi.fn(),
+  spawn: mockSpawn,
+}));
+
+vi.mock('cross-spawn', () => ({
+  default: mockSpawn,
 }));
 
 import { spawn } from 'node:child_process';
