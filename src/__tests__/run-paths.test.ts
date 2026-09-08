@@ -39,11 +39,11 @@ describe('buildRunPaths', () => {
     expect(paths.operationJournalRel).toBe('.takt/runs/20260210-demo-task/operations/journal.json');
     expect(paths.metaRel).toBe('.takt/runs/20260210-demo-task/meta.json');
 
-    expect(paths.reportsAbs).toBe('/tmp/project/.takt/runs/20260210-demo-task/reports');
-    expect(paths.contextTaskAbs).toBe('/tmp/project/.takt/runs/20260210-demo-task/context/task');
-    expect(paths.contextTaskOrderAbs).toBe('/tmp/project/.takt/runs/20260210-demo-task/context/task/order.md');
-    expect(paths.operationJournalAbs).toBe('/tmp/project/.takt/runs/20260210-demo-task/operations/journal.json');
-    expect(paths.metaAbs).toBe('/tmp/project/.takt/runs/20260210-demo-task/meta.json');
+    expect(paths.reportsAbs).toBe(path.join('/tmp/project', '.takt', 'runs', '20260210-demo-task', 'reports'));
+    expect(paths.contextTaskAbs).toBe(path.join('/tmp/project', '.takt', 'runs', '20260210-demo-task', 'context', 'task'));
+    expect(paths.contextTaskOrderAbs).toBe(path.join('/tmp/project', '.takt', 'runs', '20260210-demo-task', 'context', 'task', 'order.md'));
+    expect(paths.operationJournalAbs).toBe(path.join('/tmp/project', '.takt', 'runs', '20260210-demo-task', 'operations', 'journal.json'));
+    expect(paths.metaAbs).toBe(path.join('/tmp/project', '.takt', 'runs', '20260210-demo-task', 'meta.json'));
   });
 
   it('should append namespace under reports and context paths for subworkflows', () => {
@@ -51,8 +51,8 @@ describe('buildRunPaths', () => {
 
     expect(paths.reportsRel).toBe('.takt/runs/20260210-demo-task/reports/subworkflows/delegate-coding');
     expect(paths.contextRel).toBe('.takt/runs/20260210-demo-task/context/subworkflows/delegate-coding');
-    expect(paths.reportsAbs).toBe('/tmp/project/.takt/runs/20260210-demo-task/reports/subworkflows/delegate-coding');
-    expect(paths.contextKnowledgeAbs).toBe('/tmp/project/.takt/runs/20260210-demo-task/context/subworkflows/delegate-coding/knowledge');
+    expect(paths.reportsAbs).toBe(path.join('/tmp/project', '.takt', 'runs', '20260210-demo-task', 'reports', 'subworkflows', 'delegate-coding'));
+    expect(paths.contextKnowledgeAbs).toBe(path.join('/tmp/project', '.takt', 'runs', '20260210-demo-task', 'context', 'subworkflows', 'delegate-coding', 'knowledge'));
   });
 });
 

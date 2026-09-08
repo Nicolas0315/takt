@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { join } from 'node:path';
 
 const {
   mockConfirm,
@@ -24,16 +25,16 @@ vi.mock('node:fs', async (importOriginal) => ({
 }));
 
 vi.mock('../../infra/config/paths.js', () => ({
-  getGlobalProviderOptionsDir: () => '/global/provider-options',
-  getGlobalStepsDir: () => '/global/steps',
-  getGlobalWorkflowsDir: () => '/global/workflows',
-  getGlobalFacetPoolsDir: () => '/global/facet-pools',
-  getProjectProviderOptionsDir: () => '/project/.takt/provider-options',
-  getProjectStepsDir: () => '/project/.takt/steps',
-  getProjectWorkflowsDir: () => '/project/.takt/workflows',
-  getProjectFacetPoolsDir: () => '/project/.takt/facet-pools',
-  getRepertoireDir: () => '/home/user/.takt/repertoire',
-  getRepertoirePackageDir: () => '/home/user/.takt/repertoire/@owner/repo',
+  getGlobalProviderOptionsDir: () => join('/global', 'provider-options'),
+  getGlobalStepsDir: () => join('/global', 'steps'),
+  getGlobalWorkflowsDir: () => join('/global', 'workflows'),
+  getGlobalFacetPoolsDir: () => join('/global', 'facet-pools'),
+  getProjectProviderOptionsDir: () => join('/project', '.takt', 'provider-options'),
+  getProjectStepsDir: () => join('/project', '.takt', 'steps'),
+  getProjectWorkflowsDir: () => join('/project', '.takt', 'workflows'),
+  getProjectFacetPoolsDir: () => join('/project', '.takt', 'facet-pools'),
+  getRepertoireDir: () => join('/home', 'user', '.takt', 'repertoire'),
+  getRepertoirePackageDir: () => join('/home', 'user', '.takt', 'repertoire', '@owner', 'repo'),
 }));
 
 vi.mock('../../infra/config/global/index.js', () => ({
@@ -51,10 +52,10 @@ vi.mock('../../shared/ui/index.js', () => ({
 
 import { repertoireRemoveCommand } from '../../commands/repertoire/remove.js';
 
-const PACKAGE_DIR = '/home/user/.takt/repertoire/@owner/repo';
-const OWNER_DIR = '/home/user/.takt/repertoire/@owner';
-const WORKFLOW_DIR = '/global/workflows';
-const STEP_DIR = '/global/steps';
+const PACKAGE_DIR = join('/home', 'user', '.takt', 'repertoire', '@owner', 'repo');
+const OWNER_DIR = join('/home', 'user', '.takt', 'repertoire', '@owner');
+const WORKFLOW_DIR = join('/global', 'workflows');
+const STEP_DIR = join('/global', 'steps');
 
 describe('repertoireRemoveCommand reference scan integration', () => {
   beforeEach(() => {
@@ -105,7 +106,7 @@ describe('repertoireRemoveCommand reference scan integration', () => {
   });
 
   it('should not confirm or delete when the real reference scanner cannot inspect an enumerated workflow file', async () => {
-    const workflowPath = `${WORKFLOW_DIR}/review.yaml`;
+    const workflowPath = join(WORKFLOW_DIR, 'review.yaml');
     mockFs.statSync.mockImplementation((path: string) => {
       if (path === WORKFLOW_DIR) return directoryStats();
       if (path === workflowPath) throw new Error('permission denied');
@@ -124,7 +125,7 @@ describe('repertoireRemoveCommand reference scan integration', () => {
   });
 
   it('should not confirm or delete when the real reference scanner cannot read an enumerated workflow file', async () => {
-    const workflowPath = `${WORKFLOW_DIR}/review.yaml`;
+    const workflowPath = join(WORKFLOW_DIR, 'review.yaml');
     mockFs.statSync.mockImplementation((path: string) => {
       if (path === WORKFLOW_DIR) return directoryStats();
       if (path === workflowPath) return fileStats();
@@ -147,7 +148,7 @@ describe('repertoireRemoveCommand reference scan integration', () => {
   });
 
   it('should not confirm or delete when the real reference scanner cannot resolve a step fragment symlink', async () => {
-    const stepPath = `${STEP_DIR}/review.yaml`;
+    const stepPath = join(STEP_DIR, 'review.yaml');
     mockFs.statSync.mockImplementation((path: string) => (
       path === STEP_DIR ? directoryStats() : throwNotFound()
     ));

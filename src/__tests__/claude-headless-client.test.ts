@@ -14,6 +14,8 @@ const { assertClaudeSkillsDisableSupportedMock } = vi.hoisted(() => ({
   assertClaudeSkillsDisableSupportedMock: vi.fn(),
 }));
 
+const mockSpawn = vi.hoisted(() => vi.fn());
+
 vi.mock('../infra/claude/cli-capability.js', () => ({
   assertClaudeSkillsDisableSupported: assertClaudeSkillsDisableSupportedMock,
 }));
@@ -34,7 +36,11 @@ vi.mock('node:fs/promises', async () => {
 });
 
 vi.mock('node:child_process', () => ({
-  spawn: vi.fn(),
+  spawn: mockSpawn,
+}));
+
+vi.mock('cross-spawn', () => ({
+  default: mockSpawn,
 }));
 
 import { spawn } from 'node:child_process';
@@ -1140,7 +1146,11 @@ describe('callClaudeHeadless', () => {
     const argv = lastSpawnArgv();
     const mcpIndex = argv.indexOf('--mcp-config');
     expect(mcpIndex).toBeGreaterThanOrEqual(0);
-    expect(capturedMcpConfigMode).toBe(0o600);
+    if (process.platform === 'win32') {
+      expect(chmodMock).toHaveBeenCalledWith(capturedMcpConfigPath, 0o600);
+    } else {
+      expect(capturedMcpConfigMode).toBe(0o600);
+    }
     expect(JSON.parse(capturedMcpConfigContent!)).toEqual({
       mcpServers: {
         local: {

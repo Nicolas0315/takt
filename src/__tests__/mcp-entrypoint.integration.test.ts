@@ -15,7 +15,7 @@ describe('MCP stdio entrypoint integration', () => {
     const transport = new StdioClientTransport({
       command: process.execPath,
       args: [
-        'node_modules/.bin/vite-node',
+        'node_modules/vite-node/vite-node.mjs',
         // --script mode ignores --config, so run in normal mode: the config
         // sets an esbuild target that lowers `using` declarations, which raw
         // Node < 24 cannot parse.

@@ -13,6 +13,10 @@ vi.mock('node:child_process', () => ({
   spawn: mockSpawn,
 }));
 
+vi.mock('cross-spawn', () => ({
+  default: mockSpawn,
+}));
+
 import { invalidateGlobalConfigCache } from '../infra/config/global/globalConfig.js';
 import { KiroProvider } from '../infra/providers/kiro.js';
 

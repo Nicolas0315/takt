@@ -59,7 +59,7 @@ describe('getWorkflowCategoriesPath', () => {
     const path = getWorkflowCategoriesPath(process.cwd());
 
     // Then
-    expect(path).toBe('/tmp/.takt/preferences/workflow-categories.yaml');
+    expect(path).toBe(join('/tmp/.takt', 'preferences', 'workflow-categories.yaml'));
   });
 
   it('should rethrow when global config loading fails', () => {

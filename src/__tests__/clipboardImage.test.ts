@@ -22,6 +22,7 @@ type ExecFilePromisified = (
 
 const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform');
 let originalTmpDir: string | undefined;
+let originalWindowsTmpDir: string | undefined;
 const tempRoots = new Set<string>();
 
 function setPlatform(platform: NodeJS.Platform): void {
@@ -42,6 +43,7 @@ describe('readClipboardImage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     originalTmpDir = process.env.TMPDIR;
+    originalWindowsTmpDir = process.env.TEMP;
     setPlatform('darwin');
   });
 
@@ -56,6 +58,11 @@ describe('readClipboardImage', () => {
     } else {
       process.env.TMPDIR = originalTmpDir;
     }
+    if (originalWindowsTmpDir === undefined) {
+      delete process.env.TEMP;
+    } else {
+      process.env.TEMP = originalWindowsTmpDir;
+    }
     for (const root of tempRoots) {
       rmSync(root, { recursive: true, force: true });
     }
@@ -67,6 +74,7 @@ describe('readClipboardImage', () => {
     tempRoots.add(parentDir);
     const missingTmpDir = join(parentDir, 'missing', 'tmp');
     process.env.TMPDIR = missingTmpDir;
+    process.env.TEMP = missingTmpDir;
 
     const execFileAsync = vi.fn(async (file: string, args: string[]) => {
       if (file !== 'osascript') {
