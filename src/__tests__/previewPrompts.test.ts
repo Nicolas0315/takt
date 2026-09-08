@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MockInstance } from 'vitest';
+import { resolve } from 'node:path';
 import type {
   CompiledProviderEnvironment,
   ResolvedRuntimeEnvironment,
@@ -236,7 +237,7 @@ describe('previewPrompts', () => {
     const calls = mockInstructionBuild.mock.calls;
     const prompt = calls[calls.length - 1]?.[0];
     expect(prompt).toContain('## Companion inbox');
-    expect(prompt).toContain('/project/.takt/runs/preview/companion/implement');
+    expect(prompt).toContain(resolve('/project', '.takt', 'runs', 'preview', 'companion', 'implement'));
   });
 
   // takt prompt は診断ツール。レビュー範囲を解決できなくてもプロンプト本体の

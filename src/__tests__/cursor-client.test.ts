@@ -13,6 +13,10 @@ vi.mock('node:child_process', () => ({
   spawn: mockSpawn,
 }));
 
+vi.mock('cross-spawn', () => ({
+  default: mockSpawn,
+}));
+
 import { callCursor } from '../infra/cursor/client.js';
 
 type SpawnScenario = {
