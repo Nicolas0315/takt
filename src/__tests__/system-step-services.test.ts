@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { basename, dirname, resolve } from 'node:path';
 import type { WorkflowState } from '../core/models/index.js';
 import type { SystemStepGitProvider } from '../core/workflow/system/system-step-services.js';
 
@@ -2596,7 +2597,8 @@ describe('DefaultSystemStepServices', () => {
     });
     expect(mockResolveCloneBaseDir).toHaveBeenCalledWith('/repo');
     expect(mockCloneAndIsolate).toHaveBeenCalledWith('/repo', worktreePath);
-    expect(worktreePath).toMatch(/^\/repo\/\.takt\/pr-sync-/);
+    expect(dirname(resolve(worktreePath))).toBe(resolve('/repo/.takt'));
+    expect(basename(worktreePath)).toMatch(/^pr-sync-/);
     expect(mockExecFileSync).toHaveBeenCalledWith(
       'git',
       ['fetch', '/repo', 'refs/remotes/origin/task/test-branch:refs/takt/pr-sync/task/test-branch'],
@@ -3142,7 +3144,8 @@ describe('DefaultSystemStepServices', () => {
     });
     expect(mockResolveCloneBaseDir).toHaveBeenCalledWith('/repo');
     expect(mockCloneAndIsolate).toHaveBeenCalledWith('/repo', worktreePath);
-    expect(worktreePath).toMatch(/^\/repo\/\.takt\/pr-sync-/);
+    expect(dirname(resolve(worktreePath))).toBe(resolve('/repo/.takt'));
+    expect(basename(worktreePath)).toMatch(/^pr-sync-/);
     expect(mockAgentCall).toHaveBeenCalledWith(
       'message:Resolve conflicts',
       expect.objectContaining({ cwd: worktreePath }),
