@@ -196,7 +196,7 @@
     "tsx": "4.22.4",
     "typescript": "^5.5.0",
     "typescript-eslint": "^8.53.1",
-    "vitest": "^4.1.11"
+    "vitest": "^5.0.1"
   },
   "overrides": {
     "hono": "^4.13.5",
