@@ -14,6 +14,10 @@ vi.mock('../shared/utils/index.js', async (importOriginal) => ({
   crossSpawn: mockSpawn,
 }));
 
+vi.mock('cross-spawn', () => ({
+  default: mockSpawn,
+}));
+
 import { callCursor } from '../infra/cursor/client.js';
 
 type SpawnScenario = {

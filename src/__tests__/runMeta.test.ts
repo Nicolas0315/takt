@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { join } from 'node:path';
 import { buildRunPaths, type RunPaths } from '../core/workflow/run/run-paths.js';
 
 vi.mock('../infra/config/index.js', () => ({

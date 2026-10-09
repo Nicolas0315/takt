@@ -1,8 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import process from 'node:process';
 // New modules under test (implemented in the following `implement` step).
 import { createMcpAdapter, type ResolvedMcpServers, type ProviderMcpContext } from '../infra/providers/mcp/index.js';
+
+function expectPrivateMode(path: string, expectedMode: number, kind: 'file' | 'directory'): void {
+  const stats = statSync(path);
+  expect(kind === 'file' ? stats.isFile() : stats.isDirectory()).toBe(true);
+  if (process.platform !== 'win32') {
+    expect(stats.mode & 0o777).toBe(expectedMode);
+  }
+}
 
 /**
  * Contracts covered (see plan.md 完了契約):
@@ -197,8 +206,8 @@ describe('Cursor adapter (MCP-CURSOR)', () => {
     expect(configRoot).toBeDefined();
     expect(configRoot).not.toBe('/tmp/test');
     // The config root and the mcp.json file must be private (order.md:283, claude-mcp-config.test.ts:30-33).
-    expect(statSync(configRoot!).mode & 0o777).toBe(0o700);
-    expect(statSync(join(configRoot!, '.cursor', 'mcp.json')).mode & 0o777).toBe(0o600);
+    expectPrivateMode(configRoot!, 0o700, 'directory');
+    expectPrivateMode(join(configRoot!, '.cursor', 'mcp.json'), 0o600, 'file');
     await prepared.dispose();
   });
 
@@ -248,8 +257,8 @@ describe('Copilot adapter (MCP-COPILOT)', () => {
     // The temp config file and its parent directory must be private (order.md:283, claude-mcp-config.test.ts:30-33).
     const path = args?.[additionalIndex]?.split('=')[1]?.replace(/^@/, '');
     expect(path).toBeDefined();
-    expect(statSync(path!).mode & 0o777).toBe(0o600);
-    expect(statSync(dirname(path!)).mode & 0o777).toBe(0o700);
+    expectPrivateMode(path!, 0o600, 'file');
+    expectPrivateMode(dirname(path!), 0o700, 'directory');
     await prepared.dispose();
   });
 
@@ -307,8 +316,8 @@ describe('Kiro adapter (MCP-KIRO)', () => {
     // The temp config file and its parent directory must be private (order.md:283, claude-mcp-config.test.ts:30-33).
     const path = (prepared as { path?: string }).path;
     expect(path).toBeDefined();
-    expect(statSync(path!).mode & 0o777).toBe(0o600);
-    expect(statSync(dirname(path!)).mode & 0o777).toBe(0o700);
+    expectPrivateMode(path!, 0o600, 'file');
+    expectPrivateMode(dirname(path!), 0o700, 'directory');
     await prepared.dispose();
   });
 

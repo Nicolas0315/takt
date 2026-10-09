@@ -1,4 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { resolve } from 'node:path';
+
+const builtinWorkflowPath = resolve('/builtin/workflows/default.yaml');
 
 const mocks = vi.hoisted(() => ({
   copyFragments: vi.fn(),
@@ -64,17 +67,15 @@ describe('ejectBuiltin rollback', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     let workflowDirCreated = false;
-    const normalizePath = (path: string) => path.replace(/\\/g, '/');
-    mocks.existsSync.mockImplementation((path: string) => {
-      const normalized = normalizePath(path);
-      return normalized.endsWith('/builtin/workflows/default.yaml')
-        || (normalized.endsWith('/project/.takt/workflows') && workflowDirCreated);
-    });
+    mocks.existsSync.mockImplementation((path: string) => (
+      path === builtinWorkflowPath
+      || (path === '/project/.takt/workflows' && workflowDirCreated)
+    ));
     mocks.pathExistsForEject.mockImplementation((path: string) => (
-      normalizePath(path).endsWith('/project/.takt/workflows') && workflowDirCreated
+      path === '/project/.takt/workflows' && workflowDirCreated
     ));
     mocks.mkdirSync.mockImplementation((path: string) => {
-      if (normalizePath(path).endsWith('/project/.takt/workflows')) {
+      if (path === '/project/.takt/workflows') {
         workflowDirCreated = true;
       }
     });

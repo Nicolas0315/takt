@@ -452,7 +452,9 @@ describe('resolveReportReferenceDetailed', () => {
     )).toThrow(/symlink/);
   });
 
-  it('検証後に祖先が交換されても外部 report 内容を展開しない', () => {
+  // Windows keeps the opened report file handle exclusive, so the Unix-style
+  // parent-directory exchange cannot be injected while the descriptor is open.
+  it.skipIf(process.platform === 'win32')('検証後に祖先が交換されても外部 report 内容を展開しない', () => {
     const root = makeTemporaryDirectory();
     const reports = join(root, 'reports');
     const originalReports = join(root, 'original-reports');

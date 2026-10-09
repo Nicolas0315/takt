@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { join, relative } from 'node:path';
+import { join, relative, sep } from 'node:path';
 import { MAX_AGENT_FAILURE_MESSAGE_BYTES } from '../../shared/types/agent-failure.js';
 import { ensurePrivateDirectory, writeNewPrivateFileWithMode } from '../../shared/utils/private-file.js';
 import { createLogger, getErrorMessage } from '../../shared/utils/index.js';
@@ -31,7 +31,7 @@ export function boundCodexFailureMessage(
     try {
       ensurePrivateDirectory(options.failureDir);
       writeNewPrivateFileWithMode(filePath, message, CODEX_FAILURE_FILE_MODE);
-      fullTextPath = relative(options.cwd, filePath);
+      fullTextPath = relative(options.cwd, filePath).split(sep).join('/');
     } catch (error) {
       log.warn('Failed to persist full Codex failure text', {
         failureDir: options.failureDir,

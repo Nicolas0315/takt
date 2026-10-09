@@ -202,7 +202,7 @@ function collectReportFiles(rootDir: string, currentDir: string): ReportEntry[] 
       continue;
     }
 
-    const report = readReportFile(rootDir, fullPath, relative(rootDir, fullPath));
+    const report = readReportFile(rootDir, fullPath, relative(rootDir, fullPath).replace(/\\/g, '/'));
     if (report !== null) {
       reports.push(report);
     }

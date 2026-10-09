@@ -1,5 +1,7 @@
-import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { join } from 'node:path';
+
+const defaultAnalyticsEventsPath = join('/', 'global-config', 'analytics', 'events');
 
 const {
   commandActions,
@@ -141,7 +143,7 @@ describe('lazy CLI action wiring', () => {
 
     await requireAction('root.purge')({ retentionDays: '30' });
 
-    expect(mockPurgeOldEvents).toHaveBeenCalledWith(join('/global-config', 'analytics', 'events'), 30, expect.any(Date));
+    expect(mockPurgeOldEvents).toHaveBeenCalledWith(defaultAnalyticsEventsPath, 30, expect.any(Date));
   });
 
   it('should execute the registered reset config action', async () => {

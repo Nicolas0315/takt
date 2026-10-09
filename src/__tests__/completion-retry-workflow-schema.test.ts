@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
+import { resolve } from 'node:path';
 
 const virtualStepFragment = vi.hoisted(() => ({
   content: '',
@@ -13,7 +14,7 @@ vi.mock('node:fs', async (importOriginal) => ({
   ...await importOriginal<typeof import('node:fs')>(),
   closeSync: vi.fn(),
   existsSync: vi.fn((path: import('node:fs').PathLike) => (
-    String(path) === virtualStepFragment.path
+    resolve(String(path)) === resolve(virtualStepFragment.path)
   )),
   fstatSync: vi.fn(() => ({
     isFile: () => true,

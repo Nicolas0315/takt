@@ -200,7 +200,7 @@ function executeReleaseScript(failingCommand: string | undefined): {
   const npmStubPath = join(binDir, 'npm-cli.js');
   mkdirSync(binDir);
   writeFileSync(npmStubPath, `
-import { appendFileSync } from 'node:fs';
+const { appendFileSync } = require('node:fs');
 
 const command = process.argv.slice(2).join(' ');
 appendFileSync(process.env.TAKT_RELEASE_LOG, command + '\\n');
@@ -214,11 +214,14 @@ if (command === process.env.TAKT_FAIL_COMMAND) {
   writeFileSync(releaseLogPath, 'stale log entry\\n');
 
   try {
+    const childEnv = Object.fromEntries(
+      Object.entries(process.env).filter(([key]) => key.toLowerCase() !== 'npm_execpath'),
+    );
     const result = spawnSync(process.execPath, [join(repositoryRoot, 'scripts/run-release-check.mjs')], {
       encoding: 'utf8',
       cwd: tempRoot,
       env: {
-        ...process.env,
+        ...childEnv,
         npm_execpath: npmStubPath,
         TAKT_FAIL_COMMAND: failingCommand === undefined ? '' : failingCommand,
         TAKT_RELEASE_LOG: logPath,

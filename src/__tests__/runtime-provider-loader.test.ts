@@ -679,7 +679,8 @@ describe('runtime-provider loader', () => {
     ]);
     const filePath = join(globalDir, RUNTIME_PROVIDER_FILENAME);
 
-    expect(() => loadRuntimeProviderFileAt(filePath)).toThrow(new RegExp(`${filePath}.*review_mode`, 's'));
+    const escapedPath = filePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    expect(() => loadRuntimeProviderFileAt(filePath)).toThrow(new RegExp(`${escapedPath}.*review_mode`, 's'));
   });
 
   it('Given both files omit companion, When resolving, Then companion remains undefined', () => {

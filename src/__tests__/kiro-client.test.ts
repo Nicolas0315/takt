@@ -6,9 +6,16 @@ const { mockSpawn, debugSpy } = vi.hoisted(() => ({
   debugSpy: vi.fn(),
 }));
 
+vi.mock('node:child_process', () => ({
+  spawn: mockSpawn,
+}));
+
+vi.mock('cross-spawn', () => ({
+  default: mockSpawn,
+}));
+
 vi.mock('../shared/utils/index.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  crossSpawn: mockSpawn,
   createLogger: vi.fn(() => ({
     debug: debugSpy,
     info: vi.fn(),
@@ -78,6 +85,10 @@ const kiroNetworkEnvCases: Array<[typeof restoredEnvKeys[number], string]> = [
   ['https_proxy', 'http://lower-https-proxy.example'],
   ['no_proxy', 'localhost,.internal'],
 ];
+
+function expectedKiroNetworkEnvValue(key: string, value: string): string {
+  return process.env[key] ?? value;
+}
 
 const kiroObservabilityEnvCases: Array<[typeof restoredEnvKeys[number], string]> = [
   ['TAKT_OBSERVABILITY', '{"enabled":true,"monitor":true,"session_log_exporter":true,"usage_events_phase":true}'],
@@ -342,8 +353,8 @@ describe('callKiro', () => {
     expect(options.env?.SERVICE_SECRET).toBeUndefined();
     expect(options.env?.KIRO_API_KEY).toBeUndefined();
     expect(options.env?.KIRO_HOME).toBe('/kiro/home');
-    for (const [key] of kiroNetworkEnvCases) {
-      expect(options.env?.[key]).toBe(process.env[key]);
+    for (const [key, value] of kiroNetworkEnvCases) {
+      expect(options.env?.[key]).toBe(expectedKiroNetworkEnvValue(key, value));
     }
     expect(options.env?.TAKT_OBSERVABILITY).toBe(
       '{"enabled":true,"monitor":true,"session_log_exporter":true,"usage_events_phase":true}',

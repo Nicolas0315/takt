@@ -9,9 +9,9 @@ import type { TaskInfo, TaskListItem } from './types.js';
 function toDisplayPath(projectDir: string, targetPath: string): string {
   const relativePath = path.relative(projectDir, targetPath);
   if (!relativePath || relativePath.startsWith('..')) {
-    return targetPath;
+    return targetPath.replace(/\\/g, '/');
   }
-  return relativePath;
+  return relativePath.replace(/\\/g, '/');
 }
 
 export function resolveTaskContent(projectDir: string, task: TaskRecord): string {

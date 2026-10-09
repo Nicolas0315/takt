@@ -20,10 +20,11 @@ describe('ensureCurrentTmpDirExists', () => {
   });
 
   it('Given TMPDIR points to a missing directory, When ensuring current tmpdir, Then the directory is created and returned', () => {
-    const originalTmpDir = process.env.TMPDIR;
+    const tmpDirEnvKey = process.platform === 'win32' ? 'TEMP' : 'TMPDIR';
+    const originalTmpDir = process.env[tmpDirEnvKey];
     const parentDir = createTempDir('takt-tmpdir-parent-');
     const missingTmpDir = join(parentDir, 'missing', 'tmp');
-    process.env.TMPDIR = missingTmpDir;
+    process.env[tmpDirEnvKey] = missingTmpDir;
 
     try {
       const ensuredTmpDir = ensureCurrentTmpDirExists();
@@ -33,9 +34,9 @@ describe('ensureCurrentTmpDirExists', () => {
       expect(statSync(missingTmpDir).isDirectory()).toBe(true);
     } finally {
       if (originalTmpDir === undefined) {
-        delete process.env.TMPDIR;
+        delete process.env[tmpDirEnvKey];
       } else {
-        process.env.TMPDIR = originalTmpDir;
+        process.env[tmpDirEnvKey] = originalTmpDir;
       }
     }
   });
