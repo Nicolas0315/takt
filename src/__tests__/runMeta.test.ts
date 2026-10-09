@@ -1,4 +1,6 @@
+import { join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { join } from 'node:path';
 import { buildRunPaths, type RunPaths } from '../core/workflow/run/run-paths.js';
 
 vi.mock('../infra/config/index.js', () => ({
@@ -23,7 +25,7 @@ describe('RunMetaManager', () => {
 
     manager.updateStep('implement', 2);
 
-    expect(vi.mocked(ensureDir)).toHaveBeenCalledWith('/tmp/project/.takt/runs/20260409-force-fail-test');
+    expect(vi.mocked(ensureDir)).toHaveBeenCalledWith(join('/tmp/project', '.takt', 'runs', '20260409-force-fail-test'));
     expect(vi.mocked(writeFileAtomic)).toHaveBeenCalledTimes(2);
 
     const initialMeta = JSON.parse(String(vi.mocked(writeFileAtomic).mock.calls[0]![1])) as {

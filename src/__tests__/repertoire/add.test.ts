@@ -18,6 +18,7 @@ const {
   mockCleanupResiduals,
   mockInfo,
   mockSuccess,
+  mockEnsureCurrentTmpDirExists,
   secureTempDir,
 } = vi.hoisted(() => ({
   mockMkdtempSync: vi.fn(),
@@ -34,6 +35,7 @@ const {
   mockCleanupResiduals: vi.fn(),
   mockInfo: vi.fn(),
   mockSuccess: vi.fn(),
+  mockEnsureCurrentTmpDirExists: vi.fn(),
   secureTempDir: '/secure/tmp/takt-import-a1b2c3',
 }));
 
@@ -128,6 +130,7 @@ vi.mock('../../shared/ui/index.js', () => ({
 vi.mock('../../shared/utils/index.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), error: vi.fn() }),
+  ensureCurrentTmpDirExists: mockEnsureCurrentTmpDirExists,
 }));
 
 import { repertoireAddCommand } from '../../commands/repertoire/add.js';
@@ -142,6 +145,7 @@ describe('repertoireAddCommand temporary directory handling', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockMkdtempSync.mockReturnValue(secureTempDir);
+    mockEnsureCurrentTmpDirExists.mockReturnValue(tmpdir());
     mockExistsSync.mockImplementation((target: string) => target === secureTempDir);
     mockReadFileSync.mockReturnValue('path: .');
     mockResolveRef.mockReturnValue('main');
@@ -172,23 +176,13 @@ describe('repertoireAddCommand temporary directory handling', () => {
     expect(mockResolveRepertoireConfigPath).toHaveBeenCalledWith(join(secureTempDir, 'extract'));
   });
 
-  it('should create a missing TMPDIR before creating import artifacts', async () => {
-    const originalTmpDir = process.env.TMPDIR;
+  it('should use a missing temporary directory returned by the runtime resolver', async () => {
     const missingTmpDir = join(tmpdir(), 'takt-repertoire-missing-tmp');
-    process.env.TMPDIR = missingTmpDir;
+    mockEnsureCurrentTmpDirExists.mockReturnValue(missingTmpDir);
 
-    try {
-      await repertoireAddCommand('github:owner/repo@main');
+    await repertoireAddCommand('github:owner/repo@main');
 
-      expect(mockMkdirSync).toHaveBeenCalledWith(missingTmpDir, { recursive: true });
-      expect(mockMkdtempSync).toHaveBeenCalledWith(join(missingTmpDir, 'takt-import-'));
-    } finally {
-      if (originalTmpDir === undefined) {
-        delete process.env.TMPDIR;
-      } else {
-        process.env.TMPDIR = originalTmpDir;
-      }
-    }
+    expect(mockMkdtempSync).toHaveBeenCalledWith(join(missingTmpDir, 'takt-import-'));
   });
 
   it('should clean up the mkdtemp-created directory once', async () => {
@@ -252,7 +246,7 @@ describe('repertoireAddCommand temporary directory handling', () => {
         context: {
           projectDir: process.cwd(),
           lang: 'ja',
-          workflowDir: '/home/user/.takt/repertoire/@owner/repo/workflows',
+          workflowDir: join('/home/user/.takt/repertoire/@owner/repo/workflows'),
           repertoireDir: '/home/user/.takt/repertoire',
         },
       },
@@ -303,7 +297,7 @@ describe('repertoireAddCommand temporary directory handling', () => {
       `/repos/owner/repo/tarball/${resolvedRef}`,
     ], expect.any(Object));
     expect(mockWriteFileSync).toHaveBeenCalledWith(
-      '/home/user/.takt/repertoire/@owner/repo/.takt-repertoire-lock.yaml',
+      join('/home/user/.takt/repertoire/@owner/repo/.takt-repertoire-lock.yaml'),
       expect.stringContaining('ref: "main\\e[31munsafe\\e[0m"'),
     );
   });
@@ -317,9 +311,10 @@ describe('repertoireAddCommand temporary directory handling', () => {
     mockReadFileSync.mockImplementation((target: string) => (
       target === workflowPath ? 'steps:\n  - uses: excluded\n' : 'path: .'
     ));
-    mockExistsSync.mockImplementation((target: string) => (
-      target === secureTempDir || target === excludedFragmentPath
-    ));
+    mockExistsSync.mockImplementation((target: string) => {
+      const normalizedTarget = target.replace(/\\/g, '/');
+      return normalizedTarget === secureTempDir || normalizedTarget === excludedFragmentPath;
+    });
 
     await expect(repertoireAddCommand('github:owner/repo@main'))
       .rejects.toThrow('Step fragment "excluded" referenced by workflows/review.yaml is excluded from package installation');

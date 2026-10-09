@@ -1,4 +1,4 @@
-import { dirname, relative, resolve } from 'node:path';
+import { dirname, isAbsolute, relative, resolve, win32 } from 'node:path';
 import {
   getBuiltinFacetDir,
   getGlobalFacetDir,
@@ -105,8 +105,13 @@ interface InspectPlanNode {
 }
 
 function isPathInside(rootPath: string, targetPath: string): boolean {
-  const path = relative(resolve(rootPath), resolve(targetPath));
-  return path === '' || (!path.startsWith('..') && !path.includes('/..'));
+  const relativePath = relative(resolve(rootPath), resolve(targetPath));
+  return relativePath === ''
+    || (!relativePath.startsWith('..')
+      && !relativePath.includes('/..')
+      && !relativePath.includes('\\..')
+      && !isAbsolute(relativePath)
+      && !win32.isAbsolute(relativePath));
 }
 
 function formatValue(value: unknown): string {

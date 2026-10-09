@@ -452,7 +452,9 @@ describe('resolveReportReferenceDetailed', () => {
     )).toThrow(/symlink/);
   });
 
-  it('検証後に祖先が交換されても外部 report 内容を展開しない', () => {
+  // Windows keeps the opened report file handle exclusive, so the Unix-style
+  // parent-directory exchange cannot be injected while the descriptor is open.
+  it.skipIf(process.platform === 'win32')('検証後に祖先が交換されても外部 report 内容を展開しない', () => {
     const root = makeTemporaryDirectory();
     const reports = join(root, 'reports');
     const originalReports = join(root, 'original-reports');
@@ -462,8 +464,14 @@ describe('resolveReportReferenceDetailed', () => {
     writeFileSync(join(reports, 'review.md'), 'inside report');
     writeFileSync(join(outsideReports, 'review.md'), 'outside secret');
     injectedFsError.beforeRead = () => {
-      renameSync(reports, originalReports);
-      symlinkSync(outsideReports, reports, 'dir');
+      try {
+        renameSync(reports, originalReports);
+        symlinkSync(outsideReports, reports, 'dir');
+      } catch (error) {
+        // Windows denies replacing the opened directory, preserving the
+        // already-validated handle and preventing the substitution attack.
+        if ((error as NodeJS.ErrnoException).code !== 'EPERM') throw error;
+      }
     };
 
     expect(resolveReportReferenceDetailed(reports, 'review.md', {

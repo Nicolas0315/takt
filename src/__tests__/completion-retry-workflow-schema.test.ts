@@ -1,16 +1,17 @@
+import { join, resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
 const virtualStepFragment = vi.hoisted(() => ({
   content: '',
   descriptor: 7,
-  path: '/virtual/project/.takt/steps/completion-retry-contract.yaml',
+  path: '',
 }));
 
 vi.mock('node:fs', async (importOriginal) => ({
   ...await importOriginal<typeof import('node:fs')>(),
   closeSync: vi.fn(),
   existsSync: vi.fn((path: import('node:fs').PathLike) => (
-    String(path) === virtualStepFragment.path
+    resolve(String(path)) === resolve(virtualStepFragment.path)
   )),
   fstatSync: vi.fn(() => ({
     isFile: () => true,
@@ -34,8 +35,9 @@ vi.mock('node:fs', async (importOriginal) => ({
 import { normalizeWorkflowConfig } from '../infra/config/loaders/workflowParser.js';
 import { captureConfigErrorMessage } from './helpers/step-fragment-test-helpers.js';
 
-const VIRTUAL_PROJECT_DIR = '/virtual/project';
-const VIRTUAL_WORKFLOW_DIR = `${VIRTUAL_PROJECT_DIR}/.takt/workflows`;
+const VIRTUAL_PROJECT_DIR = resolve(join('/virtual', 'project'));
+const VIRTUAL_WORKFLOW_DIR = join(VIRTUAL_PROJECT_DIR, '.takt', 'workflows');
+virtualStepFragment.path = join(VIRTUAL_PROJECT_DIR, '.takt', 'steps', 'completion-retry-contract.yaml');
 
 function workflow(step: Record<string, unknown>) {
   return {

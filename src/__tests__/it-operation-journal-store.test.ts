@@ -12,6 +12,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../shared/utils/private-file.js', async (importOriginal) => ({
@@ -152,9 +153,9 @@ function runStoreProcess(
   journalPath: string,
   operation: string,
 ): ManagedChildProcess {
-  const storeModule = resolve(
+  const storeModule = pathToFileURL(resolve(
     'src/infra/workflow/operation-journal-store.ts',
-  );
+  )).href;
   const script = `
     import { createOperationJournalStore } from ${JSON.stringify(storeModule)};
     const waitForParentMessage = (expected) =>
@@ -204,9 +205,9 @@ function runStoreProcess(
 }
 
 function runInternalStoreProcess(journalPath: string, body: string): ManagedChildProcess {
-  const storeModule = resolve(
+  const storeModule = pathToFileURL(resolve(
     'src/infra/workflow/operation-journal-store.ts',
-  );
+  )).href;
   const script = `
     import { existsSync } from 'node:fs';
     import { createOperationJournalStore } from ${JSON.stringify(storeModule)};
@@ -267,6 +268,23 @@ function parseChildError(result: ChildProcessResult): {
   readonly message: string;
 } {
   return JSON.parse(result.stderr) as { readonly name: string; readonly message: string };
+}
+
+function expectJournalFilePrivacyContract(path: string): void {
+  const actualMode = statSync(path).mode & 0o777;
+  if (process.platform !== 'win32') {
+    expect(actualMode).toBe(0o600);
+    return;
+  }
+
+  // Windows does not expose the POSIX mode/ACL privacy guarantee through the
+  // Node stat surface. Keep the product contract observable by asserting that
+  // the private mode was requested and that the owner bits remain available;
+  // the actual Windows ACL safety gate is intentionally not claimed here.
+  expect(actualMode & 0o600).toBe(0o600);
+  expect(
+    vi.mocked(writePrivateFileWithMode).mock.calls.some((call) => call[0] === path && call[2] === 0o600),
+  ).toBe(true);
 }
 
 const LOCK_SWAP_CONFLICT = 'Operation journal lock identity changed while reading';
@@ -344,7 +362,7 @@ describe('operation journal store', () => {
     const reopened = createOperationJournalStore(journalPath);
     expect(reopened.getParent('parent-1').children).toHaveLength(2);
     expect(reopened.listParents().map((parent) => parent.id)).toEqual(['parent-1']);
-    expect(statSync(journalPath).mode & 0o777).toBe(0o600);
+    expectJournalFilePrivacyContract(journalPath);
     expect(existsSync(`${journalPath}.lock`)).toBe(false);
   });
 
@@ -1040,6 +1058,7 @@ describe('operation journal store', () => {
     expect(parseChildError(result).message).toBe(
       `Timed out waiting for file: ${missingPath}`,
     );
+    expect(activeChildProcesses.size).toBe(0);
   });
 
   it('serializes two stale-lock recoverers without removing a newly acquired owner lock', async () => {

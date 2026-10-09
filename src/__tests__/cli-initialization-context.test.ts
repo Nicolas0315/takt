@@ -1,5 +1,8 @@
 import type { Command } from 'commander';
+import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const testProjectCwd = resolve('/test/project');
 
 const initializationMocks = vi.hoisted(() => ({
   createLogger: vi.fn(),
@@ -72,30 +75,30 @@ describe('CLI execution context', () => {
     ['cwd', '/other/project'],
     ['pipelineMode', false],
   ] as const)('should reject consumer mutation of %s after initialization', async (property, value) => {
-    vi.spyOn(process, 'cwd').mockReturnValue('/test/project');
+    vi.spyOn(process, 'cwd').mockReturnValue(testProjectCwd);
     const program = { opts: () => ({ pipeline: true, quiet: false }) } as Command;
     const { getCliExecutionContext, initializeCliExecutionContext } = await import('../app/cli/initialization.js');
     await initializeCliExecutionContext(program, '1.0.0');
     const context = getCliExecutionContext();
 
     expect(() => Object.assign(context, { [property]: value })).toThrow(TypeError);
-    expect(getCliExecutionContext()).toEqual({ cwd: '/test/project', pipelineMode: true });
+    expect(getCliExecutionContext()).toEqual({ cwd: testProjectCwd, pipelineMode: true });
   });
 
   it.each([false, true])('should initialize global, project, and Git state when pipeline mode is %s', async (pipelineMode) => {
-    vi.spyOn(process, 'cwd').mockReturnValue('/test/project');
+    vi.spyOn(process, 'cwd').mockReturnValue(testProjectCwd);
     const program = { opts: () => ({ pipeline: pipelineMode, quiet: false }) } as Command;
     const { initializeCliExecutionContext } = await import('../app/cli/initialization.js');
 
     await initializeCliExecutionContext(program, '1.0.0');
 
     expect(initializationMocks.initGlobalDirs).toHaveBeenCalledWith({ nonInteractive: pipelineMode });
-    expect(initializationMocks.initProjectDirs).toHaveBeenCalledWith('/test/project');
-    expect(initializationMocks.initGitProvider).toHaveBeenCalledWith('/test/project');
+    expect(initializationMocks.initProjectDirs).toHaveBeenCalledWith(testProjectCwd);
+    expect(initializationMocks.initGitProvider).toHaveBeenCalledWith(testProjectCwd);
     expect(initializationMocks.createLogger).toHaveBeenCalledWith('cli');
     expect(initializationMocks.loggerInfo).toHaveBeenCalledWith('TAKT CLI starting', {
       version: '1.0.0',
-      cwd: '/test/project',
+      cwd: testProjectCwd,
       verbose: false,
       pipelineMode,
       quietMode: false,
@@ -103,15 +106,15 @@ describe('CLI execution context', () => {
   });
 
   it('should use info logging when verbose mode and logging config are unset', async () => {
-    vi.spyOn(process, 'cwd').mockReturnValue('/test/project');
+    vi.spyOn(process, 'cwd').mockReturnValue(testProjectCwd);
     const program = { opts: () => ({ pipeline: false, quiet: false }) } as Command;
     const { initializeCliExecutionContext } = await import('../app/cli/initialization.js');
 
     await initializeCliExecutionContext(program, '1.0.0');
 
     expect(initializationMocks.resolveConfigValues)
-      .toHaveBeenCalledWith('/test/project', ['logging', 'minimalOutput']);
-    expect(initializationMocks.initDebugLogger).toHaveBeenCalledWith(undefined, '/test/project');
+      .toHaveBeenCalledWith(testProjectCwd, ['logging', 'minimalOutput']);
+    expect(initializationMocks.initDebugLogger).toHaveBeenCalledWith(undefined, testProjectCwd);
     expect(initializationMocks.setVerboseConsole).not.toHaveBeenCalled();
     expect(initializationMocks.setLogLevel).toHaveBeenCalledWith('info');
   });
@@ -121,13 +124,13 @@ describe('CLI execution context', () => {
       logging: { level: 'warn', trace: false },
       minimalOutput: false,
     });
-    vi.spyOn(process, 'cwd').mockReturnValue('/test/project');
+    vi.spyOn(process, 'cwd').mockReturnValue(testProjectCwd);
     const program = { opts: () => ({ pipeline: false, quiet: false }) } as Command;
     const { initializeCliExecutionContext } = await import('../app/cli/initialization.js');
 
     await initializeCliExecutionContext(program, '1.0.0');
 
-    expect(initializationMocks.initDebugLogger).toHaveBeenCalledWith(undefined, '/test/project');
+    expect(initializationMocks.initDebugLogger).toHaveBeenCalledWith(undefined, testProjectCwd);
     expect(initializationMocks.setVerboseConsole).not.toHaveBeenCalled();
     expect(initializationMocks.setLogLevel).toHaveBeenCalledWith('warn');
   });
@@ -138,14 +141,14 @@ describe('CLI execution context', () => {
       logging: { level: 'warn', trace: true },
       minimalOutput: false,
     });
-    vi.spyOn(process, 'cwd').mockReturnValue('/test/project');
+    vi.spyOn(process, 'cwd').mockReturnValue(testProjectCwd);
     const program = { opts: () => ({ pipeline: false, quiet: false }) } as Command;
     const { initializeCliExecutionContext } = await import('../app/cli/initialization.js');
 
     await initializeCliExecutionContext(program, '1.0.0');
 
     expect(initializationMocks.initDebugLogger)
-      .toHaveBeenCalledWith({ enabled: true, trace: true }, '/test/project');
+      .toHaveBeenCalledWith({ enabled: true, trace: true }, testProjectCwd);
     expect(initializationMocks.setVerboseConsole).toHaveBeenCalledWith(true);
     expect(initializationMocks.setLogLevel).toHaveBeenCalledWith('debug');
   });
@@ -159,7 +162,7 @@ describe('CLI execution context', () => {
       logging: undefined,
       minimalOutput: configQuiet,
     });
-    vi.spyOn(process, 'cwd').mockReturnValue('/test/project');
+    vi.spyOn(process, 'cwd').mockReturnValue(testProjectCwd);
     const program = { opts: () => ({ pipeline: false, quiet: cliQuiet }) } as Command;
     const { initializeCliExecutionContext } = await import('../app/cli/initialization.js');
 
@@ -170,7 +173,7 @@ describe('CLI execution context', () => {
 
   it('should stop initialization and context publication when global directory setup fails', async () => {
     initializationMocks.initGlobalDirs.mockRejectedValueOnce(new Error('global setup failed'));
-    vi.spyOn(process, 'cwd').mockReturnValue('/test/project');
+    vi.spyOn(process, 'cwd').mockReturnValue(testProjectCwd);
     const program = { opts: () => ({ pipeline: false, quiet: false }) } as Command;
     const { getCliExecutionContext, initializeCliExecutionContext } = await import('../app/cli/initialization.js');
 

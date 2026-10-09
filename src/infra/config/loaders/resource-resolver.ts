@@ -1,5 +1,5 @@
 import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
-import { isAbsolute, join, relative, resolve } from 'node:path';
+import { isAbsolute, join, relative, resolve, win32 } from 'node:path';
 import { getProjectFacetDir, getRepertoireFacetDir, type FacetType } from '../paths.js';
 import { assertPathSegmentsAreSafe } from '../../../shared/utils/pathBoundary.js';
 import {
@@ -70,6 +70,14 @@ interface ExtendsDirective {
 
 function samePath(a: string, b: string): boolean {
   return resolve(a) === resolve(b);
+}
+
+function resolveResourceFilePath(spec: string, workflowDir: string): string {
+  // faceted-prompting's resolver is POSIX-oriented; preserve a native Windows
+  // absolute path instead of joining it under workflowDir as a relative name.
+  return isAbsolute(spec) || win32.isAbsolute(spec)
+    ? spec
+    : resolveResourcePath(spec, workflowDir);
 }
 
 function isPathInside(basePath: string, targetPath: string): boolean {
@@ -195,7 +203,7 @@ export function resolveResourceContentWithSource(
     assertSelectorInstructionResourcePathExtension(spec);
   }
   if (spec.endsWith('.md') && (!selectorInstruction || !/\s/.test(spec))) {
-    const resolved = resolveResourcePath(spec, workflowDir);
+    const resolved = resolveResourceFilePath(spec, workflowDir);
     if (existsSync(resolved)) {
       if (selectorInstruction) {
         assertSelectorInstructionFileIsSafe(resolved, context);
@@ -741,7 +749,7 @@ export function resolveRefToContentWithSource(
 
   if (isResourcePath(ref)) {
     if (options?.selectorInstruction && isSelectorInstructionResourcePath(ref)) {
-      assertSelectorInstructionFileIsSafe(resolveResourcePath(ref, workflowDir), context);
+      assertSelectorInstructionFileIsSafe(resolveResourceFilePath(ref, workflowDir), context);
     }
     const resource = resolveResourceContentWithSource(
       ref,

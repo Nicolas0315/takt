@@ -225,7 +225,7 @@ describe('ensureWorktreeTaktGitignore', () => {
     expect(lstatSync(gitignorePath).isDirectory()).toBe(true);
   });
 
-  it('Given .takt/.gitignore cannot be inspected, When ensuring takt gitignore, Then it fails without creating a partial file', () => {
+  it.skipIf(process.platform === 'win32')('Given .takt/.gitignore cannot be inspected, When ensuring takt gitignore, Then it fails without creating a partial file', () => {
     const worktreePath = createTempDir('takt-gitignore-worktree-');
     const taktDir = join(worktreePath, '.takt');
     const gitignorePath = join(taktDir, '.gitignore');

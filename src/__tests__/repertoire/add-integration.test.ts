@@ -27,23 +27,24 @@ const {
 
 vi.mock('node:fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs')>();
+  const normalized = (value: unknown): string => String(value).replace(/\\/g, '/');
 
   return {
     ...actual,
     lstatSync: (...args: Parameters<typeof actual.lstatSync>) => {
-      if (mockFsFailure.lstatPathSuffix !== '' && String(args[0]).endsWith(mockFsFailure.lstatPathSuffix)) {
+      if (mockFsFailure.lstatPathSuffix !== '' && normalized(args[0]).endsWith(mockFsFailure.lstatPathSuffix)) {
         throw new Error('permission denied');
       }
       return actual.lstatSync(...args);
     },
     readFileSync: (...args: Parameters<typeof actual.readFileSync>) => {
-      if (mockFsFailure.readFilePathSuffix !== '' && String(args[0]).endsWith(mockFsFailure.readFilePathSuffix)) {
+      if (mockFsFailure.readFilePathSuffix !== '' && normalized(args[0]).endsWith(mockFsFailure.readFilePathSuffix)) {
         throw new Error('permission denied');
       }
       return actual.readFileSync(...args);
     },
     readdirSync: (...args: Parameters<typeof actual.readdirSync>) => {
-      if (mockFsFailure.readdirPathSuffix !== '' && String(args[0]).endsWith(mockFsFailure.readdirPathSuffix)) {
+      if (mockFsFailure.readdirPathSuffix !== '' && normalized(args[0]).endsWith(mockFsFailure.readdirPathSuffix)) {
         throw new Error('permission denied');
       }
       return actual.readdirSync(...args);
@@ -155,7 +156,7 @@ describe('repertoireAddCommand install summary integration', () => {
     mockExecFileSync.mockImplementation(createPackageCommandHandler);
 
     await expect(repertoireAddCommand('github:owner/repo@main'))
-      .rejects.toThrow(/Failed to read package directory: .*\/extract\/steps/);
+      .rejects.toThrow(/Failed to read package directory: .*[/\\]extract[/\\]steps/);
 
     expect(mockConfirm).not.toHaveBeenCalled();
   });
@@ -167,7 +168,7 @@ describe('repertoireAddCommand install summary integration', () => {
     mockExecFileSync.mockImplementation(createPackageCommandHandler);
 
     await expect(repertoireAddCommand('github:owner/repo@main'))
-      .rejects.toThrow(/Failed to inspect package entry: .*\/extract\/steps\/review\.yaml/);
+      .rejects.toThrow(/Failed to inspect package entry: .*[/\\]extract[/\\]steps[/\\]review\.yaml/);
 
     expect(mockConfirm).not.toHaveBeenCalled();
   });

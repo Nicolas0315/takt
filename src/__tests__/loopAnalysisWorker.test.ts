@@ -228,7 +228,7 @@ describe('loop analysis worker', () => {
     expect(mockRunLoopAnalysisWorkflowExecution).toHaveBeenCalledWith({
       task: [
         'Analyze the completed run in this absolute directory:',
-        '/project/.takt/runs/source-run',
+        resolve('/project', '.takt', 'runs', 'source-run'),
         'Use its available session JSONL logs, trace, monitor data, and reports as evidence.',
       ].join('\n'),
       cwd: '/project',
@@ -241,16 +241,16 @@ describe('loop analysis worker', () => {
       '/project/.takt/runs/analysis-run/reports',
     );
     expect(mockLstatSync).toHaveBeenCalledWith(
-      '/project/.takt/runs/analysis-run/reports/loop-analysis.md',
+      join('/project', '.takt', 'runs', 'analysis-run', 'reports', 'loop-analysis.md'),
       { throwIfNoEntry: false },
     );
     expect(mockArchiveLoopAnalysisReport).toHaveBeenCalledWith({
-      sourceRunDirectory: '/project/.takt/runs/source-run',
+      sourceRunDirectory: resolve('/project', '.takt', 'runs', 'source-run'),
       projectCwd: '/project',
-      analysisReportPath: '/project/.takt/runs/analysis-run/reports/loop-analysis.md',
+      analysisReportPath: join('/project', '.takt', 'runs', 'analysis-run', 'reports', 'loop-analysis.md'),
     });
     expect(mockPrepareLoopAnalysisReportFileForPublication).toHaveBeenCalledWith(
-      '/project/.takt/runs/analysis-run/reports/loop-analysis.md',
+      join('/project', '.takt', 'runs', 'analysis-run', 'reports', 'loop-analysis.md'),
       'source-run',
     );
     expect(mockInitGitProvider).not.toHaveBeenCalled();
@@ -391,7 +391,7 @@ describe('loop analysis worker', () => {
     expect(mockCommentLoopAnalysisReportOnPr).toHaveBeenCalledWith({
       projectCwd: '/project',
       branch: 'takt/source-run',
-      reportPath: '/project/.takt/runs/analysis-run/reports/loop-analysis.md',
+      reportPath: join('/project', '.takt', 'runs', 'analysis-run', 'reports', 'loop-analysis.md'),
       sourceRunSlug: 'source-run',
     });
   });

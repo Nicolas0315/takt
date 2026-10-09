@@ -467,7 +467,8 @@ describe('branch and worktree path formatting with issue numbers', () => {
       issueNumber: 99,
     });
 
-    expect(result.path).toMatch(/\/\d{8}T\d{4}-99-fix-bug-[a-f0-9]{16}$/);
+    expect(path.dirname(result.path)).toBe(path.resolve('/takt-worktrees'));
+    expect(path.basename(result.path)).toMatch(/^\d{8}T\d{4}-99-fix-bug-[a-f0-9]{16}$/);
     expect(path.basename(result.path)).toMatch(/^[a-zA-Z0-9-]+$/);
   });
 
@@ -479,7 +480,8 @@ describe('branch and worktree path formatting with issue numbers', () => {
       taskSlug: 'regular-task',
     });
 
-    expect(result.path).toMatch(/\/\d{8}T\d{4}-regular-task-[a-f0-9]{16}$/);
+    expect(path.dirname(result.path)).toBe(path.resolve('/takt-worktrees'));
+    expect(path.basename(result.path)).toMatch(/^\d{8}T\d{4}-regular-task-[a-f0-9]{16}$/);
     expect(path.basename(result.path)).toMatch(/^[a-zA-Z0-9-]+$/);
   });
 
@@ -518,7 +520,7 @@ describe('branch and worktree path formatting with issue numbers', () => {
     });
 
     expect(result.branch).toMatch(/^takt\/\d{8}T\d{4}$/);
-    expect(result.path).toMatch(/\/\d{8}T\d{4}-[a-f0-9]{16}$/);
+    expect(path.basename(result.path)).toMatch(/^\d{8}T\d{4}-[a-f0-9]{16}$/);
   });
 
   it.each([
@@ -2378,7 +2380,7 @@ describe('cleanupOrphanedClone path traversal protection', () => {
 
     expect(mockLogError).not.toHaveBeenCalled();
     expect(vi.mocked(fs.rmSync)).toHaveBeenCalledWith(
-      validClonePath,
+      path.resolve(validClonePath),
       expect.objectContaining({ recursive: true })
     );
   });
@@ -2393,7 +2395,7 @@ describe('cleanupOrphanedClone path traversal protection', () => {
       .mockReturnValueOnce(true)
       .mockReturnValueOnce(true);
     vi.mocked(fs.realpathSync).mockImplementation((value: fs.PathLike) => {
-      if (value === symlinkClonePath) {
+      if (String(value) === path.resolve(symlinkClonePath)) {
         return '/outside/escaped-clone';
       }
       return String(value);
@@ -2441,7 +2443,7 @@ describe('resolveCloneBaseDir parent-not-writable fallback', () => {
     expect(result.path).toContain(path.join('/workspaces/hello-world', '.takt', 'worktrees'));
     expect(mockLogInfo).toHaveBeenCalledWith(
       expect.any(String),
-      expect.objectContaining({ fallback: expect.stringContaining('.takt/worktrees') }),
+      expect.objectContaining({ fallback: expect.stringContaining(path.join('.takt', 'worktrees')) }),
     );
   });
 
@@ -2543,7 +2545,8 @@ describe('auto clone path allocation', () => {
 
     const result = new CloneManager().createTempCloneForBranch('/project', 'feature/temp-command-gate');
 
-    expect(result.path).toMatch(/^\/tmp\/takt-worktrees\/tmp-\d{8}T\d{4}-[a-f0-9]{16}$/);
+    expect(path.dirname(result.path)).toBe(path.resolve('/tmp/takt-worktrees'));
+    expect(path.basename(result.path)).toMatch(/^tmp-\d{8}T\d{4}-[a-f0-9]{16}$/);
     expect(mockSyncProjectLocalTaktForRetry).toHaveBeenCalledWith('/project', result.path);
   });
 
@@ -2567,8 +2570,10 @@ describe('auto clone path allocation', () => {
       const first = new CloneManager().createTempCloneForBranch('/project', 'feature/first');
       const second = new CloneManager().createTempCloneForBranch('/project', 'feature/second');
 
-      expect(first.path).toMatch(/^\/tmp\/takt-worktrees\/tmp-20260101T0000-[a-f0-9]{16}$/);
-      expect(second.path).toMatch(/^\/tmp\/takt-worktrees\/tmp-20260101T0000-[a-f0-9]{16}$/);
+      expect(path.dirname(first.path)).toBe(path.resolve('/tmp/takt-worktrees'));
+      expect(path.dirname(second.path)).toBe(path.resolve('/tmp/takt-worktrees'));
+      expect(path.basename(first.path)).toMatch(/^tmp-20260101T0000-[a-f0-9]{16}$/);
+      expect(path.basename(second.path)).toMatch(/^tmp-20260101T0000-[a-f0-9]{16}$/);
       expect(first.path).not.toBe(second.path);
     } finally {
       vi.useRealTimers();
@@ -2605,8 +2610,10 @@ describe('auto clone path allocation', () => {
         branch: 'takt/816/implement-review-flow',
       });
 
-      expect(first.path).toMatch(/^\/tmp\/takt-worktrees\/20260101T0000-fix-review-comments-[a-f0-9]{16}$/);
-      expect(second.path).toMatch(/^\/tmp\/takt-worktrees\/20260101T0000-fix-review-comments-[a-f0-9]{16}$/);
+      expect(path.dirname(first.path)).toBe(path.resolve('/tmp/takt-worktrees'));
+      expect(path.dirname(second.path)).toBe(path.resolve('/tmp/takt-worktrees'));
+      expect(path.basename(first.path)).toMatch(/^20260101T0000-fix-review-comments-[a-f0-9]{16}$/);
+      expect(path.basename(second.path)).toMatch(/^20260101T0000-fix-review-comments-[a-f0-9]{16}$/);
       expect(first.path).not.toBe(second.path);
     } finally {
       vi.useRealTimers();
@@ -2649,13 +2656,15 @@ describe('auto clone path allocation', () => {
       await vi.runAllTimersAsync();
       const [first, second] = await clonePromises;
 
-      expect(first.path).toMatch(/^\/tmp\/takt-worktrees\/20260101T0000-fix-review-comments-[a-f0-9]{16}$/);
-      expect(second.path).toMatch(/^\/tmp\/takt-worktrees\/20260101T0000-fix-review-comments-[a-f0-9]{16}$/);
+      expect(path.dirname(first.path)).toBe(path.resolve('/tmp/takt-worktrees'));
+      expect(path.dirname(second.path)).toBe(path.resolve('/tmp/takt-worktrees'));
+      expect(path.basename(first.path)).toMatch(/^20260101T0000-fix-review-comments-[a-f0-9]{16}$/);
+      expect(path.basename(second.path)).toMatch(/^20260101T0000-fix-review-comments-[a-f0-9]{16}$/);
       expect(first.path).not.toBe(second.path);
 
       const metadataByBranch = new Map<string, { filePath: string; clonePath: string }>(
         vi.mocked(fs.writeFileSync).mock.calls
-          .filter(([filePath]) => String(filePath).includes('/.takt/clone-meta/'))
+          .filter(([filePath]) => String(filePath).replace(/\\/g, '/').includes('/.takt/clone-meta/'))
           .map(([filePath, content]) => {
             const metadata = JSON.parse(String(content)) as { branch: string; clonePath: string };
             return [metadata.branch, { filePath: String(filePath), clonePath: metadata.clonePath }];
@@ -2663,11 +2672,11 @@ describe('auto clone path allocation', () => {
       );
 
       expect(metadataByBranch.get(first.branch)).toEqual({
-        filePath: '/project/.takt/clone-meta/takt--827--add-trace-task-metadata.json',
+        filePath: path.join('/project', '.takt', 'clone-meta', 'takt--827--add-trace-task-metadata.json'),
         clonePath: first.path,
       });
       expect(metadataByBranch.get(second.branch)).toEqual({
-        filePath: '/project/.takt/clone-meta/takt--816--implement-review-flow.json',
+        filePath: path.join('/project', '.takt', 'clone-meta', 'takt--816--implement-review-flow.json'),
         clonePath: second.path,
       });
     } finally {

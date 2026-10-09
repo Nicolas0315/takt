@@ -37,6 +37,7 @@ describe('CLI update check', () => {
   const originalXdgConfigHome = process.env.XDG_CONFIG_HOME;
   const originalNoUpdateNotifier = process.env.NO_UPDATE_NOTIFIER;
   let configHome: string;
+  const workerScript = expect.stringMatching(/shared[\\/]utils[\\/]updateNotifierWorker\.js$/);
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -75,7 +76,7 @@ describe('CLI update check', () => {
 
     expect(mockSpawn).toHaveBeenCalledWith(
       process.execPath,
-      [expect.stringMatching(/shared\/utils\/updateNotifierWorker\.js$/)],
+      [workerScript],
       {
         detached: true,
         stdio: 'ignore',
@@ -92,7 +93,7 @@ describe('CLI update check', () => {
 
     expect(mockSpawn).toHaveBeenCalledWith(
       process.execPath,
-      [expect.stringMatching(/shared\/utils\/updateNotifierWorker\.js$/), '--no-update-notifier'],
+      [workerScript, '--no-update-notifier'],
       expect.any(Object),
     );
   });

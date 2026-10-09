@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { invalidateAllResolvedConfigCache, invalidateGlobalConfigCache } from '../infra/config/index.js';
 import { inspectWorkflowCommand } from '../features/workflowAuthoring/inspect.js';
+import { getBuiltinFacetDir } from '../infra/config/paths.js';
 
 const { outputEvents, mockBlankLine, mockError, mockHeader, mockInfo, mockSection, mockSuccess, mockWarn } = vi.hoisted(() => {
   const events: string[] = [];
@@ -924,8 +925,8 @@ steps:
   it('facet の参照名、解決先パス、出所を表示する', async () => {
     const projectPersonaPath = writeProjectFacet(projectDir, 'personas', 'project-persona');
     const globalInstructionPath = writeGlobalFacet(globalDir, 'instructions', 'global-instruction');
-    const builtinPolicyPath = join('builtins', 'en', 'facets', 'policies', 'architecture.md');
-    const builtinKnowledgePath = join('builtins', 'en', 'facets', 'knowledge', 'architecture.md');
+    const builtinPolicyPath = join(getBuiltinFacetDir('en', 'policies'), 'architecture.md');
+    const builtinKnowledgePath = join(getBuiltinFacetDir('en', 'knowledge'), 'architecture.md');
     const externalInstructionPath = writeFile(projectDir, 'docs/guide.md', 'external guide body');
     const workflowPath = writeFile(projectDir, '.takt/workflows/facets.yaml', `name: facet-sources
 instructions:
@@ -972,8 +973,9 @@ steps:
     expect(globalInstructionBlock).toContain('source: global');
     const architectureBlocks = facetBlocks(output, 'architecture');
     expect(architectureBlocks.length).toBeGreaterThanOrEqual(2);
-    expect(architectureBlocks.some((block) => block.includes(builtinPolicyPath) && block.includes('source: builtin'))).toBe(true);
-    expect(architectureBlocks.some((block) => block.includes(builtinKnowledgePath) && block.includes('source: builtin'))).toBe(true);
+    const normalizePath = (value: string): string => value.replace(/\\/g, '/');
+    expect(architectureBlocks.some((block) => block.replace(/\\/g, '/').includes(normalizePath(builtinPolicyPath)) && block.includes('source: builtin'))).toBe(true);
+    expect(architectureBlocks.some((block) => block.replace(/\\/g, '/').includes(normalizePath(builtinKnowledgePath)) && block.includes('source: builtin'))).toBe(true);
     const fragmentBlock = facetBlock(output, 'fragment-instruction');
     expect(fragmentBlock).toContain('source: fragment');
     const guideBlock = facetBlock(output, 'guide');

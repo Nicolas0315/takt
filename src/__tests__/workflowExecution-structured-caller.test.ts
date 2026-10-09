@@ -907,7 +907,7 @@ steps:
 
     expect(result.success).toBe(false);
     const metaWrites = vi.mocked(writeFileAtomic).mock.calls.filter(([filePath]) =>
-      String(filePath).endsWith('/meta.json'));
+      String(filePath).replace(/\\/g, '/').endsWith('/meta.json'));
     const lastWrite = metaWrites.at(-1);
     expect(lastWrite).toBeDefined();
     const serialized = JSON.parse(String(lastWrite?.[1]));
@@ -991,7 +991,7 @@ steps:
       projectCwd,
     })).rejects.toThrow('engine crashed after child completion');
     const metaWrites = vi.mocked(writeFileAtomic).mock.calls.filter(([filePath]) =>
-      String(filePath).endsWith('/meta.json'));
+      String(filePath).replace(/\\/g, '/').endsWith('/meta.json'));
     const lastWrite = metaWrites.at(-1);
     expect(lastWrite).toBeDefined();
     const serialized = JSON.parse(String(lastWrite?.[1]));

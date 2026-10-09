@@ -186,7 +186,7 @@ describe('inheritReviewReports', () => {
     ]));
   });
 
-  it('should leave the workflow runnable with diagnostics when a source review report cannot be read', () => {
+  it.skipIf(process.platform === 'win32')('should leave the workflow runnable with diagnostics when a source review report cannot be read', () => {
     // Given
     const projectDirectory = createProjectDirectory();
     const unreadablePath = writeSourceReport(

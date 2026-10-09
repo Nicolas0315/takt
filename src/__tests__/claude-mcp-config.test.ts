@@ -27,10 +27,13 @@ describe('prepareClaudeMcpConfig', () => {
     expect(prepared.path).toMatch(/mcp-config\.json$/);
     tempDirs.push(dirname(prepared.path!));
 
-    const mode = (await stat(prepared.path!)).mode & 0o777;
+    const stats = await stat(prepared.path!);
     const content = JSON.parse(await readFile(prepared.path!, 'utf-8'));
 
-    expect(mode).toBe(0o600);
+    expect(stats.isFile()).toBe(true);
+    if (process.platform !== 'win32') {
+      expect(stats.mode & 0o777).toBe(0o600);
+    }
     expect(content).toEqual({
       mcpServers: {
         docs: { type: 'stdio', command: 'docs-mcp', args: ['serve'] },
@@ -42,11 +45,12 @@ describe('prepareClaudeMcpConfig', () => {
   });
 
   it('Given TMPDIR points to a missing directory, When preparing MCP config, Then mkdtemp succeeds', async () => {
-    const originalTmpDir = process.env.TMPDIR;
+    const tmpDirEnvKey = process.platform === 'win32' ? 'TEMP' : 'TMPDIR';
+    const originalTmpDir = process.env[tmpDirEnvKey];
     const parentDir = mkdtempSync(join(tmpdir(), 'takt-claude-mcp-parent-'));
     const missingTmpDir = join(parentDir, 'missing-tmp');
     tempDirs.push(parentDir);
-    process.env.TMPDIR = missingTmpDir;
+    process.env[tmpDirEnvKey] = missingTmpDir;
 
     try {
       const prepared = await prepareClaudeMcpConfig({
@@ -66,9 +70,9 @@ describe('prepareClaudeMcpConfig', () => {
       await expect(access(prepared.path!)).rejects.toMatchObject({ code: 'ENOENT' });
     } finally {
       if (originalTmpDir === undefined) {
-        delete process.env.TMPDIR;
+        delete process.env[tmpDirEnvKey];
       } else {
-        process.env.TMPDIR = originalTmpDir;
+        process.env[tmpDirEnvKey] = originalTmpDir;
       }
     }
   });
