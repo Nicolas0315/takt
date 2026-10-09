@@ -102,6 +102,7 @@ export async function runWithWorkerPool(
   taskExecutionOptions: TaskExecutionOptions | undefined,
   runOptions: RunWorkerOptions | undefined,
   pollIntervalMs: number,
+  taskExecutor: typeof executeRunTaskAndComplete = executeRunTaskAndComplete,
 ): Promise<WorkerPoolResult> {
   const abortController = new AbortController();
   const shutdownManager = new ShutdownManager({
@@ -111,9 +112,6 @@ export async function runWithWorkerPool(
     },
   });
   shutdownManager.install();
-  const selfSigintOnce = process.env.TAKT_E2E_SELF_SIGINT_ONCE === '1';
-  const selfSigintTwice = process.env.TAKT_E2E_SELF_SIGINT_TWICE === '1';
-  let selfSigintInjected = false;
 
   let successCount = 0;
   let failCount = 0;
@@ -126,18 +124,18 @@ export async function runWithWorkerPool(
   try {
     while (queue.length > 0 || active.size > 0) {
       if (!abortController.signal.aborted) {
-        fillSlots(queue, active, concurrency, taskRunner, cwd, taskExecutionOptions, runOptions, abortController, colorCounter);
-        if ((selfSigintOnce || selfSigintTwice) && !selfSigintInjected && active.size > 0) {
-          selfSigintInjected = true;
-          process.emit('SIGINT');
-          if (selfSigintTwice) {
-            // E2E deterministic path: force-exit shortly after graceful SIGINT.
-            // Avoids intermittent hangs caused by listener ordering/races.
-            setTimeout(() => {
-              process.exit(EXIT_SIGINT);
-            }, 25);
-          }
-        }
+        fillSlots(
+          queue,
+          active,
+          concurrency,
+          taskRunner,
+          cwd,
+          taskExecutionOptions,
+          runOptions,
+          abortController,
+          colorCounter,
+          taskExecutor,
+        );
       }
 
       if (active.size === 0) {
@@ -258,6 +256,7 @@ function fillSlots(
   runOptions: RunWorkerOptions | undefined,
   abortController: AbortController,
   colorCounter: { value: number },
+  taskExecutor: typeof executeRunTaskAndComplete,
 ): void {
   while (active.size < concurrency && queue.length > 0) {
     const task = queue.shift()!;
@@ -280,7 +279,7 @@ function fillSlots(
       info(`=== Task: ${task.name} ===`);
     }
 
-    const promise = executeRunTaskAndComplete(task, taskRunner, cwd, taskExecutionOptions, {
+    const promise = taskExecutor(task, taskRunner, cwd, taskExecutionOptions, {
       abortSignal: abortController.signal,
       taskPrefix: isParallel ? taskPrefix : undefined,
       taskColorIndex: isParallel ? colorIndex : undefined,
