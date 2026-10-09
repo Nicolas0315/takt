@@ -1,13 +1,10 @@
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { resolve } from 'node:path';
 
 const virtualStepFragment = vi.hoisted(() => ({
   content: '',
   descriptor: 7,
-  path: process.platform === 'win32'
-    ? 'C:\\virtual\\project\\.takt\\steps\\completion-retry-contract.yaml'
-    : '/virtual/project/.takt/steps/completion-retry-contract.yaml',
+  path: '',
 }));
 
 vi.mock('node:fs', async (importOriginal) => ({
@@ -38,8 +35,9 @@ vi.mock('node:fs', async (importOriginal) => ({
 import { normalizeWorkflowConfig } from '../infra/config/loaders/workflowParser.js';
 import { captureConfigErrorMessage } from './helpers/step-fragment-test-helpers.js';
 
-const VIRTUAL_PROJECT_DIR = join('/virtual', 'project');
+const VIRTUAL_PROJECT_DIR = resolve(join('/virtual', 'project'));
 const VIRTUAL_WORKFLOW_DIR = join(VIRTUAL_PROJECT_DIR, '.takt', 'workflows');
+virtualStepFragment.path = join(VIRTUAL_PROJECT_DIR, '.takt', 'steps', 'completion-retry-contract.yaml');
 
 function workflow(step: Record<string, unknown>) {
   return {

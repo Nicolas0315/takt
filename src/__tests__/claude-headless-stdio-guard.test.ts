@@ -5,12 +5,14 @@ import type { ChildProcess } from 'node:child_process';
 
 const mockSpawn = vi.hoisted(() => vi.fn());
 
-vi.mock('node:child_process', () => ({
-  spawn: mockSpawn,
-}));
+vi.mock('node:child_process', async () => {
+  const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
+  return { ...actual, spawn: mockSpawn };
+});
 
-vi.mock('cross-spawn', () => ({
-  default: mockSpawn,
+vi.mock('../shared/utils/index.js', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../shared/utils/index.js')>(),
+  crossSpawn: mockSpawn,
 }));
 
 import { spawn } from 'node:child_process';
