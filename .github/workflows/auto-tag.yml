@@ -23,8 +23,10 @@ jobs:
 
       - name: Extract version from PR title
         id: version
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
-          VERSION=$(echo "${{ github.event.pull_request.title }}" | sed 's/^Release //')
+          VERSION=$(echo "$PR_TITLE" | sed 's/^Release //')
           echo "tag=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Create and push tag on PR head commit
